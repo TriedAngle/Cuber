@@ -6,21 +6,38 @@ use std::arch::x86_64::*;
 
 pub struct SDF {
     pub underlying: FunnyVec<f32>,
+    pub x: isize,
+    pub y: isize,
     pub width: usize,
     pub height: usize,
 }
 
 impl SDF {
-    pub fn new_empty(size: UVec2) -> Self {
+    pub fn new_empty(x: isize, y: isize, width: usize, height: usize) -> Self {
         return Self {
-            underlying: FunnyVec::with_capacity(size.x * size.y),
-            width: size.x,
-            height: size.y,
+            underlying: FunnyVec::with_capacity(width * height),
+            x,
+            y,
+            width,
+            height,
         };
     }
 
+    pub fn new_by_bounds(sdf1: &SDF, sdf2: &SDF) -> Self {
+        let min_x = isize::min(sdf1.x, sdf2.x);
+        let min_y = isize::min(sdf1.y, sdf2.y);
+        let max_x = usize::max(sdf1.x as usize + sdf1.width, sdf2.x as usize + sdf2.width);
+        let max_y = usize::max(sdf1.y as usize + sdf1.height, sdf2.y as usize + sdf2.height);
+
+        return Self::new_empty(min_x, min_y, max_x - min_x as usize, max_y - min_y as usize);
+    }
+
     pub fn new_circle(center: Vec2, radius: f32) -> Self {
-        let mut sdf = Self::new_empty(safe!(RENDER_SIZE));
+        let width = radius as usize * 2;
+        let height = radius as usize * 2;
+        let offset_x = (center.x - radius) as isize;
+        let offset_y = (center.y - radius) as isize;
+        let mut sdf = Self::new_empty(offset_x, offset_y, width, height);
         safe! {
             let x_offsets = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
             let xos = _mm256_load_ps(x_offsets.as_ptr());
@@ -29,9 +46,11 @@ impl SDF {
             let rs = _mm256_set1_ps(radius);
             // iterate over rows and inside of them from left to right
             (0..sdf.height).into_par_iter().for_each(|row| {
-                let p_ys = _mm256_set1_ps(row as f32);
+                let actual_y = row + offset_y as usize;
+                let p_ys = _mm256_set1_ps(actual_y as f32);
                 for x_start in (0..sdf.width).step_by(8) {
-                    let p_x = _mm256_set1_ps(x_start as f32);
+                    let actual_x = x_start + offset_x as usize;
+                    let p_x = _mm256_set1_ps(actual_x as f32);
                     let p_xs = _mm256_add_ps(p_x, xos);
 
                     let cp_xs = _mm256_sub_ps(p_xs, c_xs);
@@ -50,11 +69,22 @@ impl SDF {
         }
         return sdf;
     }
+
+    pub fn compose(sdf1: &SDF, sdf2: &SDF, f: fn(sdf1: &SDF, sdf2: &SDF, out: &mut SDF)) -> Self {
+        let mut out = SDF::new_by_bounds(sdf1, sdf2);
+        f(sdf1, sdf2, &mut out);
+        return out;
+    }
+
+    fn min(sdf1: &SDF, sdf2: &SDF, out: &mut SDF) {
+        // for
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn test_range() {
@@ -74,25 +104,48 @@ mod tests {
     fn create_circle() {
         let sdf = SDF::new_circle((600.0, 500.0).into(), 10.0);
     }
-}
 
-#[test]
-#[ignore]
-fn create_and_write_circle() {
-    use image::{GrayImage, Luma};
-    use std::time::Instant;
-
-    let start = Instant::now();
-    let sdf = SDF::new_circle((600.0, 500.0).into(), 60.0);
-    let duration = start.elapsed();
-    println!("Took: {:?}", duration);
-    let mut img = GrayImage::new(sdf.width as u32, sdf.height as u32);
-    for y in (0..sdf.height) {
-        for x in (0..sdf.width) {
-            let val = safe!(sdf.underlying.transmute_at::<f32>(y, x, sdf.width));
-            let pix = if val > 0.0 { 0u8 } else { 255u8 };
-            img.put_pixel(x as u32, y as u32, Luma([pix]));
+    fn sdf_to_png(sdf: &SDF, path: impl AsRef<Path>) {
+        use image::{GrayImage, Luma};
+        let mut img = GrayImage::new(sdf.width as u32, sdf.height as u32);
+        for y in 0..sdf.height {
+            for x in 0..sdf.width {
+                let val = safe!(sdf.underlying.transmute_at::<f32>(y, x, sdf.width));
+                let pix = if val > 0.0 { 0u8 } else { 255u8 };
+                img.put_pixel(x as u32, y as u32, Luma([pix]));
+            }
         }
+        img.save(path).unwrap();
     }
-    img.save("tmp/circle.png").unwrap();
+
+    #[test]
+    #[ignore]
+    fn create_and_write_circle() {
+        use std::time::Instant;
+        let start = Instant::now();
+        let sdf = SDF::new_circle((600.0, 500.0).into(), 60.0);
+        let duration = start.elapsed();
+        println!("Took (create_write): {:?}", duration);
+        sdf_to_png(&sdf, "tmp/circle.png")
+    }
+
+    #[test]
+    #[ignore]
+    fn compose_circles() {
+        use std::time::Instant;
+        let start = Instant::now();
+        let sdf1 = SDF::new_circle((600.0, 500.0).into(), 60.0);
+        let sdf2 = SDF::new_circle((670.0, 550.0).into(), 30.0);
+        let sdf = SDF::compose(&sdf1, &sdf2, SDF::min);
+        let duration = start.elapsed();
+        println!("Took (compose): {:?}", duration);
+        sdf_to_png(&sdf, "tmp/compose_circle.png")
+    }
 }
+// this is what the api might look like at the end? idk yet
+// UI::root(1920, 1080)
+//     .add(compose(
+//         UI::rect(400, 600, 200, 200).color([1.0, 0.0, 0.0, 1.0]),
+//         UI::circle(600, 600, 10).color([0.0, 1.0, 0.0, 1.0])
+//     ), smooth_union)
+//     .add(UI::text("This is a test", 300, 200, 20, FF::Default))
