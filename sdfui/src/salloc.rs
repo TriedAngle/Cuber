@@ -36,14 +36,15 @@ pub fn allocard(size: usize) -> *mut ffi::c_void {
         const PROT_WRITE: i32 = 0x2;
         const MAP_PRIVATE: i32 = 0x02;
         const MAP_ANONYMOUS: i32 = 0x20;
-        let ptr mmap(
+        let ptr = mmap(
             std::ptr::null_mut(),
             size,
             PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS
+            MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0,
-        )
+        );
+        return ptr;
     }
     #[cfg(target_os = "windows")]
     safe! {

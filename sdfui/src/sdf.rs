@@ -1,8 +1,8 @@
 //! **blazingly fast** :rocket: :fire: SDF based UI primitives and their compose functions
 use crate::funny_vec::FunnyVec;
 use crate::{safe, UVec2, Vec2, RENDER_SIZE};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::arch::x86_64::*;
-use rayon::iter::{ParallelIterator, IntoParallelIterator};
 
 pub struct SDF {
     pub underlying: FunnyVec<f32>,
@@ -50,7 +50,6 @@ impl SDF {
         }
         return sdf;
     }
-
 }
 
 #[cfg(test)]

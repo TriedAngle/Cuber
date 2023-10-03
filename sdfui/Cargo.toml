@@ -1,6 +1,6 @@
 [package]
 name = "sdfui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = [ "Sebastian Strobl" ]
 description = "UI library based on Signed Distance Fields"

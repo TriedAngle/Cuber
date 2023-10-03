@@ -2,10 +2,10 @@
 
 use std::convert::Into;
 
+pub mod fearless;
 pub mod funny_vec;
 pub mod salloc;
 pub mod sdf;
-pub mod fearless;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]

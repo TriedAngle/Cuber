@@ -37,7 +37,7 @@ impl<T> FunnyVec<T> {
     /// very safe quick transmute index
     #[inline]
     pub fn transmute_at<U: Copy>(&self, row: usize, col: usize, width: usize) -> U {
-        let index = row * width + col ;
+        let index = row * width + col;
         safe! {
             let addr = self.allocation.offset(index as isize);
             *(addr as *const U)
@@ -47,7 +47,7 @@ impl<T> FunnyVec<T> {
     /// very safe
     #[inline]
     pub fn ptr_at(&self, row: usize, col: usize, width: usize) -> *mut T {
-        let index = row * width + col ;
+        let index = row * width + col;
         return safe!(self.allocation.offset(index as isize));
     }
 }
