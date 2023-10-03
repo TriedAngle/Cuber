@@ -1,4 +1,5 @@
-use crate::platform::{allocard, freebie};
+//! high performant parallel vector implementation
+use crate::salloc::{allocard, freebie};
 use crate::{safe, UVec2};
 use std::arch::x86_64::{__m256, _mm256_load_ps};
 use std::mem::size_of;

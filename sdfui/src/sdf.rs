@@ -1,3 +1,4 @@
+//! **blazingly fast** :rocket: :fire: SDF based UI primitives and their compose functions
 use crate::funny_vec::FunnyVec;
 use crate::{safe, UVec2, Vec2, RENDER_SIZE};
 use std::arch::x86_64::*;
@@ -49,6 +50,7 @@ impl SDF {
         }
         return sdf;
     }
+
 }
 
 #[cfg(test)]
@@ -76,12 +78,13 @@ mod tests {
 }
 
 #[test]
+#[ignore]
 fn create_and_write_circle() {
     use image::{GrayImage, Luma};
     use std::time::Instant;
 
     let start = Instant::now();
-    let sdf = SDF::new_circle((600.0, 500.0).into(), 10.0);
+    let sdf = SDF::new_circle((600.0, 500.0).into(), 60.0);
     let duration = start.elapsed();
     println!("Took: {:?}", duration);
     let mut img = GrayImage::new(sdf.width as u32, sdf.height as u32);

@@ -3,10 +3,9 @@
 use std::convert::Into;
 
 pub mod funny_vec;
-pub mod instructions;
-pub mod platform;
+pub mod salloc;
 pub mod sdf;
-pub mod utils;
+pub mod fearless;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
