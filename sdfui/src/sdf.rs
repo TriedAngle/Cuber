@@ -3,6 +3,7 @@ use crate::funny_vec::FunnyVec;
 use crate::{safe, UVec2, Vec2, RENDER_SIZE};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::arch::x86_64::*;
+use std::ptr;
 
 pub struct SDF {
     pub underlying: FunnyVec<f32>,
@@ -33,10 +34,10 @@ impl SDF {
     }
 
     pub fn new_circle(center: Vec2, radius: f32) -> Self {
-        let width = radius as usize * 2;
-        let height = radius as usize * 2;
-        let offset_x = (center.x - radius) as isize;
-        let offset_y = (center.y - radius) as isize;
+        let width = radius as usize * 3;
+        let height = radius as usize * 3;
+        let offset_x = (center.x - radius * 1.5) as isize;
+        let offset_y = (center.y - radius * 1.5) as isize;
         let mut sdf = Self::new_empty(offset_x, offset_y, width, height);
         safe! {
             let x_offsets = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
@@ -65,7 +66,7 @@ impl SDF {
                     let ptr = sdf.underlying.ptr_at(row, x_start, sdf.width);
                     _mm256_storeu_ps(ptr, distances);
                 }
-            })
+            });
         }
         return sdf;
     }
@@ -77,7 +78,66 @@ impl SDF {
     }
 
     fn min(sdf1: &SDF, sdf2: &SDF, out: &mut SDF) {
-        // for
+        let (sdf1_min_x, sdf1_max_x) = (sdf1.x as usize, sdf1.x as usize + sdf1.width);
+        let (sdf1_min_y, sdf1_max_y) = (sdf1.y as usize, sdf1.y as usize + sdf1.height);
+        let (sdf2_min_x, sdf2_max_x) = (sdf2.x as usize, sdf2.x as usize + sdf2.width);
+        let (sdf2_min_y, sdf2_max_y) = (sdf2.y as usize, sdf2.y as usize + sdf2.height);
+        safe! {
+            let fake_distances = [100.0f32, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0];
+            let x_offsets = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+            let xos = _mm256_load_ps(x_offsets.as_ptr());
+            (0..out.height).into_par_iter().for_each(|row| {
+                let out_y = row + out.y as usize;
+                let y_in_sdf1 = out_y >= sdf1_min_y && out_y < sdf1_max_y;
+                let y_in_sdf2 = out_y >= sdf2_min_y && out_y < sdf2_max_y;
+
+                for x_start in (0..out.width).step_by(8) {
+                    let out_x = x_start + out.x as usize;
+                    let x_in_sdf1 = out_x >= sdf1_min_x && out_x < sdf1_max_x;
+                    let x_in_sdf2 = out_x >= sdf2_min_x && out_x < sdf2_max_x;
+                    let in_sdf1 = x_in_sdf1 && y_in_sdf1;
+                    let in_sdf2 = x_in_sdf2 && y_in_sdf2;
+
+                    if in_sdf1 && in_sdf2 {
+                        let sdf1_x = out_x - sdf1_min_x ;
+                        let sdf1_y = out_y - sdf1_min_y ;
+                        let sdf2_x = out_x - sdf2_min_x ;
+                        let sdf2_y = out_y - sdf2_min_y ;
+                        let ptr1 = sdf1.underlying.ptr_at(sdf1_y, sdf1_x, sdf1.width);
+                        let ptr2 = sdf2.underlying.ptr_at(sdf2_y, sdf2_x, sdf2.width);
+                        let vs1 = _mm256_loadu_ps(ptr1);
+                        let vs2 = _mm256_loadu_ps(ptr2);
+                        let mins = _mm256_min_ps(vs1, vs2);
+                        let out_ptr = out.underlying.ptr_at(row, x_start, out.width);
+                        _mm256_storeu_ps(out_ptr, mins);
+                    } else if (in_sdf1) || (in_sdf2) {
+                        if (in_sdf1) {
+                            let sdf1_x = out_x - sdf1_min_x ;
+                            let sdf1_y = out_y - sdf1_min_y ;
+                            ptr::copy_nonoverlapping(
+                                sdf1.underlying.ptr_at(sdf1_y, sdf1_x, sdf1.width),
+                                out.underlying.ptr_at(row, x_start, out.width),
+                                8
+                            );
+                        } else {
+                            let sdf2_x = out_x - sdf2_min_x ;
+                            let sdf2_y = out_y - sdf2_min_y ;
+                            ptr::copy_nonoverlapping(
+                                sdf2.underlying.ptr_at(sdf2_y, sdf2_x, sdf2.width),
+                                out.underlying.ptr_at(row, x_start, out.width),
+                                8
+                            );
+                        }
+                    } else {
+                        ptr::copy_nonoverlapping(
+                            fake_distances.as_ptr(),
+                            out.underlying.ptr_at(row, x_start, out.width),
+                            8
+                        );
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -139,7 +199,9 @@ mod tests {
         let sdf = SDF::compose(&sdf1, &sdf2, SDF::min);
         let duration = start.elapsed();
         println!("Took (compose): {:?}", duration);
-        sdf_to_png(&sdf, "tmp/compose_circle.png")
+        sdf_to_png(&sdf1, "tmp/compose_circle1.png");
+        sdf_to_png(&sdf2, "tmp/compose_circle2.png");
+        sdf_to_png(&sdf, "tmp/compose_circle3RES.png");
     }
 }
 // this is what the api might look like at the end? idk yet

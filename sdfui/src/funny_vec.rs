@@ -50,6 +50,17 @@ impl<T> FunnyVec<T> {
         let index = row * width + col;
         return safe!(self.allocation.offset(index as isize));
     }
+
+    /// very safe
+    #[inline]
+    pub fn ptr_at_safe(&self, row: usize, col: usize, width: usize) -> Option<*mut T> {
+        let index = row * width + col;
+        return if index >= self.capacity {
+            None
+        } else {
+            Some(safe!(self.allocation.offset(index as isize)))
+        }
+    }
 }
 
 impl<T> Drop for FunnyVec<T> {
