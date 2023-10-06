@@ -30,7 +30,7 @@ struct Command {
   int kind;
   int idx;
   int fun;
-  int padding;
+  float extra;
 };
 
 uniform uint commands_length;
@@ -43,8 +43,18 @@ layout(std430, binding = 1) buffer Shapes4 {
   Shape4 shapes4[];
 };
 
-float sdCircle(vec2 p, float r) {
-    return length(gl_FragCoord.xy - p) - r;
+// unions
+float smoothMax(float a, float b, float k) {
+    return log(exp(k * a) + exp(k * b)) / k;
+}
+
+float smoothMin(float a, float b, float k) {
+    return -smoothMax(-a, -b, k);
+}
+
+// primitives
+float sdCircle(vec2 c, float r) {
+    return length(gl_FragCoord.xy - c) - r;
 }
 
 
@@ -58,15 +68,28 @@ out vec4 FragColor;
 
 void main() {
   FragColor = vec4(0.0, 0.0, 1.0, 1.0);
-  float d = 0;
+  float d = 1e10;
   
   for (int i = 0; i <= commands_length; i++) {
     Command com = commands[i];
     float dt = 0.0;
+    
     if (com.kind == 1) {
-      Shape4 c = shapes4[com.idx];
-      dt = sdCircle(c.data.xy, c.data.z);
+      Shape4 s = shapes4[com.idx];
+      dt = sdCircle(s.data.xy, s.data.z);
+    } else if (com.kind == 2) {
+      Shape4 s = shapes4[com.idx];
+      dt = sdBox(s.data.xy, s.data.zw);
+    }
+
+    if (com.fun == 1) {
       d = min(d, dt);
+    } else if (com.fun == 2) {
+      d = max(d, dt);
+    } else if (com.fun == 3) {
+      d = smoothMin(d, dt, com.extra);
+    } else if (com.fun == 4) {
+      d = smoothMax(d, dt, com.extra);
     }
   }
 
@@ -84,12 +107,11 @@ PACKED-STRUCT: Shape4
   { data c:float[4] }
   { color c:float[4] } ;
 
-
 PACKED-STRUCT: Command
   { kind c:int }
   { idx c:int }
   { fun c:int }
-  { padding c:int } ;
+  { extra c:float } ;
 
 SPECIALIZED-VECTORS: Command Shape4 ;
 SPECIALIZED-ARRAYS:  Command Shape4 ;
@@ -98,7 +120,28 @@ SPECIALIZED-ARRAYS:  Command Shape4 ;
   [ 0 4array [ ] float-array{ } map-as ] dip 
   color>float-array Shape4 boa ;
 
-: <circle-command> ( idx -- command ) [ 1 ] dip 0 0 Command boa ;
+: <c:box> ( x y w h color -- box )
+  [ 4array [ ] float-array{ } map-as ] dip
+  color>float-array Shape4 boa ;
+
+: <command> ( kind idx -- command ) 1 0 Command boa ;
+
+SYMBOLS: umin umax usmin usmax ;
+
+: =union ( command sym -- command ) {
+  { umin [ 1 ] }
+  { umax [ 2 ] }
+  { usmin [ 3 ] }
+  { usmax [ 4 ] }
+} case >>fun ;
+
+TUPLE: merge fun value ;
+
+: <merge> ( fun value -- merge ) merge boa ;
+
+: command-add-merge ( command merge -- command ) 
+  [ fun>> ] [ value>> ] bi
+  [ =union ] dip >>extra ;
 
 
 TUPLE: buffers
@@ -119,7 +162,7 @@ TUPLE: buffers
 
 TUPLE: cubed-cache 
   commands 
-  circles ;
+  shapes4 ;
 
 : <cubed-cache> ( -- cache ) 
   Command-vector{ } clone
@@ -141,7 +184,7 @@ TUPLE: cubed-ctx
 : cubed-ctx-submit-commands ( ctx -- )
   [ cache>> ] [ buffers>> ] bi
   [ [ commands>> ] dip command-ssbo>> Command cache=>buffer ] 
-  [ [ circles>>  ] dip shapes4-ssbo>> Shape4  cache=>buffer ] 2bi ;
+  [ [ shapes4>>  ] dip shapes4-ssbo>> Shape4  cache=>buffer ] 2bi ;
 
 : cubed-ctx-bind-buffers ( ctx -- )
   buffers>> bind-buffers ;
@@ -158,7 +201,26 @@ TUPLE: cubed-ctx
     [ cubed-ctx-program ]
   } cleave ;
 
-: cubed-ctx-add-circle ( circle ctx -- ) 
-  cache>> [ circles>> ] [ commands>> ] bi
-  [ dup length>> <circle-command> ] dip push push ;
+! : cubed-ctx-add-shape4 ( shape kind ctx -- command ) 
+!   cache>> [ shapes4>> ] [ commands>> ] bi ! s i ss cs
+!   [ dup length>> swapd <command> ] dip push push ; 
 
+: cubed-ctx-add-shape4 ( ctx shape kind merge/f -- )
+  [ rot cache>> [ shapes4>> ] [ commands>> ] bi ! s k ss cs 
+    [ dup length>> swapd <command> ] dip ! s ss c cs
+  ] dip ! s ss c cs m -> s ss cs c m -> s ss cs c
+  swapd dup [ command-add-merge ] [ drop ] if 
+  swap push push ; ! s ss cs c
+
+
+! : cubed-ctx-add-circle ( circle ctx -- command )
+!   [ 1 ] dip cubed-ctx-add-shape4 ;
+
+! : cubed-ctx-add-box ( box ctx -- command )
+!  [ 2 ] dip cubed-ctx-add-shape4 ;
+
+: cubed-ctx>circle ( ctx x y r c m/f -- ) ! ctx x y r c m ->
+  [ <c:circle> 1 ] dip cubed-ctx-add-shape4 ;
+
+: cubed-ctx>box ( ctx x y w h c m/f -- )
+  [ <c:box> 2 ] dip cubed-ctx-add-shape4 ;
