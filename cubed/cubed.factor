@@ -77,12 +77,6 @@ void main() {
 ;
 
 
-PACKED-STRUCT: Circle 
-  { position c:float[2] }
-  { radius c:float }
-  { padding c:float }
-  { color c:float[4] } ;
-
 PACKED-STRUCT: Shape4
   { data c:float[4] }
   { color c:float[4] } ;
@@ -94,10 +88,12 @@ PACKED-STRUCT: Command
   { fun c:int }
   { padding c:int } ;
 
-SPECIALIZED-VECTORS: Circle Command Shape4 ;
-SPECIALIZED-ARRAYS:  Circle Command Shape4 ;
+SPECIALIZED-VECTORS: Command Shape4 ;
+SPECIALIZED-ARRAYS:  Command Shape4 ;
 
-: <c:circle> ( pos r color -- circle ) [ 0 ] dip Circle boa ;
+: <c:circle> ( pos r color -- circle ) 
+  [ 0 2array [ ] float-array{ } map-as append ] dip Shape4 boa ;
+
 : <circle-command> ( idx -- command ) [ 1 ] dip 0 0 Command boa ;
 
 
