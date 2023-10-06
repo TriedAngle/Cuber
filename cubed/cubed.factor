@@ -1,5 +1,5 @@
-USING: accessors alien arrays classes.struct combinators kernel
-math multiline opengl opengl.gl opengl.shaders sequences
+USING: accessors alien arrays classes.struct colors combinators 
+kernel math multiline opengl opengl.gl opengl.shaders sequences
 specialized-arrays
 specialized-arrays.instances.alien.c-types.float specialized-vectors ;
 QUALIFIED-WITH: alien.c-types c
@@ -76,6 +76,9 @@ void main() {
 }
 ;
 
+: color>float-array ( color -- float-array )
+  >rgba-components 4array [ ] float-array{ } map-as ;
+
 
 PACKED-STRUCT: Shape4
   { data c:float[4] }
@@ -91,8 +94,9 @@ PACKED-STRUCT: Command
 SPECIALIZED-VECTORS: Command Shape4 ;
 SPECIALIZED-ARRAYS:  Command Shape4 ;
 
-: <c:circle> ( pos r color -- circle ) 
-  [ 0 2array [ ] float-array{ } map-as append ] dip Shape4 boa ;
+: <c:circle> ( x y r color -- circle ) 
+  [ 0 4array [ ] float-array{ } map-as ] dip 
+  color>float-array Shape4 boa ;
 
 : <circle-command> ( idx -- command ) [ 1 ] dip 0 0 Command boa ;
 

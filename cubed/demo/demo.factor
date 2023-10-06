@@ -1,11 +1,10 @@
 ! Copyright (C) 2023 Your name.
 ! See https://factorcode.org/license.txt for BSD license.
-USING: accessors combinators cubed game.input
+USING: accessors colors combinators cubed game.input
 game.input.scancodes game.loop game.worlds kernel literals
-namespaces prettyprint sequences
+namespaces opengl.gl prettyprint sequences
 specialized-arrays.instances.alien.c-types.float ui
 ui.gadgets.worlds ui.pixel-formats ;
-USE: opengl.gl
 IN: cubed.demo
 
 TUPLE: demo < game-world 
@@ -13,11 +12,6 @@ TUPLE: demo < game-world
 
 M: demo begin-game-world 
   <cubed-ctx> >>ui-ctx drop ;
-
-! :: read-ssbo ( ctx -- ) 
-!   ctx buffers>> circle-ssbo>> GL_READ_ONLY glMapNamedBuffer :> mapped
-!   0 2 [a..]
-! ;
 
 :: handle-tick-input ( world -- )
   read-keyboard keys>> :> keys
@@ -32,9 +26,9 @@ M: demo tick-game-world {
 M: demo draw-world*
   dup ui-ctx>> {
     [ cubed-ctx-record ]
-    [ float-array{ 300 500 } 90.0 float-array{ 1.0 0.0 0.0 1.0 } <c:circle>
+    [ 300 500 90.0 COLOR: red <c:circle>
       swap cubed-ctx-add-circle ]
-    [ float-array{ 900 300 } 60.0 float-array{ 1.0 0.0 0.0 1.0 } <c:circle>
+    [ 900 300 60.0 COLOR: red <c:circle>
       swap cubed-ctx-add-circle ]   
     [ cubed-ctx-render ]
   } cleave
