@@ -34,6 +34,7 @@ struct Command {
 };
 
 uniform uint commands_length;
+uniform uint shape_count;
 
 layout(std430, binding = 0) buffer Commands {
   Command commands[];
@@ -67,9 +68,12 @@ float sdBox(vec2 center, vec2 size) {
 out vec4 FragColor;
 
 void main() {
-  float d = 1e10;
-  int shape_count = 0;
   vec4 bgColor = vec4(0.0, 0.0, 0.0, 0.0);
+  float d = 1e10;
+
+  vec4 finalColor = vec4(0.0, 0.0, 0.0, 1.0);
+  float totalWeight = 0.0;
+  
 
   for (int i = 0; i < commands_length; i++) {
     Command com = commands[i];
@@ -89,6 +93,13 @@ void main() {
         return;
     }
 
+    if (com.kind > 0 && com.kind < 3) {
+      vec4 color = shapes4[com.idx].color; 
+      float w = 1.0 / (1.0 + exp(10.0 * dt));
+      totalWeight += w;
+      finalColor += w * color;
+    }
+   
     switch (com.fun) {
       case 1:
         d = min(d, dt); break;
@@ -104,9 +115,21 @@ void main() {
     }
   }
 
-  if (d < 0.0) {
-    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+  if ( totalWeight > 0.0 ) {
+    finalColor /= totalWeight;
   }
+  
+  finalColor = mix(
+    finalColor,
+    bgColor,
+    smoothstep(-1.0, 1.0, d / fwidth(d))
+  );
+  
+  FragColor = finalColor;
+
+//  if (d < 0.0) {
+//    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+//  }
 }
 ;
 
