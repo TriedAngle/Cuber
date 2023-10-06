@@ -22,12 +22,17 @@ STRING: cubed-fragment-shader
 #version 460
 
 struct Circle {
-  vec4 data; // xy = pos; z = radius; w = padding
+  vec2 pos;
+  float r;
+  float padding;
   vec4 color;
 };
 
 struct Command {
-  ivec4 data; // x = kind; y = buf; z = idx; w = padding
+  int kind;
+  int idx;
+  int fun;
+  int padding;
 };
 
 uniform uint commands_length;
@@ -40,34 +45,32 @@ layout(std430, binding = 1) buffer Circles {
   Circle circles[];
 };
 
-out vec4 FragColor;
-
-float sdCircle(vec2 p, float r)
-{
+float sdCircle(vec2 p, float r) {
     return length(gl_FragCoord.xy - p) - r;
 }
+
+
+float sdBox(vec2 center, vec2 size) {
+    vec2 d = abs(gl_FragCoord.xy - center) - size;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+
+out vec4 FragColor;
 
 void main() {
   FragColor = vec4(0.0, 0.0, 1.0, 1.0);
   float d = 0;
   
   for (int i = 0; i <= commands_length; i++) {
-    Command comm = commands[i];
+    Command com = commands[i];
     float dt = 0.0;
-    if (comm.data.x == 0) {
-      Circle c = circles[comm.data.z];
-      dt = sdCircle(c.data.xy, c.data.z);
+    if (com.kind == 0) {
+      Circle c = circles[com.idx];
+      dt = sdCircle(c.pos, c.r);
       d = min(d, dt);
     }
   }
-
-  // Circle c1 = circles[0];
-  // Circle c2 = circles[1];
-
-  // float d1 = sdCircle(c1.data.xy, c1.data.z);
-  // float d2 = sdCircle(c2.data.xy, c2.data.z);
-  
-  // d = min(d1, d2);
 
   if (d < 0.0) {
     FragColor = vec4(1.0, 0.0, 0.0, 1.0);
@@ -85,15 +88,15 @@ PACKED-STRUCT: Circle
 
 PACKED-STRUCT: Command
   { kind c:int }
-  { buffer c:int }
   { idx c:int }
+  { fun c:int }
   { padding c:int } ;
 
 SPECIALIZED-VECTORS: Circle Command ;
 SPECIALIZED-ARRAYS:  Circle Command ;
 
 : <c:circle> ( pos r color -- circle ) [ 0 ] dip Circle boa ;
-: <circle-command> ( idx -- command ) [ 0 0 ] dip 0 Command boa ;
+: <circle-command> ( idx -- command ) [ 0 ] dip 0 0 Command boa ;
 
 
 TUPLE: buffers
