@@ -31,6 +31,7 @@ struct Command {
   int idx;
   int fun;
   float extra;
+  vec4 data;
 };
 
 uniform uint commands_length;
@@ -88,6 +89,10 @@ void main() {
         Shape4 sb = shapes4[com.idx];
         dt = sdBox(sb.data.xy, sb.data.zw);
         break;
+      case 69:
+        finalColor = mix(com.data, finalColor, smoothstep(
+          0.0, com.extra, abs(d)));
+        break; 
       default:
         FragColor = vec4(1.0, 0.0, 1.0, 1.0);
         return;
@@ -110,8 +115,7 @@ void main() {
       case 4:
         d = smoothMax(d, dt, com.extra); break;
       default:
-        FragColor = vec4(1.0, 0.0, 1.0, 1.0);
-        return;
+        break;
     }
   }
 
@@ -145,7 +149,8 @@ PACKED-STRUCT: Command
   { kind c:int }
   { idx c:int }
   { fun c:int }
-  { extra c:float } ;
+  { extra c:float }
+  { data c:float[4] } ;
 
 SPECIALIZED-VECTORS: Command Shape4 ;
 SPECIALIZED-ARRAYS:  Command Shape4 ;
@@ -158,7 +163,13 @@ SPECIALIZED-ARRAYS:  Command Shape4 ;
   [ 4array [ ] float-array{ } map-as ] dip
   color>float-array Shape4 boa ;
 
-: <command> ( kind idx -- command ) 1 0 Command boa ;
+: <command> ( k i f e d -- command ) Command boa ;
+: <!data-command> ( k i f e -- command ) float-array{ 0 0 0 0 } Command boa ; 
+
+: <s-command> ( kind idx -- command ) 1 0 <!data-command> ;
+
+: <outline-command> ( thicc color -- command ) 
+  [ 69 0 0 ] 2dip color>float-array <command>  ;
 
 SYMBOLS: umin umax usmin usmax ;
 
@@ -241,7 +252,7 @@ TUPLE: cubed-ctx
 
 : cubed-ctx-add-shape4 ( ctx shape kind merge/f -- )
   [ rot cache>> [ shapes4>> ] [ commands>> ] bi ! s k ss cs 
-    [ dup length>> swapd <command> ] dip ! s ss c cs
+    [ dup length>> swapd <s-command> ] dip ! s ss c cs
   ] dip ! s ss c cs m -> s ss cs c m -> s ss cs c
   swapd dup [ command-add-merge ] [ drop ] if 
   swap push push ; ! s ss cs c
@@ -258,3 +269,6 @@ TUPLE: cubed-ctx
 
 : cubed-ctx>box ( ctx x y w h c m/f -- )
   [ <c:box> 2 ] dip cubed-ctx-add-shape4 ;
+
+: cubed-ctx>outline ( ctx thicc color -- )
+  <outline-command> swap cache>> commands>> push ;
