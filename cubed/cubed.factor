@@ -21,10 +21,8 @@ void main() {
 STRING: cubed-fragment-shader
 #version 460
 
-struct Circle {
-  vec2 pos;
-  float r;
-  float padding;
+struct Shape4 {
+  vec4 data;
   vec4 color;
 };
 
@@ -41,8 +39,8 @@ layout(std430, binding = 0) buffer Commands {
   Command commands[];
 };
 
-layout(std430, binding = 1) buffer Circles {
-  Circle circles[];
+layout(std430, binding = 1) buffer Shapes4 {
+  Shape4 shapes4[];
 };
 
 float sdCircle(vec2 p, float r) {
@@ -65,9 +63,9 @@ void main() {
   for (int i = 0; i <= commands_length; i++) {
     Command com = commands[i];
     float dt = 0.0;
-    if (com.kind == 0) {
-      Circle c = circles[com.idx];
-      dt = sdCircle(c.pos, c.r);
+    if (com.kind == 1) {
+      Shape4 c = shapes4[com.idx];
+      dt = sdCircle(c.data.xy, c.data.z);
       d = min(d, dt);
     }
   }
@@ -85,6 +83,10 @@ PACKED-STRUCT: Circle
   { padding c:float }
   { color c:float[4] } ;
 
+PACKED-STRUCT: Shape4
+  { data c:float[4] }
+  { color c:float[4] } ;
+
 
 PACKED-STRUCT: Command
   { kind c:int }
@@ -92,16 +94,16 @@ PACKED-STRUCT: Command
   { fun c:int }
   { padding c:int } ;
 
-SPECIALIZED-VECTORS: Circle Command ;
-SPECIALIZED-ARRAYS:  Circle Command ;
+SPECIALIZED-VECTORS: Circle Command Shape4 ;
+SPECIALIZED-ARRAYS:  Circle Command Shape4 ;
 
 : <c:circle> ( pos r color -- circle ) [ 0 ] dip Circle boa ;
-: <circle-command> ( idx -- command ) [ 0 ] dip 0 0 Command boa ;
+: <circle-command> ( idx -- command ) [ 1 ] dip 0 0 Command boa ;
 
 
 TUPLE: buffers
   command-ssbo
-  circle-ssbo ;
+  shapes4-ssbo ;
 
 : <buffers> ( -- buffers ) 
   create-gl-buffer
@@ -113,7 +115,7 @@ TUPLE: buffers
 
 : bind-buffers ( buffers -- ) 
   [ [ GL_SHADER_STORAGE_BUFFER 0 ] dip command-ssbo>> glBindBufferBase ] 
-  [ [ GL_SHADER_STORAGE_BUFFER 1 ] dip circle-ssbo>>  glBindBufferBase ] bi ;
+  [ [ GL_SHADER_STORAGE_BUFFER 1 ] dip shapes4-ssbo>> glBindBufferBase ] bi ;
 
 TUPLE: cubed-cache 
   commands 
@@ -121,7 +123,7 @@ TUPLE: cubed-cache
 
 : <cubed-cache> ( -- cache ) 
   Command-vector{ } clone
-  Circle-vector{ } clone 
+  Shape4-vector{ } clone 
   cubed-cache boa ;
 
 TUPLE: cubed-ctx
@@ -139,7 +141,7 @@ TUPLE: cubed-ctx
 : cubed-ctx-submit-commands ( ctx -- )
   [ cache>> ] [ buffers>> ] bi
   [ [ commands>> ] dip command-ssbo>> Command cache=>buffer ] 
-  [ [ circles>>  ] dip circle-ssbo>>  Circle  cache=>buffer ] 2bi ;
+  [ [ circles>>  ] dip shapes4-ssbo>> Shape4  cache=>buffer ] 2bi ;
 
 : cubed-ctx-bind-buffers ( ctx -- )
   buffers>> bind-buffers ;
@@ -159,3 +161,4 @@ TUPLE: cubed-ctx
 : cubed-ctx-add-circle ( circle ctx -- ) 
   cache>> [ circles>> ] [ commands>> ] bi
   [ dup length>> <circle-command> ] dip push push ;
+
