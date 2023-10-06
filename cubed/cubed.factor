@@ -67,29 +67,40 @@ float sdBox(vec2 center, vec2 size) {
 out vec4 FragColor;
 
 void main() {
-  FragColor = vec4(0.0, 0.0, 1.0, 1.0);
   float d = 1e10;
-  
-  for (int i = 0; i <= commands_length; i++) {
+  int shape_count = 0;
+  vec4 bgColor = vec4(0.0, 0.0, 0.0, 0.0);
+
+  for (int i = 0; i < commands_length; i++) {
     Command com = commands[i];
     float dt = 0.0;
-    
-    if (com.kind == 1) {
-      Shape4 s = shapes4[com.idx];
-      dt = sdCircle(s.data.xy, s.data.z);
-    } else if (com.kind == 2) {
-      Shape4 s = shapes4[com.idx];
-      dt = sdBox(s.data.xy, s.data.zw);
+
+    switch (com.kind) {
+      case 1:
+        Shape4 sc = shapes4[com.idx];
+        dt = sdCircle(sc.data.xy, sc.data.z);
+        break;
+      case 2:
+        Shape4 sb = shapes4[com.idx];
+        dt = sdBox(sb.data.xy, sb.data.zw);
+        break;
+      default:
+        FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+        return;
     }
 
-    if (com.fun == 1) {
-      d = min(d, dt);
-    } else if (com.fun == 2) {
-      d = max(d, dt);
-    } else if (com.fun == 3) {
-      d = smoothMin(d, dt, com.extra);
-    } else if (com.fun == 4) {
-      d = smoothMax(d, dt, com.extra);
+    switch (com.fun) {
+      case 1:
+        d = min(d, dt); break;
+      case 2:
+        d = max(d, dt); break;
+      case 3:
+        d = smoothMin(d, dt, com.extra); break;
+      case 4:
+        d = smoothMax(d, dt, com.extra); break;
+      default:
+        FragColor = vec4(1.0, 0.0, 1.0, 1.0);
+        return;
     }
   }
 

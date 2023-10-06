@@ -27,7 +27,7 @@ M: demo draw-world*
   dup ui-ctx>> {
     [ cubed-ctx-record ]
     [ 300 500 95.0 COLOR: red f cubed-ctx>circle ]
-    [ 900 300 60.0 COLOR: red f cubed-ctx>circle ]
+    [ 900 300 60.0 COLOR: blue f cubed-ctx>circle ]
     [ 300 350 100 50 COLOR: red usmin 0.2 <merge> cubed-ctx>box ]
     [ cubed-ctx-render ]
   } cleave
