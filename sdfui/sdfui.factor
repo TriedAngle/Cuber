@@ -3,12 +3,12 @@ kernel math multiline opengl opengl.gl opengl.shaders sequences
 specialized-arrays
 specialized-arrays.instances.alien.c-types.float specialized-vectors ;
 QUALIFIED-WITH: alien.c-types c
-IN: cubed
+IN: sdfui
 
 ! TODO: Add them to Factor
 CONSTANT: GL_SHADER_STORAGE_BUFFER 0x90d2
 
-STRING: cubed-vertex-shader
+STRING: sdfui-vertex-shader
 #version 460
 
 void main() {
@@ -18,7 +18,7 @@ void main() {
 }
 ;
 
-STRING: cubed-fragment-shader
+STRING: sdfui-fragment-shader
 #version 460
 
 struct Shape4 {
@@ -130,10 +130,6 @@ void main() {
   );
   
   FragColor = finalColor;
-
-//  if (d < 0.0) {
-//    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-//  }
 }
 ;
 
@@ -153,7 +149,6 @@ PACKED-STRUCT: Command
   { data c:float[4] } ;
 
 SPECIALIZED-VECTORS: Command Shape4 ;
-SPECIALIZED-ARRAYS:  Command Shape4 ;
 
 : <c:circle> ( x y r color -- circle ) 
   [ 0 4array [ ] float-array{ } map-as ] dip 
@@ -205,70 +200,59 @@ TUPLE: buffers
   [ [ GL_SHADER_STORAGE_BUFFER 0 ] dip command-ssbo>> glBindBufferBase ] 
   [ [ GL_SHADER_STORAGE_BUFFER 1 ] dip shapes4-ssbo>> glBindBufferBase ] bi ;
 
-TUPLE: cubed-cache 
+TUPLE: sdfui-cache 
   commands 
   shapes4 ;
 
-: <cubed-cache> ( -- cache ) 
+: <sdfui-cache> ( -- cache ) 
   Command-vector{ } clone
   Shape4-vector{ } clone 
-  cubed-cache boa ;
+  sdfui-cache boa ;
 
-TUPLE: cubed-ctx
+TUPLE: sdfui-ctx
   program cache buffers ;
 
-: <cubed-ctx> ( -- ctx ) 
-  cubed-vertex-shader cubed-fragment-shader <simple-gl-program>
-  <cubed-cache> 
+: <sdfui-ctx> ( -- ctx ) 
+  sdfui-vertex-shader sdfui-fragment-shader <simple-gl-program>
+  <sdfui-cache> 
   <buffers> 
-  cubed-ctx boa ;
+  sdfui-ctx boa ;
 
-: cubed-ctx-record ( ctx -- )
-  [ drop <cubed-cache> ] change-cache drop ;
+: sdfui-record ( ctx -- )
+  [ drop <sdfui-cache> ] change-cache drop ;
 
-: cubed-ctx-submit-commands ( ctx -- )
+: sdfui-submit-commands ( ctx -- )
   [ cache>> ] [ buffers>> ] bi
   [ [ commands>> ] dip command-ssbo>> Command cache=>buffer ] 
   [ [ shapes4>>  ] dip shapes4-ssbo>> Shape4  cache=>buffer ] 2bi ;
 
-: cubed-ctx-bind-buffers ( ctx -- )
+: sdfui-bind-buffers ( ctx -- )
   buffers>> bind-buffers ;
 
-: cubed-ctx-program ( ctx -- ) 
+: sdfui-run-program ( ctx -- ) 
   dup program>> [ over cache>> commands>> length 
     [ dup "commands_length" glGetUniformLocation ] dip glProgramUniform1ui
     GL_TRIANGLES 0 4 glDrawArrays 
   ] with-gl-program drop ;
 
-: cubed-ctx-render ( ctx -- ) { 
-    [ cubed-ctx-submit-commands ]
-    [ cubed-ctx-bind-buffers ]
-    [ cubed-ctx-program ]
+: sdfui-render ( ctx -- ) { 
+    [ sdfui-submit-commands ]
+    [ sdfui-bind-buffers ]
+    [ sdfui-run-program ]
   } cleave ;
 
-! : cubed-ctx-add-shape4 ( shape kind ctx -- command ) 
-!   cache>> [ shapes4>> ] [ commands>> ] bi ! s i ss cs
-!   [ dup length>> swapd <command> ] dip push push ; 
-
-: cubed-ctx-add-shape4 ( ctx shape kind merge/f -- )
+: sdfui>shape4 ( ctx shape kind merge/f -- )
   [ rot cache>> [ shapes4>> ] [ commands>> ] bi ! s k ss cs 
     [ dup length>> swapd <s-command> ] dip ! s ss c cs
   ] dip ! s ss c cs m -> s ss cs c m -> s ss cs c
   swapd dup [ command-add-merge ] [ drop ] if 
   swap push push ; ! s ss cs c
 
+: sdfui>circle ( ctx x y r c m/f -- ) ! ctx x y r c m ->
+  [ <c:circle> 1 ] dip sdfui>shape4 ;
 
-! : cubed-ctx-add-circle ( circle ctx -- command )
-!   [ 1 ] dip cubed-ctx-add-shape4 ;
+: sdfui>box ( ctx x y w h c m/f -- )
+  [ <c:box> 2 ] dip sdfui>shape4 ;
 
-! : cubed-ctx-add-box ( box ctx -- command )
-!  [ 2 ] dip cubed-ctx-add-shape4 ;
-
-: cubed-ctx>circle ( ctx x y r c m/f -- ) ! ctx x y r c m ->
-  [ <c:circle> 1 ] dip cubed-ctx-add-shape4 ;
-
-: cubed-ctx>box ( ctx x y w h c m/f -- )
-  [ <c:box> 2 ] dip cubed-ctx-add-shape4 ;
-
-: cubed-ctx>outline ( ctx thicc color -- )
+: sdfui>outline ( ctx thicc color -- )
   <outline-command> swap cache>> commands>> push ;
