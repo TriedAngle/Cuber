@@ -26,10 +26,10 @@ M: demo tick-game-world {
 M: demo draw-world*
   dup ui-ctx>> {
     [ cubed-ctx-record ]
-    [ 300 500 95 COLOR: red f cubed-ctx>circle ]
-    [ 1.5 COLOR: white cubed-ctx>outline ]
+    [ 300 500 100 COLOR: red f cubed-ctx>circle ]
     [ 900 300 60 COLOR: blue f cubed-ctx>circle ]
-    [ 300 350 100 50 COLOR: red usmin 0.2 <merge> cubed-ctx>box ]
+    [ 300 350 100 50 COLOR: blue usmin 0.2 <merge> cubed-ctx>box ]
+    [ 1.5 COLOR: white cubed-ctx>outline ]
     [ cubed-ctx-render ]
   } cleave
   drop ;
