@@ -29,3 +29,6 @@ M: hashcache clear-assoc assoc>> clear-assoc ;
   dup [ assoc>> >alist ] [ max-age>> ] bi '[ second age>> _ <= ] filter
   [ [ first ] [ second ] bi [ 1 + ] change-age 2array ] map
   >hashtable >>assoc drop ;
+
+: delete-next ( cache -- seq ) 
+  [ assoc>> >alist ] [ max-age>> ] bi '[ second age>> _ > ] filter ;
