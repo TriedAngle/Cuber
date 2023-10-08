@@ -13,10 +13,9 @@ static mut glCreateTextures: PFN_glCreateTextures = {
 
 
 #[no_mangle]
-pub extern "C" fn load_opengl_function_pointers() -> ffi::c_int {
+pub extern "C" fn load_opengl_function_pointers(path: *const ffi::c_char) -> ffi::c_int {
     natty!{
-        let lib = ffi::CString::new("opengl32.dll").unwrap();
-        let handle = raid::invade(lib.as_ptr());
+        let handle = raid::invade(path);
         if handle.is_null() { return -1; }
         
         let proc_name = ffi::CString::new("wglGetProcAddress").unwrap();
