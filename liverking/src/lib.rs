@@ -5,6 +5,7 @@
 pub mod hunt;
 pub mod juice;
 pub mod liver;
+pub mod raid;
 
 /// rust will often accuse you and will try to check your natty status
 /// use this to protect yourself from those accusations
