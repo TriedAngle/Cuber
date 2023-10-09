@@ -1,0 +1,10 @@
+[package]
+name = "glyphers_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+liverking = { version = "*", path="../../liverking" }
+glyphers = { version = "*", path="../../glyphers" }
+glutin = "0.28"
+glow = "0.12.3"

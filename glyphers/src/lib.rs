@@ -66,7 +66,7 @@ pub mod test {
     #[test]
     fn test_fonts() {
         use fontdue::{Font, layout::{ Layout, CoordinateSystem, LayoutSettings, TextStyle } };
-        let text = "meow 猫";
+        let text = "meowwy 猫";
         let font_file = load_font_file("Arial.ttf");
         let font = Font::from_bytes(font_file, fontdue::FontSettings::default()).unwrap();
         let fonts = &[&font];
@@ -77,7 +77,7 @@ pub mod test {
         let glyphs = layout.glyphs();
         for glyph in glyphs {
             let (metrics, bitmap) = font.rasterize(glyph.parent, glyph.key.px);
-            println!("Glyph: {:?}", bitmap);
+            println!("Glyph: {:?} | {}, {} | {}", bitmap.len(), glyph.width, glyph.height, glyph.x);
         }
     }
 }
