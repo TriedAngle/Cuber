@@ -1,7 +1,11 @@
 use glow::*;
 use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::ControlFlow;
+
+use fontdue::{Font, layout::{ Layout, CoordinateSystem, LayoutSettings, TextStyle } };
+use image::{GrayImage, Luma};
 use liverking::natty;
+use std::fs;
 
 fn main() {
     natty! {
@@ -77,9 +81,54 @@ fn main() {
             gl.delete_shader(shader);
         }
 
-        gl.use_program(Some(program));
-        gl.clear_color(0.1, 0.2, 0.3, 1.0);
+        
+        let text = "meowwy 猫🐱 XD";
+        let font_file = load_font_file("Arial.ttf");
+        let font = Font::from_bytes(font_file, fontdue::FontSettings::default()).unwrap();
+        let fonts = &[&font];
 
+        let mut layout = Layout::new(CoordinateSystem::PositiveYUp);
+        layout.append(fonts, &TextStyle::new(text, 42.0, 0));
+        let glyphs = layout.glyphs();
+
+        let ( mut total_width, mut total_height) = (0usize, 0usize);
+        for glyph in glyphs {
+            let padding = glyph.x as usize - total_width;
+            total_width += glyph.width;
+            total_width += padding;
+            if glyph.height > total_height { total_height = glyph.height }; 
+        }
+        
+        println!("total_width: {}, total_height: {}", total_width, total_height);
+        let mut render_text = vec![0u8; total_width * total_height];
+        for glyph in glyphs {
+            let (_metrics, bitmap) = font.rasterize(glyph.parent, glyph.key.px);
+            let (width, _) = (glyph.width, glyph.height);
+            
+            println!("glyph: {}, x: {}, y: {}, width: {}, height: {}", glyph.parent, glyph.x, glyph.y, glyph.width, glyph.height);
+            for sub_y in 0..glyph.height {
+                for sub_x in 0..glyph.width {
+                    let image_index = (sub_y) * total_width + (glyph.x as usize + sub_x);
+                    let glyph_index = sub_y * width + sub_x;
+                    render_text[image_index] = bitmap[glyph_index];
+                }
+            }
+        }
+
+
+        let mut img = GrayImage::new(total_width as u32, total_height as u32);
+        for y in 0..total_height {
+            for x in 0..total_width {
+                let pixel_index = y * total_width + x;
+                let pixel_value = render_text[pixel_index];
+                img.put_pixel(x as u32, y as u32, Luma([pixel_value]));
+            }
+        }
+        img.save("out/merge.png").unwrap();
+        
+
+        
+        gl.clear_color(0.1, 0.2, 0.3, 1.0);
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             match event {
@@ -91,7 +140,10 @@ fn main() {
                 }
                 Event::RedrawRequested(_) => {
                     gl.clear(glow::COLOR_BUFFER_BIT);
+                    gl.use_program(Some(program));
+                    gl.clear_color(0.1, 0.2, 0.3, 1.0);
                     gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
                     window.swap_buffers().unwrap();
                 }
                 Event::WindowEvent { ref event, .. } => match event {
@@ -110,4 +162,16 @@ fn main() {
         });
     }
 
+}
+
+fn load_font_file(path: &str) -> Vec<u8> {
+    if path.starts_with(".") || path.starts_with("/") {
+        return fs::read(path).unwrap();
+    } else {
+        #[cfg(target_os = "windows")]
+        let path = format!("C:/Windows/Fonts/{}", path);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let path = format!("/usr/share/fonts/truetype/{}", path);
+        return fs::read(&path).unwrap();
+    }
 }
