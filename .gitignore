@@ -2,3 +2,4 @@
 **/Cargo.lock
 **/*.dll
 **/*.so
+.vscode

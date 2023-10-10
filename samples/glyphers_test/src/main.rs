@@ -3,7 +3,19 @@ use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::ControlFlow;
 use image::{GrayImage, Luma};
 use liverking::natty;
-use glyphers::rasterize;
+use std::ffi;
+use glyphers;
+
+extern "C" {
+    fn rasterize(
+        text: *const i8, 
+        fonts: *const *const i8,
+        fonts_count: usize, 
+        width: *mut usize,
+        height: *mut usize,
+        length: *mut usize,
+    ) -> *mut u8;
+}
 
 fn main() {
     natty! {
@@ -81,7 +93,8 @@ fn main() {
 
 
         let text = "meowwy 猫🐱 XD";
-        let (out, width, height) = rasterize(text, &["Arial.ttf", "msyh.ttc", "seguiemj.ttf"]);
+        let fonts = ["Arial.ttf", "msyh.ttc", "seguiemj.ttf"];
+        let (out, width, height) = glyphers::rasterize(text, &fonts);
 
         let mut img = GrayImage::new(width as u32, height as u32);
         for y in 0..height {
@@ -93,9 +106,6 @@ fn main() {
         }
         img.save("out/merge.png").unwrap();
 
-
-
-        gl.clear_color(0.1, 0.2, 0.3, 1.0);
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             match event {
