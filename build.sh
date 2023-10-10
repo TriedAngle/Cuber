@@ -1,5 +1,5 @@
 #!/bin/bash
-cd glyphers
+cd glyphers_ffi
 cargo build --release
 if [ $? -ne 0 ]; then
     echo "Error: 'cargo build --release' failed."

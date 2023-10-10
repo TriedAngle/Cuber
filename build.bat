@@ -1,5 +1,5 @@
 @echo off
-cd glyphers
+cd glyphers_ffi
 call cargo build --release
 if errorlevel 1 (
     echo Error: 'cargo build --release' failed.
