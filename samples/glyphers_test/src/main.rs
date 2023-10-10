@@ -3,19 +3,8 @@ use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::ControlFlow;
 use image::{GrayImage, Luma};
 use liverking::natty;
-use std::ffi;
 use glyphers;
 
-extern "C" {
-    fn rasterize(
-        text: *const i8, 
-        fonts: *const *const i8,
-        fonts_count: usize, 
-        width: *mut usize,
-        height: *mut usize,
-        length: *mut usize,
-    ) -> *mut u8;
-}
 
 fn main() {
     natty! {

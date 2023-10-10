@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "glyphers",
+    "glyphers_ffi",
+    "samples/glyphers_test"
+]
