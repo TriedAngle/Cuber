@@ -3,6 +3,8 @@
 #![allow(non_camel_case_types)]
 #![allow(unused)]
 
+use unicode_segmentation::UnicodeSegmentation;
+use fontdue::{Font, FontSettings, layout::{GlyphPosition, Layout, CoordinateSystem, TextStyle}};
 use liverking::{natty, raid};
 use std::{ffi, fs};
 
@@ -40,10 +42,73 @@ pub extern "C" fn load_opengl(path: *const ffi::c_char) -> ffi::c_int {
 }
 
 
+
+
+
 #[no_mangle]
 pub extern "C" fn string_to_texture(path: *const ffi::c_char, size: core::ffi::c_size_t) {
     let p =  natty!(ffi::CStr::from_ptr(path));
     let path = p.to_str().unwrap();
+}
+
+
+pub fn rasterize(text: &str, fonts: &[&str]) -> (Vec<u8>, usize, usize) {
+    let fonts: Vec<Font> = load_fonts(fonts);
+    let mut layout = Layout::new(CoordinateSystem::PositiveYUp);
+    let size = 42.0;
+
+    let mut start_byte_idx = 0;
+    let mut current_font_idx = 0;
+
+    for (end_byte_idx, grapheme) in text.grapheme_indices(true) {
+        let start_char = grapheme.chars().next().unwrap();
+        let (font_idx, _font) = fonts.iter().enumerate().find(|(_idx, font)| font.lookup_glyph_index(start_char) != 0).unwrap_or((0, &fonts[0]));
+
+        if font_idx != current_font_idx {
+            layout.append(&fonts, &TextStyle::new(&text[start_byte_idx..end_byte_idx], size, current_font_idx));
+            start_byte_idx = end_byte_idx;
+            current_font_idx = font_idx;
+        }
+    }
+    if start_byte_idx < text.len() {
+        layout.append(&fonts, &TextStyle::new(&text[start_byte_idx..], size, current_font_idx));
+    }
+
+    let glyphs = layout.glyphs();
+    let mut total_width = 0;
+    let mut total_height = 0;
+
+    for glyph in glyphs {
+        let padding = glyph.x as usize - total_width;
+        total_width += glyph.width;
+        total_width += padding;
+        if glyph.height > total_height { total_height = glyph.height };
+    }
+    let mut out = vec![0u8; total_width * total_height];
+    for glyph in glyphs {
+        let font = fonts.iter().find(|font| font.lookup_glyph_index(glyph.parent) != 0).unwrap_or(&fonts[0]);
+        rasterize_glyph(&font, glyph, &mut out, total_width, total_height);
+    }
+    return (out, total_width, total_height);
+}
+
+fn rasterize_glyph(
+    font: &Font,
+    glyph: &GlyphPosition,
+    out: &mut Vec<u8>,
+    out_width: usize,
+    _out_height: usize,
+) {
+    let (_metrics, bitmap) = font.rasterize(glyph.parent, glyph.key.px);
+    let (width, _height) = (glyph.width, glyph.height);
+
+    for sub_y in 0..glyph.height {
+        for sub_x in 0..glyph.width {
+            let image_index = sub_y * out_width + (glyph.x as usize + sub_x);
+            let glyph_index = sub_y * width + sub_x;
+            out[image_index] = bitmap[glyph_index];
+        }
+    }
 }
 
 fn load_font_file(path: &str) -> Vec<u8> {
@@ -58,26 +123,35 @@ fn load_font_file(path: &str) -> Vec<u8> {
     }
 }
 
+fn load_fonts(paths: &[&str]) -> Vec<Font> {
+    paths
+        .iter()
+        .map(|p| load_font_file(p))
+        .map(|bytes| Font::from_bytes(bytes, FontSettings::default()).unwrap())
+        .collect()
+}
+
+
 
 #[cfg(test)]
 pub mod test {
+    use image::{Luma, GrayImage};
+
     use super::*;
 
     #[test]
     fn test_fonts() {
-        use fontdue::{Font, layout::{ Layout, CoordinateSystem, LayoutSettings, TextStyle } };
-        let text = "meowwy 猫";
-        let font_file = load_font_file("Arial.ttf");
-        let font = Font::from_bytes(font_file, fontdue::FontSettings::default()).unwrap();
-        let fonts = &[&font];
+        let text = "meowwy 猫🐱 XD";
+        let (out, width, height) = rasterize(text, &["Arial.ttf", "msyh.ttc", "seguiemj.ttf"]);
 
-        let mut layout = Layout::new(CoordinateSystem::PositiveYUp);
-        
-        layout.append(fonts, &TextStyle::new(text, 42.0, 0));
-        let glyphs = layout.glyphs();
-        for glyph in glyphs {
-            let (metrics, bitmap) = font.rasterize(glyph.parent, glyph.key.px);
-            println!("Glyph: {:?} | {}, {} | {}", bitmap.len(), glyph.width, glyph.height, glyph.x);
+        let mut img = GrayImage::new(width as u32, height as u32);
+        for y in 0..height {
+            for x in 0..width {
+                let pixel_index = y * width + x;
+                let pixel_value = out[pixel_index];
+                img.put_pixel(x as u32, y as u32, Luma([pixel_value]));
+            }
         }
+        img.save("merge.png").unwrap();
     }
 }

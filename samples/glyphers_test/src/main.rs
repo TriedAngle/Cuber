@@ -1,15 +1,9 @@
-use fontdue::layout::GlyphPosition;
 use glow::*;
 use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::ControlFlow;
-
-use fontdue::{
-    layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle},
-    Font,
-};
 use image::{GrayImage, Luma};
 use liverking::natty;
-use std::fs;
+use glyphers::rasterize;
 
 fn main() {
     natty! {
@@ -87,52 +81,13 @@ fn main() {
 
 
         let text = "meowwy 猫🐱 XD";
-        let fonts: Vec<Font> = load_fonts(&["Arial.ttf", "msyh.ttc", "seguiemj.ttf"]);
-        let mut layout = Layout::new(CoordinateSystem::PositiveYUp);
-        let size = 42.0;
-        use unicode_segmentation::UnicodeSegmentation;
-        let mut start_byte_idx = 0;
-        let mut current_font_idx = 0;
+        let (out, width, height) = rasterize(text, &["Arial.ttf", "msyh.ttc", "seguiemj.ttf"]);
 
-        for (end_byte_idx, grapheme) in text.grapheme_indices(true) {
-            let start_char = grapheme.chars().next().unwrap();
-            let (font_idx, font) = fonts.iter().enumerate().find(|(_idx, font)| font.lookup_glyph_index(start_char) != 0).unwrap_or((0, &fonts[0]));
-
-            if font_idx != current_font_idx {
-                layout.append(&fonts, &TextStyle::new(&text[start_byte_idx..end_byte_idx], size, current_font_idx));
-                start_byte_idx = end_byte_idx;
-                current_font_idx = font_idx;
-            }
-        }
-
-        if start_byte_idx < text.len() {
-            layout.append(&fonts, &TextStyle::new(&text[start_byte_idx..], size, current_font_idx));
-        }
-
-        let glyphs = layout.glyphs();
-        let mut total_width = 0;
-        let mut total_height = 0;
-
-        for glyph in glyphs {
-            let padding = glyph.x as usize - total_width;
-            total_width += glyph.width;
-            total_width += padding;
-            if glyph.height > total_height { total_height = glyph.height };
-        }
-
-        println!("total_width: {}, total_height: {}", total_width, total_height);
-        let mut render_text = vec![0u8; total_width * total_height];
-        for glyph in glyphs {
-            let font = fonts.iter().find(|font| font.lookup_glyph_index(glyph.parent) != 0).unwrap_or(&fonts[0]);
-            rasterize_glyph(&font, glyph, &mut render_text, total_width, total_height);
-        }
-
-
-        let mut img = GrayImage::new(total_width as u32, total_height as u32);
-        for y in 0..total_height {
-            for x in 0..total_width {
-                let pixel_index = y * total_width + x;
-                let pixel_value = render_text[pixel_index];
+        let mut img = GrayImage::new(width as u32, height as u32);
+        for y in 0..height {
+            for x in 0..width {
+                let pixel_index = y * width + x;
+                let pixel_value = out[pixel_index];
                 img.put_pixel(x as u32, y as u32, Luma([pixel_value]));
             }
         }
@@ -173,43 +128,4 @@ fn main() {
             }
         });
     }
-}
-
-fn rasterize_glyph(
-    font: &Font,
-    glyph: &GlyphPosition,
-    out: &mut Vec<u8>,
-    out_width: usize,
-    out_height: usize,
-) {
-    let (_metrics, bitmap) = font.rasterize(glyph.parent, glyph.key.px);
-    let (width, _height) = (glyph.width, glyph.height);
-
-    for sub_y in 0..glyph.height {
-        for sub_x in 0..glyph.width {
-            let image_index = sub_y * out_width + (glyph.x as usize + sub_x);
-            let glyph_index = sub_y * width + sub_x;
-            out[image_index] = bitmap[glyph_index];
-        }
-    }
-}
-
-fn load_font_file(path: &str) -> Vec<u8> {
-    if path.starts_with(".") || path.starts_with("/") {
-        return fs::read(path).unwrap();
-    } else {
-        #[cfg(target_os = "windows")]
-        let path = format!("C:/Windows/Fonts/{}", path);
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let path = format!("/usr/share/fonts/truetype/{}", path);
-        return fs::read(&path).unwrap();
-    }
-}
-
-fn load_fonts(paths: &[&str]) -> Vec<Font> {
-    paths
-        .iter()
-        .map(|p| load_font_file(p))
-        .map(|bytes| Font::from_bytes(bytes, fontdue::FontSettings::default()).unwrap())
-        .collect()
 }
