@@ -27,8 +27,14 @@ M: demo draw-world*
     [ sdfui-record ]
     [ 300 500 100 COLOR: red f sdfui>circle ]
     [ 900 300 60 COLOR: blue f sdfui>circle ]
-    [ 300 350 100 50 COLOR: blue usmin 0.2 <merge> sdfui>box ]
+    [ 300 350 100 50 COLOR: red usmin 0.2 <merge> sdfui>box ]
     [ 1.5 COLOR: white sdfui>outline ]
+    [ 100 600 "hello 猫🐱 044 XD" 42 
+      { "Arial.ttf" "msyh.ttc" "seguiemj.ttf" } 
+      COLOR: white f sdfui>text ]
+    ! [ 200 800 "i am in pain owo" 42 
+    !  { "comici.ttf" } 
+    !  COLOR: white f sdfui>text ]
     [ sdfui-render ]
   } cleave
   drop ;

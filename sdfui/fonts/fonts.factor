@@ -1,48 +1,46 @@
-USING: accessors alien.data arrays assocs destructors freetype
-kernel math sdfui.cache sdfui.utils sequences strings ;
+USING: accessors alien.data arrays assocs combinators
+destructors freetype kernel math sdfui.cache sdfui.glue
+sdfui.utils sequences strings ;
 QUALIFIED-WITH: alien.c-types c
 IN: sdfui.fonts
 
-TUPLE: font-key string size font ;
+TUPLE: font-key string size fonts ;
 
-: <font-key> ( string size font -- bitmap-key ) font-key boa ;
+: <font-key> ( string size fonts -- bitmap-key ) font-key boa ;
 
 
 TUPLE: font-string < disposable 
   { value string }
   { size fixnum }
-  { font string }
-  { face fixnum } ;
+  { fonts sequence }
+  { rasta rasterization } ;
 
-M: font-string dispose* face>> FT_Done_Face ;
+M: font-string dispose* rasta>> dispose ;
 
-: <font-string> ( string size font face -- font-string ) 
-  font-string new-disposable
-  >>face >>font >>size >>value ; 
+: <font-string> ( string size fonts -- font-string ) 
+  font-string new-disposable [ {
+    [ fonts<< ] [ size<< ] [ value<< ]
+  } cleave ] keep dup [ value>> ] [ fonts>> ] bi 
+  rasterize-text >>rasta ;
 
 TUPLE: sdfui-fonts < disposable
-  { library fixnum } 
   { fonts hashcache } ;
 
 M: sdfui-fonts dispose* 
-  [ fonts>> >alist dispose-each ]
-  [ library>> FT_Done_FreeType ] bi ;
+  fonts>> >alist dispose-each ;
 
 : <sdfui-fonts> ( -- fonts )
   sdfui-fonts new-disposable
-  0 c:int [ FT_Init_FreeType throw ] ref >>library
-  69 42 <hashcache> >>fonts ;
+  69 42 <hashcache> >>fonts ; ! funni numbers hehee
  
 M: sdfui-fonts at* fonts>> at* ;
 
 M: sdfui-fonts set-at fonts>> set-at ;
 
-:: add-string* ( str size font sdfui-fonts -- font-string ) 
-  sdfui-fonts library>> font 0 0 c:int [ FT_New_Face throw ] ref :> face
-  str size font face <font-string> 
-  [ str size font <font-key> sdfui-fonts set-at ] keep ;
+: add-string* ( string size fonts sdfui-fonts -- font-string ) 
+  [ [ <font-string> dup ] [ <font-key> ] 3bi ] dip set-at ;
 
-: add-string ( string size font sdfui-fonts -- font-string )
+: add-string ( string size fonts sdfui-fonts -- font-string )
   [ 3dup <font-key> ] dip dup swapd
   at dup [ [ 4drop ] dip ] [ drop add-string* ] if ;
 
