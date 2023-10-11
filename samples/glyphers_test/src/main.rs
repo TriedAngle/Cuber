@@ -32,21 +32,36 @@ fn main() {
         let program = gl.create_program().expect("Cannot create program");
 
         let (vertex_shader_source, fragment_shader_source) = (
-            r#"const vec2 verts[3] = vec2[3](
-                vec2(0.5f, 1.0f),
-                vec2(0.0f, 0.0f),
-                vec2(1.0f, 0.0f)
-            );
-            out vec2 vert;
+            r#"#version 460
             void main() {
-                vert = verts[gl_VertexID];
-                gl_Position = vec4(vert - 0.5, 0.0, 1.0);
+              float x = -1.0 + float((gl_VertexID & 1) << 2);
+              float y = -1.0 + float((gl_VertexID & 2) << 1);
+              gl_Position = vec4(x, y, 0.0, 1.0);
             }"#,
-            r#"precision mediump float;
-            in vec2 vert;
-            out vec4 color;
+            r#"#version 460
+            uniform uint text_offset;
+            uniform vec2 text_pos;
+            uniform vec2 text_dim;
+
+            layout(std430, binding = 0) buffer Texts {
+                float texts[];
+            };
+
+            out vec4 FragColor;
+
             void main() {
-                color = vec4(vert, 0.5, 1.0);
+                vec2 text_top_right = text_pos + text_dim;
+                if (gl_FragCoord.x >= text_pos.x && gl_FragCoord.x <= text_top_right.x && gl_FragCoord.y >= text_pos.y && gl_FragCoord.y <= text_top_right.y) {
+                    uint x_index = uint(gl_FragCoord.x - text_pos.x);
+                    uint y_index = uint(text_dim.y - (gl_FragCoord.y - text_pos.y) - 1);
+                    
+                    uint index = text_offset + x_index + y_index * uint(text_dim.x);
+                    
+                    float grayscale = texts[index];
+                    FragColor = vec4(vec3(grayscale), 1.0);
+                } else {
+                    FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+                }
             }"#,
         );
 
@@ -61,7 +76,7 @@ fn main() {
             let shader = gl
                 .create_shader(*shader_type)
                 .expect("Cannot create shader");
-            gl.shader_source(shader, &format!("{}\n{}", shader_version, shader_source));
+            gl.shader_source(shader,  shader_source);
             gl.compile_shader(shader);
             if !gl.get_shader_compile_status(shader) {
                 panic!("{}", gl.get_shader_info_log(shader));
@@ -95,6 +110,15 @@ fn main() {
         }
         img.save("out/merge.png").unwrap();
 
+        let normalized: Vec<f32> = out.iter().map(|&val| val as f32 / 256.0).collect();
+
+        let buffer = gl.create_named_buffer().unwrap();
+        gl.named_buffer_data_u8_slice(buffer, bytemuck::cast_slice(&normalized), glow::DYNAMIC_DRAW);
+
+        let text_offset_loc = gl.get_uniform_location(program, "text_offset").unwrap();
+        let text_pos_loc = gl.get_uniform_location(program, "text_pos").unwrap();
+        let text_dim_loc = gl.get_uniform_location(program, "text_dim").unwrap();
+
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             match event {
@@ -105,10 +129,16 @@ fn main() {
                     window.window().request_redraw();
                 }
                 Event::RedrawRequested(_) => {
-                    gl.clear(glow::COLOR_BUFFER_BIT);
-                    gl.use_program(Some(program));
                     gl.clear_color(0.1, 0.2, 0.3, 1.0);
-                    gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                    
+                    gl.use_program(Some(program));
+                    gl.bind_buffer_base(glow::SHADER_STORAGE_BUFFER, 0, Some(buffer));
+                    gl.uniform_1_u32(Some(&text_offset_loc), 0);
+                    gl.uniform_2_f32(Some(&text_pos_loc), 600.0, 400.0);
+                    gl.uniform_2_f32(Some(&text_dim_loc), width as f32, height as f32);
+                    
+                    gl.draw_arrays(glow::TRIANGLES, 0, 4);
 
                     window.swap_buffers().unwrap();
                 }
