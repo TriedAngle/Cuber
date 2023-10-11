@@ -1,14 +1,13 @@
 use glow::*;
 use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::ControlFlow;
+use glyphers;
 use image::{GrayImage, Luma};
 use liverking::natty;
-use glyphers;
-
 
 fn main() {
     natty! {
-        let (gl, shader_version, window, event_loop) = {
+        let (gl, _shader_version, window, event_loop) = {
             let event_loop = glutin::event_loop::EventLoop::new();
             let window_builder = glutin::window::WindowBuilder::new()
                 .with_title("Hello triangle!")
@@ -54,7 +53,7 @@ fn main() {
                 if (gl_FragCoord.x >= text_pos.x && gl_FragCoord.x <= text_top_right.x && gl_FragCoord.y >= text_pos.y && gl_FragCoord.y <= text_top_right.y) {
                     uint x_index = uint(gl_FragCoord.x - text_pos.x);
                     uint y_index = uint(text_dim.y - (gl_FragCoord.y - text_pos.y) - 1);
-                    
+
                     uint index = text_offset + x_index + y_index * uint(text_dim.x);
                     
                     float grayscale = texts[index];
@@ -131,13 +130,13 @@ fn main() {
                 Event::RedrawRequested(_) => {
                     gl.clear_color(0.1, 0.2, 0.3, 1.0);
                     gl.clear(glow::COLOR_BUFFER_BIT);
-                    
+
                     gl.use_program(Some(program));
                     gl.bind_buffer_base(glow::SHADER_STORAGE_BUFFER, 0, Some(buffer));
                     gl.uniform_1_u32(Some(&text_offset_loc), 0);
                     gl.uniform_2_f32(Some(&text_pos_loc), 600.0, 400.0);
                     gl.uniform_2_f32(Some(&text_dim_loc), width as f32, height as f32);
-                    
+
                     gl.draw_arrays(glow::TRIANGLES, 0, 4);
 
                     window.swap_buffers().unwrap();

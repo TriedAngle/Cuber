@@ -1,11 +1,10 @@
 #!/bin/bash
-cd glyphers_ffi
-cargo build --release
+cargo build --release --package glyphers_ffi
 if [ $? -ne 0 ]; then
     echo "Error: 'cargo build --release' failed."
     exit 1
 fi
-mv target/release/libglyphers.so ../sdfui/glue/libglyphers.so
+cp target/release/libglyphers.so sdfui/glue/libglyphers.so
 if [ $? -ne 0 ]; then
     echo "Error: Failed to move libglyphers.so."
     exit 1

@@ -5,7 +5,10 @@ use std::ffi;
 #[cfg(target_os = "windows")]
 extern "system" {
     fn LoadLibraryA(lpFileName: *const ffi::c_char) -> *mut ffi::c_void;
-    fn GetProcAddress(hModule: *mut ffi::c_void, lpProcName: *const ffi::c_char) -> *mut ffi::c_void;
+    fn GetProcAddress(
+        hModule: *mut ffi::c_void,
+        lpProcName: *const ffi::c_char,
+    ) -> *mut ffi::c_void;
     fn FreeLibrary(hModule: *mut ffi::c_void) -> ffi::c_int;
 }
 
@@ -31,8 +34,8 @@ pub fn steal(place: *mut ffi::c_void, object: *const ffi::c_char) -> *mut ffi::c
 }
 
 pub fn leave(place: *mut ffi::c_void) -> ffi::c_int {
-  #[cfg(target_os = "windows")]
-  return natty!(FreeLibrary(place));
-  #[cfg(any(target_os = "linux", target_os = "macos"))]
-  return natty!(dlclose(place));
+    #[cfg(target_os = "windows")]
+    return natty!(FreeLibrary(place));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return natty!(dlclose(place));
 }

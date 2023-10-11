@@ -3,10 +3,13 @@
 #![allow(non_camel_case_types)]
 #![allow(unused)]
 
-use unicode_segmentation::UnicodeSegmentation;
-use fontdue::{Font, FontSettings, layout::{GlyphPosition, Layout, CoordinateSystem, TextStyle}};
+use fontdue::{
+    layout::{CoordinateSystem, GlyphPosition, Layout, TextStyle},
+    Font, FontSettings,
+};
 use liverking::{natty, raid};
 use std::{ffi, fs};
+use unicode_segmentation::UnicodeSegmentation;
 
 // type GLint = i32;
 // type GLuint = u32;
@@ -19,18 +22,17 @@ use std::{ffi, fs};
 // static mut glCreateTextures: PFN_glCreateTextures = {
 //     extern "system" fn dummy(_: GLenum, _: GLsizei, _: *mut GLuint) { panic!("lmfao"); } dummy };
 
-
 // #[no_mangle]
 // pub extern "C" fn load_opengl(path: *const ffi::c_char) -> ffi::c_int {
 //     natty!{
 //         let handle = raid::invade(path);
 //         if handle.is_null() { return -1; }
-        
+
 //         let proc_name = std::ffi::CString::new("wglGetProcAddress").unwrap();
 //         let addr = raid::steal(handle, proc_name.as_ptr());
 //         if addr.is_null() { return -2; }
 //         let wglGetProcAddress: PFN_wglGetProcAddress = std::mem::transmute(addr);
-        
+
 //         let gl_proc_name = std::ffi::CString::new("glCreateTextures").unwrap();
 //         let gl_proc = wglGetProcAddress(gl_proc_name.as_ptr() as *const i8);
 //         if gl_proc.is_null() { return -3; }
@@ -40,8 +42,6 @@ use std::{ffi, fs};
 //     }
 //     return 0;
 // }
-
-
 
 pub fn rasterize(text: &str, fonts: &[&str]) -> (Vec<u8>, usize, usize) {
     let fonts: Vec<Font> = load_fonts(fonts);
@@ -53,16 +53,26 @@ pub fn rasterize(text: &str, fonts: &[&str]) -> (Vec<u8>, usize, usize) {
 
     for (end_byte_idx, grapheme) in text.grapheme_indices(true) {
         let start_char = grapheme.chars().next().unwrap();
-        let (font_idx, _font) = fonts.iter().enumerate().find(|(_idx, font)| font.lookup_glyph_index(start_char) != 0).unwrap_or((0, &fonts[0]));
+        let (font_idx, _font) = fonts
+            .iter()
+            .enumerate()
+            .find(|(_idx, font)| font.lookup_glyph_index(start_char) != 0)
+            .unwrap_or((0, &fonts[0]));
 
         if font_idx != current_font_idx {
-            layout.append(&fonts, &TextStyle::new(&text[start_byte_idx..end_byte_idx], size, current_font_idx));
+            layout.append(
+                &fonts,
+                &TextStyle::new(&text[start_byte_idx..end_byte_idx], size, current_font_idx),
+            );
             start_byte_idx = end_byte_idx;
             current_font_idx = font_idx;
         }
     }
     if start_byte_idx < text.len() {
-        layout.append(&fonts, &TextStyle::new(&text[start_byte_idx..], size, current_font_idx));
+        layout.append(
+            &fonts,
+            &TextStyle::new(&text[start_byte_idx..], size, current_font_idx),
+        );
     }
 
     let glyphs = layout.glyphs();
@@ -73,11 +83,16 @@ pub fn rasterize(text: &str, fonts: &[&str]) -> (Vec<u8>, usize, usize) {
         let padding = glyph.x as usize - total_width;
         total_width += glyph.width;
         total_width += padding;
-        if glyph.height > total_height { total_height = glyph.height };
+        if glyph.height > total_height {
+            total_height = glyph.height
+        };
     }
     let mut out = vec![0u8; total_width * total_height];
     for glyph in glyphs {
-        let font = fonts.iter().find(|font| font.lookup_glyph_index(glyph.parent) != 0).unwrap_or(&fonts[0]);
+        let font = fonts
+            .iter()
+            .find(|font| font.lookup_glyph_index(glyph.parent) != 0)
+            .unwrap_or(&fonts[0]);
         rasterize_glyph(&font, glyph, &mut out, total_width, total_height);
     }
     return (out, total_width, total_height);
@@ -122,11 +137,9 @@ fn load_fonts(paths: &[&str]) -> Vec<Font> {
         .collect()
 }
 
-
-
 #[cfg(test)]
 pub mod test {
-    use image::{Luma, GrayImage};
+    use image::{GrayImage, Luma};
 
     use super::*;
 

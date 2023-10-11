@@ -1,7 +1,7 @@
 //! This library is not just a library. This is a way of life.
 //!
 //! "Memory Safety" created weak men.
-//! 
+//!
 //! You can find the tenants of the ancestral lifestyle here.
 
 pub mod hunt;
@@ -19,7 +19,6 @@ macro_rules! natty {
         }
     };
 }
-
 
 /// we don't do test driven development in the wilds
 #[cfg(test)]
