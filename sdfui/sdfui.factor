@@ -1,7 +1,8 @@
 USING: accessors alien arrays classes.struct colors combinators
 generalizations kernel math multiline opengl opengl.gl
-opengl.shaders sdfui.fonts sequences specialized-arrays
-specialized-arrays.instances.alien.c-types.float specialized-vectors ;
+opengl.shaders sdfui.fonts sdfui.utils sequences specialized-arrays
+specialized-arrays.instances.alien.c-types.float 
+specialized-arrays.instances.alien.c-types.int specialized-vectors ;
 QUALIFIED-WITH: alien.c-types c
 IN: sdfui
 
@@ -310,7 +311,7 @@ TUPLE: sdfui-ctx
   [ drop <sdfui-cache> ] change-cache drop ;
 
 : sdfui-submid-textdata ( ctx -- )
-  dup cache>> cached-texts>> 0 [ rasta>> rasta>> data>> length + ] reduce
+  dup cache>> cached-texts>> 0 [ rasta>> rasta>> data>> length + 4 round-to ] reduce
   over buffers>> textdata-ssbo>> swap f GL_DYNAMIC_DRAW glNamedBufferData
   [ cache>> ] [ buffers>> ] bi Text-vector{ } clone
   [| cache buffers texts | 
@@ -318,12 +319,12 @@ TUPLE: sdfui-ctx
     cache cached-texts>> [ 
       { [ [ x>> ] [ y>> ] bi ]
         [ rasta>> rasta>> [ width>> ] [ height>> ] bi ]
-        [ drop offset ]
+        [ drop offset 4 round-to ]
         [ color>> ]
         [ rasta>> rasta>> data>> [ length ] keep 
           [ buffers textdata-ssbo>> offset ] 2dip
           glNamedBufferSubData ]
-        [ rasta>> rasta>> data>> length offset + :> offset ]
+        [ rasta>> rasta>> data>> length offset + 4 round-to :> offset ]
       } cleave
       <c:text> texts push
     ] each
