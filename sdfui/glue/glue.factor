@@ -7,8 +7,9 @@ QUALIFIED-WITH: alien.c-types c
 IN: sdfui.glue
 
 << "glyphers" {
-  { [ os windows? ] [ "vocab:sdfui/glue/glyphers.dll" normalize-path ] }
-  { [ drop "other os not implemented yet" throw ] }
+  { [ os windows? ] [ "glyphers.dll" ] }
+  { [ os linux?   ] [ "libglyphers.so" ] }
+  [ drop "other os not implemented yet" throw ]
 } cond cdecl add-library >>
 
 STRUCT: RasterizationResult

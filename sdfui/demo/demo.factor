@@ -15,7 +15,8 @@ DEFER: reset-gl-context
 
 M: demo begin-game-world 
   <sdfui-ctx> >>ui-ctx 
-  dup handle>> hDC>> reset-gl-context
+  dup reset-gl-context 
+  dup set-gl-context
   drop ;
 
 :: handle-tick-input ( world -- )
@@ -28,6 +29,7 @@ M: demo tick-game-world {
 } cleave ;
 
 M: demo draw-world*
+  dup set-gl-context
   dup ui-ctx>> {
     [ sdfui-record ]
     [ 300 500 100 COLOR: red f sdfui>circle ]
@@ -78,8 +80,12 @@ CONSTANT: ERROR_INVALID_PROFILE_ARB               0x2096
   WGL_CONTEXT_PROFILE_MASK_ARB WGL_CONTEXT_CORE_PROFILE_BIT_ARB
 0 ] } ;
 
-: reset-gl-context ( hDC -- )
-  dup 0 wgl-context-attribs-4-6-basic
+: reset-gl-context ( world -- )
+  handle>> 
+  dup hDC>> 0 wgl-context-attribs-4-6-basic
   "wglCreateContextAttribsARB" utf8 string>alien wglGetProcAddress
-  HGLRC { HDC int pointer: int } cdecl alien-indirect
-  wglMakeCurrent drop ;
+  HGLRC { HDC int pointer: int } cdecl alien-indirect ! h hdr
+  f f wglMakeCurrent drop
+  [ dup hRC>> wglDeleteContext drop ] dip ! h hdr
+  [ [ hDC>> ] dip wglMakeCurrent drop ] 2keep
+  >>hRC drop ;

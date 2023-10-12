@@ -319,7 +319,7 @@ TUPLE: sdfui-ctx
     cache cached-texts>> [ 
       { [ [ x>> ] [ y>> ] bi ]
         [ rasta>> rasta>> [ width>> ] [ height>> ] bi ]
-        [ drop offset 4 round-to ]
+        [ drop offset ]
         [ color>> ]
         [ rasta>> rasta>> data>> [ length ] keep 
           [ buffers textdata-ssbo>> offset ] 2dip
