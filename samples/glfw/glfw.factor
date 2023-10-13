@@ -1,4 +1,4 @@
-USING: opengl.gl ;
+USING: kernel opengl.gl ;
 QUALIFIED-WITH: glfw glfw
 IN: samples.glfw
 
@@ -8,9 +8,10 @@ IN: samples.glfw
     { title "meow" }
     { version { 4 6 } } 
   } glfw:new-window
-  [ 0.2 0.3 0.3 1.0 glClearColor
+  [ drop 
+    0.2 0.3 0.3 1.0 glClearColor
     GL_COLOR_BUFFER_BIT glClear
-  ] glfw:run-window
+  ] glfw:run-window drop
 ;
 
 

@@ -1,6 +1,6 @@
 USING: accessors alien.strings arrays classes.tuple
 classes.tuple.parser io.encodings.utf8 kernel lexer literals
-math namespaces sequences slots.syntax strings ;
+math namespaces sequences slots.syntax strings threads ;
 QUALIFIED-WITH: glfw.ffi ffi
 QUALIFIED-WITH: alien.c-types c
 IN: glfw
@@ -68,14 +68,16 @@ TUPLE: window
 : poll-events ( -- ) 
   ffi:glfwPollEvents ;
 
-: run-window ( window quot -- )
-  [ dup set-context ] dip
-  [ [ dup should-close? ] dip swap not ] [ 
-    dup call( -- )
-    [ dup swap-buffers ] dip
-    poll-events
-  ] while drop close
-; inline
+: run-window ( window quot: ( window -- ) -- thread ) 
+  '[ _ _ swap
+    dup set-context
+    [ dup should-close? not ] [
+      2dup swap call( window -- )
+      yield
+      dup swap-buffers
+      poll-events
+    ] while close drop stop
+] "glfw" spawn ;
 
 : parse-window-attributes ( -- attributes ) 
   "{" expect window-attributes dup all-slots parse-tuple-literal-slots ;
@@ -83,21 +85,3 @@ TUPLE: window
 SYNTAX: WINDOW:
   parse-window-attributes new-window suffix! ;
 
-! : main ( -- ) 
-!  glfwInit drop
-!  GLFW_CONTEXT_VERSION_MAJOR 4 glfwWindowHint
-!  GLFW_CONTEXT_VERSION_MINOR 6 glfwWindowHint
-!  GLFW_OPENGL_PROFILE GLFW_OPENGL_CORE_PROFILE glfwWindowHint
-!
-!  800 600 "hello" utf8 string>alien f f glfwCreateWindow
-!  dup glfwMakeContextCurrent
-!  [ dup glfwWindowShouldClose 0 = ] [
-!    0.2 0.3 0.3 1.0 glClearColor
-!    GL_COLOR_BUFFER_BIT glClear
-!
-!    dup glfwSwapBuffers
-!    glfwPollEvents
-!  ] while
-!  glfwDestroyWindow
-!  glfwTerminate
-! ;
