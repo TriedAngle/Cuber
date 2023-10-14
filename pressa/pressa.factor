@@ -39,31 +39,26 @@ TUPLE: input
   { cursor array } ;
 
 : <input> ( -- input ) 
-  V{ } clone 
-  V{ } clone 
-  V{ } clone 
-  { 0.0 0.0 } input boa ;
+  V{ } clone V{ } clone V{ } clone { 0.0 0.0 } input boa ;
 
 : test-input? ( key keys -- ? ) 
   '[ _ dup mod? [ mod<|>keys ] [ dup ] if [ _ in? ] bi@ or ] call ; inline
 
-: pressed? ( key input -- ? ) 
-  pressed>> test-input? ;
+GENERIC#: pressed? 1 ( key(s) input -- ? )
+GENERIC#: active? 1 ( key(s) input -- ? )
 
-: hold? ( key input -- ? )
-  hold>> test-input? ;
+M: object pressed? pressed>> test-input? ;
 
-: released? ( key input -- ? ) 
-  released>> test-input? ;
+: hold? ( key input -- ? ) hold>> test-input? ;
 
-: pressed/hold? ( key input -- ? ) 
-  [ pressed? ] [ hold? ] 2bi or ;
+: released? ( key input -- ? ) released>> test-input? ;
 
-: combo-active? ( keys input -- ? ) 
-  t swap '[ _ pressed/hold? and ] reduce ;
+M: object active? [ pressed? ] [ hold? ] 2bi or ;
 
-: combo-pressed? ( keys input -- ? ) 
-  [ combo-active? ] [ t swap '[ _ hold? and ] reduce not ] 2bi and ;
+M: array active? t swap '[ _ active? and ] reduce ;
+
+M: array pressed?
+  [ active? ] [ t swap '[ _ hold? and ] reduce not ] 2bi and ;
 
 : press>hold ( key input -- ) 
   [ pressed>> delete ] [ 2dup hold? [ 2drop ] [ hold>> push ] if ] 2bi ;
@@ -72,7 +67,7 @@ TUPLE: input
   2dup pressed? [ press>hold ] [ pressed>> push ] if ;
 
 : release ( key input -- )
-  [ 2dup pressed/hold? [ released>> push ] [ 2drop ] if ] 
+  [ 2dup active? [ released>> push ] [ 2drop ] if ] 
   [ [ pressed>> delete ] [ hold>> delete ] 2bi ] 2bi ;
 
 : press-combo ( keys input -- ) '[ _ press ] each ;
