@@ -41,8 +41,8 @@ TUPLE: input
 : <input> ( -- input ) 
   V{ } clone V{ } clone V{ } clone { 0.0 0.0 } input boa ;
 
-: test-input? ( key keys -- ? ) 
-  '[ _ dup mod? [ mod<|>keys ] [ dup ] if [ _ in? ] bi@ or ] call ; inline
+:: test-input? ( key keys -- ? ) 
+  key dup mod? [ mod<|>keys ] [ dup ] if [ keys in? ] bi@ or ; inline
 
 GENERIC#: pressed? 1 ( key(s) input -- ? )
 GENERIC#: active? 1 ( key(s) input -- ? )
@@ -55,9 +55,9 @@ M: object pressed? pressed>> test-input? ;
 
 M: object active? [ pressed? ] [ hold? ] 2bi or ;
 
-M: array active? t swap '[ _ active? and ] reduce ;
+M: sequence active? t swap '[ _ active? and ] reduce ;
 
-M: array pressed?
+M: sequence pressed?
   [ active? ] [ t swap '[ _ hold? and ] reduce not ] 2bi and ;
 
 : press>hold ( key input -- ) 
@@ -73,3 +73,4 @@ M: array pressed?
 : press-combo ( keys input -- ) '[ _ press ] each ;
 
 : clear-released ( input -- ) released>> delete-all ;
+
