@@ -1,76 +1,73 @@
-USING: accessors arrays combinators kernel sequences sets
-vectors ;
+USING: accessors arrays combinators kernel namespaces
+pressa.constants sequences sets vectors ;
 IN: pressa
 
-SYMBOLS:
-  keyUnknown keyEscape keyPrt keyScr KeyPause 
-  keyIns KeyHome keyPgUp keyDel keyEnd keyPgDown
-  keyUp keyDown keyLeft keyRight KeyTab KeyEnter KeyBack
+SYMBOL: pressa
 
-  keyF1 keyF2 keyF3 keyF4  keyF5  keyF6
-  keyF7 keyF8 keyF9 keyF10 keyF11 keyF12
-  keyGrave keyMinus keyEquals 
-  keyLBrack keyRBrack keySemi keyApo keyBSlashL keyBackSlash keyBackSlashL
-  keyComma keyDot keySlash
-  keyLShift keyRShift keyLControl keyRControl keyLAlt keyRAlt 
-  keyWin keySpace keyFn 
-  
-  key0 key1 key2 key3 key4 key5 key6 key7 key8 key9
-  keyA keyB keyC keyD keyE keyF keyG keyH keyI 
-  keyJ keyK keyL keyM keyN keyO keyP keyQ keyR 
-  keyS keyT keyU keyV keyW keyX keyY keyZ
+: pressa* ( -- pressa ) pressa get-global ;
 
-  modControl modShift modAlt modWin
-;
-
-: mod? ( mod -- ? ) { modControl modShift modAlt modWin } in? ;
+: mod? ( mod -- ? ) { modControl modShift modAlt modCommand modCaps modNumlock } in? ;
 
 : mod<|>keys ( mod -- keyL keyR ) { 
   { [ dup modControl = ] [ keyLControl keyRControl ] }
   { [ dup modShift = ] [ keyLShift keyRShift ] }
   { [ dup modAlt = ] [ keyLAlt keyRAlt ] }
-  { [ dup modWin = ] [ keyWin keyWin ] }
+  { [ dup modCommand = ] [ keyLCommand keyRCommand ] }
 } cond nipd ;
 
 TUPLE: input 
+  { mods vector }
   { pressed vector }
   { hold vector }
   { released vector } 
   { cursor array } ;
 
 : <input> ( -- input ) 
-  V{ } clone V{ } clone V{ } clone { 0.0 0.0 } input boa ;
+  V{ } clone V{ } clone V{ } clone V{ } clone { 0.0 0.0 } input boa ;
+
+: setup-pressa ( -- ) 
+  <input> pressa set-global ;
+
+pressa* [ setup-pressa ] unless
 
 :: test-input? ( key keys -- ? ) 
   key dup mod? [ mod<|>keys ] [ dup ] if [ keys in? ] bi@ or ; inline
 
-GENERIC#: pressed? 1 ( key(s) input -- ? )
-GENERIC#: active? 1 ( key(s) input -- ? )
+GENERIC: pressed? ( key(s) -- ? )
+GENERIC: active? ( key(s) -- ? )
 
-M: object pressed? pressed>> test-input? ;
+: set-mods ( seq -- ) pressa* mods<< ;
 
-: hold? ( key input -- ? ) hold>> test-input? ;
+M: object pressed? pressa* pressed>> test-input? ;
 
-: released? ( key input -- ? ) released>> test-input? ;
+: hold? ( key -- ? ) pressa* hold>> test-input? ;
 
-M: object active? [ pressed? ] [ hold? ] 2bi or ;
+: released? ( key -- ? ) pressa* released>> test-input? ;
 
-M: sequence active? t swap '[ _ active? and ] reduce ;
+M: object active? [ pressed? ] [ hold? ] bi or ;
+
+M: sequence active? t [ active? and ] reduce ;
 
 M: sequence pressed?
-  [ active? ] [ t swap '[ _ hold? and ] reduce not ] 2bi and ;
+  [ active? ] [ t [ hold? and ] reduce not ] bi and ;
 
-: press>hold ( key input -- ) 
-  [ pressed>> delete ] [ 2dup hold? [ 2drop ] [ hold>> push ] if ] 2bi ;
+: hold ( key -- ) 
+  [ pressa* pressed>> delete ] 
+  [ dup hold? [ drop ] [ pressa* hold>> push ] if ] bi ;
 
-: press ( key input -- )
-  2dup pressed? [ press>hold ] [ pressed>> push ] if ;
+: press ( key -- )
+  dup active? [ hold ] [ pressa* pressed>> push ] if ;
 
-: release ( key input -- )
-  [ 2dup active? [ released>> push ] [ 2drop ] if ] 
-  [ [ pressed>> delete ] [ hold>> delete ] 2bi ] 2bi ;
+: release ( key -- )
+  [ dup active? [ pressa* released>> push ] [ drop ] if ] 
+  [ pressa* [ pressed>> delete ] [ hold>> delete ] 2bi ] bi ;
 
-: press-combo ( keys input -- ) '[ _ press ] each ;
+: press-combo ( keys -- ) '[ press ] each ;
 
-: clear-released ( input -- ) released>> delete-all ;
+: pressed>hold ( -- ) pressa* [ hold>> ] [ pressed>> ] bi [ append! drop ] keep
+  delete-all ;
+
+: clear-released ( -- ) pressa* released>> delete-all ;
+
+: pressa-flush ( -- ) pressed>hold clear-released ;
 

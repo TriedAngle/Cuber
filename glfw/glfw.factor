@@ -62,16 +62,22 @@ TUPLE: window
 : set-context ( window -- ) 
   underlying>> ffi:glfwMakeContextCurrent ;
 
+: set-should-close ( window ? -- ) 
+  [ underlying>> ] dip [ 1 ] [ 0 ] if ffi:glfwSetWindowShouldClose ;
+
 : swap-buffers ( window -- ) 
   underlying>> ffi:glfwSwapBuffers ;
 
 : poll-events ( -- ) 
   ffi:glfwPollEvents ;
 
+: set-key-callback ( window cb -- ) 
+  [ underlying>> ] dip ffi:glfwSetKeyCallback drop ;
+
 : run-window ( window quot: ( window -- ) -- thread ) 
   '[ _ _ swap
-    dup set-context
     [ dup should-close? not ] [
+      dup set-context
       2dup swap call( window -- )
       yield
       dup swap-buffers
