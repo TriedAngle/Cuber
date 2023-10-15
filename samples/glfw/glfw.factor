@@ -1,6 +1,11 @@
-USING: glfw io kernel namespaces opengl.gl pressa
-pressa.constants pressa.glfw prettyprint ;
+USING: calendar glfw io kernel namespaces opengl.gl pressa
+pressa.constants pressa.glfw prettyprint threads ;
 IN: samples.glfw
+
+! this is sadly required to make it work from terminal / renderdoc
+! TODO: make a macro that runs a quot on main thread
+INITIALIZED-SYMBOL: keep-alive? [ t ]
+: keep-alive?* ( -- ? ) keep-alive? get-global ;
 
 : main ( -- )
   T{ window-attributes
@@ -14,7 +19,7 @@ IN: samples.glfw
   [| window | 
     0.2 0.3 0.3 1.0 glClearColor
     GL_COLOR_BUFFER_BIT glClear
-    ! [ pressa* . ] with-global
+
     keyA pressed? [ [ "A pressed" . ] with-global ] when
     keyB pressed? [ [ "B pressed" . ] with-global ] when
     keyB hold? [ [ "B hold" . ] with-global ] when
@@ -24,6 +29,9 @@ IN: samples.glfw
     keyEscape released? [ window t set-should-close ] when
     pressa-flush
   ] run-window drop
+
+  
+  keep-alive?* [ [ 10 milliseconds sleep windows* ] loop ] when
 ;
 
 

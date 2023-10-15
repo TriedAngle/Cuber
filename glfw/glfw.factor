@@ -6,6 +6,7 @@ QUALIFIED-WITH: alien.c-types c
 IN: glfw
 
 SYMBOL: windows 
+: windows* ( -- windows ) windows get-global ;
 
 : setup-windows? ( -- ? ) 
   windows get-global [ f ] [ V{ } clone windows set-global t ] if ;
@@ -73,6 +74,15 @@ TUPLE: window
 
 : set-key-callback ( window cb -- ) 
   [ underlying>> ] dip ffi:glfwSetKeyCallback drop ;
+
+: run-window-sync ( window quot: ( window -- ) -- window ) 
+  swap [ dup should-close? not ] [
+    dup set-context
+    2dup swap call( window -- )
+    yield
+    dup swap-buffers
+    poll-events
+  ] while nip dup close ;
 
 : run-window ( window quot: ( window -- ) -- thread ) 
   '[ _ _ swap
