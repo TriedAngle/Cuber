@@ -52,7 +52,9 @@ TUPLE: window
   dup slots[ version profile ] set-gl-hints
   dup slots[ dim title monitor share ] 
   [ [ [ first ] [ second ] bi ] dip utf8 string>alien ] 2dip
-  ffi:glfwCreateWindow dup push-window window boa ;
+  ffi:glfwCreateWindow dup push-window 
+  dup ffi:glfwMakeContextCurrent
+  window boa ;
 
 : close ( window -- ) 
   underlying>> dup ffi:glfwDestroyWindow pop-window ?terminate ;
