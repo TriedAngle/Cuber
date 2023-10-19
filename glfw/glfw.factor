@@ -3,7 +3,10 @@ classes.tuple.parser io.encodings.utf8 kernel lexer literals
 math namespaces sequences slots.syntax strings threads ;
 QUALIFIED-WITH: glfw.ffi ffi
 QUALIFIED-WITH: alien.c-types c
+! FROM: ui.private => ui-running ;
 IN: glfw
+
+SYMBOL: ui-running
 
 SYMBOL: windows 
 : windows* ( -- windows ) windows get-global ;
@@ -77,16 +80,16 @@ TUPLE: window
 : set-key-callback ( window cb -- ) 
   [ underlying>> ] dip ffi:glfwSetKeyCallback drop ;
 
-: run-window-sync ( window quot: ( window -- ) -- window ) 
+: run-window-sync ( window quot: ( window -- ) -- )
   swap [ dup should-close? not ] [
     dup set-context
     2dup swap call( window -- )
     yield
     dup swap-buffers
     poll-events
-  ] while nip dup close ;
+  ] while nip close ;
 
-: run-window ( window quot: ( window -- ) -- thread ) 
+: run-window-async ( window quot: ( window -- ) -- ) 
   '[ _ _ swap
     [ dup should-close? not ] [
       dup set-context
@@ -95,7 +98,15 @@ TUPLE: window
       dup swap-buffers
       poll-events
     ] while close drop stop
-] "glfw" spawn ;
+  ] "glfw" spawn drop ;
+
+: run-window ( window quot: ( window -- ) -- )
+  ui-running get-global [
+    run-window-async
+  ] [
+    t ui-running set-global
+    run-window-sync  
+  ] if ;
 
 : parse-window-attributes ( -- attributes ) 
   "{" expect window-attributes dup all-slots parse-tuple-literal-slots ;
