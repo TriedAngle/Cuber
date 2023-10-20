@@ -1,6 +1,7 @@
 const std = @import("std");
+const mem = std.mem;
 
-pub const TypeId = struct {
+pub const TypeId = extern struct {
     value: u32,
 
     pub fn equals(self: TypeId, other: TypeId) bool {
@@ -9,19 +10,24 @@ pub const TypeId = struct {
 };
 
 // Fowler–Noll–Vo hash
-pub fn typeId(comptime T: type) TypeId {
-    const name = @typeName(T);
+pub export fn hash_type(name: [*:0]const u8) TypeId {
     const prime: u32 = 16777619;
     var hash: u32 = 2166136261;
 
-    for (name) |c| {
+    var index: usize = 0;
+    while (name[index] != 0) : (index += 1) {
         hash *%= prime;
-        hash ^= @as(u32, @intCast(c));
+        hash ^= @as(u32, @intCast(name[index]));
     }
 
     return TypeId{
         .value = hash,
     };
+}
+
+pub fn typeId(comptime T: type) TypeId {
+    const name = @typeName(T);
+    return hash_type(name);
 }
 
 test "typeid" {
