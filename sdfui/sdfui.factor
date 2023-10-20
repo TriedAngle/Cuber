@@ -312,7 +312,7 @@ TUPLE: sdfui-ctx
 
 :: sdfui-submid-textdata ( ctx -- )
   ctx cache>> cached-texts>> 
-    0 [ rasta>> rasta>> data>> length 4 round-to + ] reduce :> buffer-size
+    0 [ rasta>> rasta>> data>> length + 4 round-to ] reduce :> buffer-size
   ctx buffers>> textdata-ssbo>> buffer-size f GL_DYNAMIC_DRAW glNamedBufferData
   Text-vector{ } :> texts
   0 :> offset!
