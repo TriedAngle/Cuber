@@ -2,7 +2,7 @@ USING: accessors alien alien.c-types alien.strings alien.syntax
 calendar colors combinators glfw io.encodings.utf8 kernel
 literals namespaces opengl opengl.gl opengl.gl.windows pressa
 pressa.constants pressa.glfw prettyprint sdfui sequences threads
-windows.types ;
+multiline windows.types opengl.shaders ;
 IN: sdfui.demo
 
 : main ( -- )
@@ -31,6 +31,6 @@ IN: sdfui.demo
     } cleave 
     keyEscape released? [  t set-should-close ] when
     pressa-flush
-  ] run-window drop ] call drop ;
+  ] run-window ] call drop ;
 MAIN: main
 

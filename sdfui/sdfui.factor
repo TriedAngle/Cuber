@@ -310,27 +310,26 @@ TUPLE: sdfui-ctx
 : sdfui-record ( ctx -- )
   [ drop <sdfui-cache> ] change-cache drop ;
 
-: sdfui-submid-textdata ( ctx -- )
-  dup cache>> cached-texts>> 0 [ rasta>> rasta>> data>> length + 4 round-to ] reduce
-  over buffers>> textdata-ssbo>> swap f GL_DYNAMIC_DRAW glNamedBufferData
-  [ cache>> ] [ buffers>> ] bi Text-vector{ } clone
-  [| cache buffers texts | 
-    0 :> offset
-    cache cached-texts>> [ 
-      { [ [ x>> ] [ y>> ] bi ]
-        [ rasta>> rasta>> [ width>> ] [ height>> ] bi ]
-        [ drop offset ]
-        [ color>> ]
-        [ rasta>> rasta>> data>> [ length ] keep 
-          [ buffers textdata-ssbo>> offset ] 2dip
+:: sdfui-submid-textdata ( ctx -- )
+  ctx cache>> cached-texts>> 
+    0 [ rasta>> rasta>> data>> length 4 round-to + ] reduce :> buffer-size
+  ctx buffers>> textdata-ssbo>> buffer-size f GL_DYNAMIC_DRAW glNamedBufferData
+  Text-vector{ } :> texts
+  0 :> offset!
+  ctx cache>> cached-texts>> [ 
+    { [ [ x>> ] [ y>> ] bi ]
+      [ rasta>> rasta>> [ width>> ] [ height>> ] bi ]
+      [ drop offset ]
+      [ color>> ]
+      [ rasta>> rasta>> data>> [ length ] keep 
+        [ ctx buffers>> textdata-ssbo>> offset ] 2dip
           glNamedBufferSubData ]
-        [ rasta>> rasta>> data>> length offset + 4 round-to :> offset ]
-      } cleave
+      [ rasta>> rasta>> data>> length offset + 4 round-to offset! ]
+    } cleave
       <c:text> texts push
     ] each
-   buffers texts-ssbo>> texts [ length Text c:heap-size * ] keep 
-   GL_DYNAMIC_COPY glNamedBufferData
-  ] call ; 
+   ctx buffers>> texts-ssbo>> texts [ length Text c:heap-size * ] keep 
+   GL_DYNAMIC_COPY glNamedBufferData ; 
 
 : sdfui-submit-commands ( ctx -- )
   dup sdfui-submid-textdata
