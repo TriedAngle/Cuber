@@ -15,7 +15,7 @@ IN: sdfui.demo
   dup set-pressa-callbacks
   dup <sdfui-ctx>
   [| ctx | [| window | ctx {
-      [ drop COLOR: seagreen gl-clear ]
+     ! [ drop COLOR: seagreen gl-clear ]
       [ sdfui-record ]
       [ 300 500 100 COLOR: red f sdfui>circle ]
       [ 900 300 60 COLOR: blue f sdfui>circle ]
@@ -29,7 +29,7 @@ IN: sdfui.demo
         COLOR: white f sdfui>text ]
       [ sdfui-render ]
     } cleave 
-    keyEscape released? [  t set-should-close ] when
+    keyEscape released? [ window t set-should-close ] when
     pressa-flush
   ] run-window ] call drop ;
 MAIN: main
