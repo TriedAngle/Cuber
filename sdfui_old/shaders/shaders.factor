@@ -1,5 +1,5 @@
-USING: accessors destructors io.encodings.utf8
-io.files kernel opengl.gl opengl.shaders slots.syntax ;
+USING: accessors destructors io io.encodings.utf8 io.files
+kernel opengl.gl opengl.shaders slots.syntax ;
 IN: sdfui.shaders
 
 CONSTANT: vertex-path   "vocab:sdfui/shaders/shader.vert"
@@ -11,10 +11,12 @@ TUPLE: sdfui-shaders < disposable
 
 : <sdfui-shaders> ( -- sdfui-shaders )
   sdfui-shaders new-disposable
-  vertex-path utf8 file-contents >>vertex
-  fragment-path utf8 file-contents >>fragment
-  dup slots[ vertex fragment ] <simple-gl-program>
-  >>program ;
+  vertex-path utf8 [ read-contents ] with-file-reader >>vertex
+  flush
+  ! fragment-path utf8 file-contents >>fragment
+  ! dup slots[ vertex fragment ] <simple-gl-program>
+  ! >>program 
+  ;
 
 M: sdfui-shaders dispose*
   program>> glDeleteProgram ;

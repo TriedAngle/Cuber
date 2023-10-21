@@ -4,3 +4,4 @@
 **/*.so
 **/.idea
 **/.vscode
+**/zig-cache

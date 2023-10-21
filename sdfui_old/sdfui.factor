@@ -1,13 +1,11 @@
 USING: accessors alien arrays classes.struct colors combinators
 generalizations kernel math multiline opengl opengl.gl
-opengl.shaders sdfui.fonts sdfui.utils sequences specialized-arrays
-specialized-arrays.instances.alien.c-types.float 
-specialized-arrays.instances.alien.c-types.int specialized-vectors ;
+opengl.shaders sdfui.fonts sdfui.shaders sdfui.utils sequences 
+specialized-arrays specialized-arrays.instances.alien.c-types.float 
+specialized-arrays.instances.alien.c-types.int specialized-vectors 
+calendar threads ;
 QUALIFIED-WITH: alien.c-types c
 IN: sdfui
-
-! TODO: Add them to Factor
-CONSTANT: GL_SHADER_STORAGE_BUFFER 0x90d2
 
 STRING: sdfui-vertex-shader
 #version 460
@@ -300,8 +298,8 @@ TUPLE: sdfui-ctx
   cache
   buffers ;
 
-: <sdfui-ctx> ( -- ctx ) 
-  sdfui-vertex-shader sdfui-fragment-shader <simple-gl-program> 
+: <sdfui-ctx> ( -- ctx )
+  sdfui-vertex-shader sdfui-fragment-shader <simple-gl-program>
   <sdfui-fonts>
   <sdfui-cache>
   <buffers> 

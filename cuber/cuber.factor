@@ -5,7 +5,7 @@ game.input.scancodes game.loop game.worlds io kernel literals
 math multiline namespaces opengl opengl.gl opengl.shaders
 opengl.textures prettyprint sequences
 specialized-arrays.instances.alien.c-types.float ui
-ui.gadgets.worlds ui.pixel-formats ;
+ui.gadgets.worlds ui.pixel-formats io.files io.encodings.utf8 ;
 IN: cuber
 
 STRING: compute-shader
@@ -94,6 +94,8 @@ TUPLE: cuber < game-world
 
 M: cuber begin-game-world
   compute-shader <compute-program> >>program
+
+  "vocab:sdfui/shaders/shader.vert" utf8 file-contents drop
   vertex-shader fragment-shader <simple-gl-program> >>present-program
 
   create-vertex-array >>vao

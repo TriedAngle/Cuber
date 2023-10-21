@@ -2,10 +2,11 @@ USING: accessors alien alien.c-types alien.strings alien.syntax
 calendar colors combinators glfw io.encodings.utf8 kernel
 literals namespaces opengl opengl.gl opengl.gl.windows pressa
 pressa.constants pressa.glfw prettyprint sdfui sequences threads
-multiline windows.types opengl.shaders ;
+multiline windows.types opengl.shaders io.files ;
 IN: sdfui.demo
 
 : main ( -- )
+  [
   T{ window-attributes 
     { dim { 1280 720 } }
     { title "sdfui demo" }
@@ -13,7 +14,9 @@ IN: sdfui.demo
   } new-window
 
   dup set-pressa-callbacks
+
   dup <sdfui-ctx>
+
   [| ctx | [| window | ctx {
      ! [ drop COLOR: seagreen gl-clear ]
       [ sdfui-record ]
@@ -28,9 +31,11 @@ IN: sdfui.demo
         42 { "comici.ttf" } 
         COLOR: white f sdfui>text ]
       [ sdfui-render ]
-    } cleave 
+    } cleave
     keyEscape released? [ window t set-should-close ] when
     pressa-flush
-  ] run-window ] call drop ;
+    yield
+  ] run-window-sync ] call drop 
+] "lol " spawn drop [ 10 milliseconds sleep t ] loop ;
 MAIN: main
 
