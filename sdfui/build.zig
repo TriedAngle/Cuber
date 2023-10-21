@@ -9,6 +9,11 @@ pub fn build(b: *Builder) void {
         .source_file = std.build.FileSource{ .path = "src/sdfui.zig" },
     });
 
+    const glfw_dep = b.dependency("mach_glfw", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const examples = [_][2][]const u8{
         [_][]const u8{ "basic", "examples/basic.zig" },
     };
@@ -21,16 +26,24 @@ pub fn build(b: *Builder) void {
             .root_source_file = std.build.FileSource{ .path = source },
             .optimize = optimize,
         });
-        exe.addModule("sdfui", sdfui_module);
         exe.linkLibC();
+        exe.addModule("sdfui", sdfui_module);
+        exe.addModule("mach-glfw", glfw_dep.module("mach-glfw"));
+        @import("mach_glfw").link(glfw_dep.builder, exe);
+
+        exe.addModule("gl", b.createModule(.{
+            .source_file = .{ .path = "libs/gl46.zig" },
+        }));
 
         const docs = exe;
         const doc = b.step(b.fmt("{s}-docs", .{name}), "Generate documentation");
         doc.dependOn(&docs.step);
 
         const run_cmd = b.addRunArtifact(exe);
+        b.installArtifact(exe);
         const exe_step = b.step(name, b.fmt("run {s}.zig", .{name}));
         exe_step.dependOn(&run_cmd.step);
+
         if (i == 0) {
             const run_exe_step = b.step("run", b.fmt("run {s}.zig", .{name}));
             run_exe_step.dependOn(&run_cmd.step);

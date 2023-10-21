@@ -1,0 +1,14 @@
+.{
+    .name = "sdfui",
+    .version = "0.0.1",
+    .paths = .{
+        "src",
+        "examples",
+    },
+    .dependencies = .{
+        .mach_glfw = .{
+            .url = "https://pkg.machengine.org/mach-glfw/a13c2b7f6a27e407b6d8686208d96fa654864dec.tar.gz",
+            .hash = "12208da63a18938cf0ac8fe0e9f538b87d796057684f090e15a8c8bbb9326ec8ea21",
+        },
+    },
+}
