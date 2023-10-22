@@ -1,9 +1,9 @@
 .{
-    .name = "sdfui",
+    .name = "cuber",
     .version = "0.0.1",
     .paths = .{
-        "src",
-        "examples",
+        "sdfui",
+        "samples",
     },
     .dependencies = .{
         .mach_glfw = .{
