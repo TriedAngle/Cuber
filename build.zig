@@ -5,8 +5,11 @@ const Builder = std.build.Builder;
 // libraries
 const opengl_path = "libs/gl.zig";
 
+const zgui = @import("libs/zgui/build.zig");
+
 // modules
 const sdfui_path = "sdfui/sdfui.zig";
+const cuber_path = "cuber/cuber.zig";
 
 // examples
 const sdfui_samples = [_][2][]const u8{
@@ -20,27 +23,27 @@ pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const sdfui_module = b.addModule("sdfui", .{
+    const sdfui = b.addModule("sdfui", .{
         .source_file = .{ .path = sdfui_path },
     });
 
-    const glfw_dep = b.dependency("mach_glfw", .{
+    const glfw = b.dependency("mach_glfw", .{
         .target = target,
         .optimize = optimize,
     });
 
-    const opengl_module = b.addModule("gl", .{
+    const opengl = b.addModule("gl", .{
         .source_file = .{ .path = opengl_path },
     });
 
-    build_sdfui(
-        b,
-        optimize,
-        target,
-        sdfui_module,
-        opengl_module,
-        glfw_dep,
-    );
+    // const zgui_pkg = zgui.package(b, target, optimize, .{
+    //     .backend = .glfw
+    // });
+    // _ = zgui_pkg;
+
+    build_sdfui(b, optimize, target, sdfui, opengl, glfw);
+
+    build_cuber(b, optimize, target, sdfui, opengl, glfw);
 }
 
 pub fn executable_name(b: *Builder, module: []const u8, name: []const u8) []const u8 {
@@ -60,7 +63,7 @@ pub fn build_sdfui(
         const source = example[1];
         var exe = b.addExecutable(.{
             .name = executable_name(b, "sdfui", name),
-            .root_source_file = std.build.FileSource{ .path = source },
+            .root_source_file = .{ .path = source },
             .optimize = optimize,
         });
         exe.linkLibC();
@@ -100,4 +103,40 @@ pub fn build_sdfui(
     );
     test_cmd.dependOn(b.getInstallStep());
     test_cmd.dependOn(&b.addRunArtifact(tests).step);
+}
+
+pub fn build_cuber(
+    b: *Builder,
+    optimize: builtin.OptimizeMode,
+    target: std.zig.CrossTarget,
+    sdfui: *std.Build.Module,
+    opengl: *std.Build.Module,
+    glfw: *std.Build.Dependency,
+) void {
+    var exe = b.addExecutable(.{
+        .name = "cuber",
+        .root_source_file = .{ .path = cuber_path },
+        .optimize = optimize,
+        .target = target,
+    });
+    exe.linkLibC();
+    exe.addModule("sdfui", sdfui);
+    exe.addModule("mach-glfw", glfw.module("mach-glfw"));
+    @import("mach_glfw").link(glfw.builder, exe);
+    exe.addModule("gl", opengl);
+
+    const docs = exe;
+    const doc = b.step(
+        "cuber-docs",
+        "Generate documentation",
+    );
+    doc.dependOn(&docs.step);
+
+    const run_cmd = b.addRunArtifact(exe);
+    b.installArtifact(exe);
+    const exe_step = b.step(
+        "cuber",
+        "run cuber",
+    );
+    exe_step.dependOn(&run_cmd.step);
 }
