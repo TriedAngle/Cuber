@@ -1,8 +1,10 @@
 const std = @import("std");
 const sdfui = @import("sdfui");
-
 const glfw = @import("mach-glfw");
 const gl = @import("gl");
+
+const shaders = @import("shaders.zig");
+const textures = @import("textures.zig");
 
 fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
     _ = p;
@@ -13,6 +15,17 @@ fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
     std.log.err("glfw: {}: {s}\n", .{ error_code, description });
 }
 
+const vertex_shader = @embedFile("shaders/shader.vert");
+const fragment_shader = @embedFile("shaders/shader.frag");
+const compute_shader = @embedFile("shaders/shader.comp");
+
+const present_vertices = [_]f32{
+    -1.0, 1.0, 0.0, 0.0, 1.0, //noformat
+    -1.0, -1.0, 0.0, 0.0, 0.0, //noformat
+    1.0, 1.0, 0.0, 1.0, 1.0, //noformat
+    1.0, -1.0, 0.0, 1.0, 0.0, //noformat
+};
+
 pub fn main() !void {
     glfw.setErrorCallback(errorCallback);
     if (!glfw.init(.{})) {
@@ -21,10 +34,10 @@ pub fn main() !void {
     }
     defer glfw.terminate();
 
-    const window = glfw.Window.create(640, 480, "Cuber", null, null, .{
+    const window = glfw.Window.create(1280, 720, "Cuber", null, null, .{
         .opengl_profile = .opengl_core_profile,
         .context_version_major = 4,
-        .context_version_minor = 6,
+        .context_version_minor = 5,
     }) orelse {
         std.log.err("failed to create GLFW window: {?s}", .{glfw.getErrorString()});
         std.process.exit(1);
@@ -35,10 +48,80 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
+    const present_program = shaders.make_simple_program(vertex_shader, fragment_shader);
+    const compute_program = shaders.make_compute_program(compute_shader);
+    defer gl.deleteProgram(present_program);
+    defer gl.deleteProgram(compute_program);
+
+    var vao: u32 = undefined;
+    var vbo: u32 = undefined;
+
+    gl.genVertexArrays(1, &vao);
+    gl.genBuffers(1, &vbo);
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, present_vertices.len * @sizeOf(f32), &present_vertices, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, gl.FALSE, 5 * @sizeOf(f32), @ptrFromInt(0));
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, gl.FALSE, 5 * @sizeOf(f32), @ptrFromInt( 3 * @sizeOf(f32)));
+
+    // gl.createVertexArrays(1, &vao);
+    // defer gl.deleteVertexArrays(1, &[_]u32{vao});
+    // gl.createBuffers(1, &vbo);
+    // defer gl.deleteBuffers(1, &[_]u32{vbo});
+
+    // gl.namedBufferData(vbo, present_vertices.len * @sizeOf(f32), &present_vertices, gl.DYNAMIC_DRAW);
+    // gl.vertexArrayVertexBuffer(vao, 0, vbo, 0, 5 * @sizeOf(f32));
+
+    // gl.enableVertexArrayAttrib(vao, 0);
+    // gl.vertexArrayAttribFormat(vao, 0, 3, gl.FLOAT, gl.FALSE, 0);
+    // gl.vertexArrayAttribBinding(vao, 0, 0);
+
+    // gl.enableVertexArrayAttrib(vao, 1);
+    // gl.vertexArrayAttribFormat(vao, 1, 2, gl.FLOAT, gl.FALSE, 3 * @sizeOf(f32));
+    // gl.vertexArrayAttribBinding(vao, 1, 0);
+
+    // -----------------------------------
+    var texture: u32 = undefined;
+
+    gl.genTextures(1, &texture);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1280, 720, 0, gl.RGBA, gl.FLOAT, null);
+
+    gl.bindImageTexture(0, texture, 0, gl.FALSE, 0, gl.READ_WRITE, gl.RGBA32F);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    const loc = gl.getUniformLocation(present_program, "tex");
+    gl.uniform1i(loc, 0);
+    // -----------------------------------
+
+    // var present_texture = textures.make_present(1280, 720);
+    // defer textures.free(present_texture);
+    // gl.bindImageTexture(0, present_texture, 0, gl.FALSE, 0, gl.READ_WRITE, gl.RGBA32F);
+
     while (!window.shouldClose()) {
-        gl.clearColor(1, 0, 1, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        glfw.pollEvents();
+        gl.useProgram(compute_program);
+        gl.dispatchCompute(1280, 720, 1);
+        gl.memoryBarrier(gl.SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+        gl.clear(gl.DEPTH_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
+
+        gl.useProgram(present_program);
+
+        // gl.bindTextureUnit(0, present_texture);
+
+        gl.bindVertexArray(vao);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.bindVertexArray(0);
         window.swapBuffers();
+        glfw.pollEvents();
     }
 }
