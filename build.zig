@@ -5,8 +5,6 @@ const Builder = std.build.Builder;
 // libraries
 const opengl_path = "libs/gl.zig";
 
-const zgui = @import("libs/zgui/build.zig");
-
 // modules
 const sdfui_path = "sdfui/sdfui.zig";
 const cuber_path = "cuber/cuber.zig";
@@ -23,10 +21,6 @@ pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const sdfui = b.addModule("sdfui", .{
-        .source_file = .{ .path = sdfui_path },
-    });
-
     const glfw = b.dependency("mach_glfw", .{
         .target = target,
         .optimize = optimize,
@@ -36,10 +30,12 @@ pub fn build(b: *Builder) void {
         .source_file = .{ .path = opengl_path },
     });
 
-    // const zgui_pkg = zgui.package(b, target, optimize, .{
-    //     .backend = .glfw
-    // });
-    // _ = zgui_pkg;
+    const sdfui = b.addModule("sdfui", .{
+        .source_file = .{ .path = sdfui_path },
+        .dependencies = &.{
+            .{ .name = "gl", .module = opengl },
+        },
+    });
 
     build_sdfui(b, optimize, target, sdfui, opengl, glfw);
 
@@ -113,6 +109,12 @@ pub fn build_cuber(
     opengl: *std.Build.Module,
     glfw: *std.Build.Dependency,
 ) void {
+    var cflags = [_][]const u8{ "-Wall", "-O3", "-g" };
+
+    var cfiles = [_][]const u8{
+        "libs/microui/src/microui.c",
+    };
+
     var exe = b.addExecutable(.{
         .name = "cuber",
         .root_source_file = .{ .path = cuber_path },
@@ -124,6 +126,11 @@ pub fn build_cuber(
     exe.addModule("mach-glfw", glfw.module("mach-glfw"));
     @import("mach_glfw").link(glfw.builder, exe);
     exe.addModule("gl", opengl);
+    exe.addIncludePath(.{ .path = "libs/" });
+    exe.addCSourceFiles(.{
+        .files = &cfiles,
+        .flags = &cflags,
+    });
 
     const docs = exe;
     const doc = b.step(

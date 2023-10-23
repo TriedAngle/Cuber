@@ -14,6 +14,10 @@ fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
 }
 
 pub fn main() !void {
+    var allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(allocator.deinit() == .ok);
+    const gpa = allocator.allocator();
+
     glfw.setErrorCallback(errorCallback);
     if (!glfw.init(.{})) {
         std.log.err("failed to initialize GLFW: {?s}", .{glfw.getErrorString()});
@@ -35,10 +39,32 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
+    var context = sdfui.Context.init(gpa);
+    defer context.deinit();
+
+    var circle = sdfui.Shape{
+        .position = [_]f32{ 3, 2, 1 },
+        .shape = .{ .Circle = .{ .radius = 10.0 } },
+    };
+    var box = sdfui.Shape{
+        .position = [_]f32{ 3, 2, 1 },
+        .shape = .{ .Box = .{ .width = 20, .height = 10 } },
+    };
+    const tag_circle = read_tag_value(&circle);
+    std.debug.print("circle: {}  tag: {}\n", .{ circle, tag_circle });
+
+    const tag_box = read_tag_value(&box);
+    std.debug.print("box: {}  tag: {}\n", .{ box, tag_box });
+
     while (!window.shouldClose()) {
         gl.clearColor(1, 0, 1, 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
         glfw.pollEvents();
         window.swapBuffers();
     }
+}
+
+fn read_tag_value(ptr: *const sdfui.Shape) u32 {
+    const offset_ptr: *const u32 = @ptrFromInt(@intFromPtr(ptr) + @sizeOf([4]f32));
+    return offset_ptr.*;
 }
