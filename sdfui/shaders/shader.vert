@@ -1,7 +1,11 @@
-#version 460
+#version 430 core
 
-void main() {
-  float x = -1.0 + float((gl_VertexID & 1) << 2);
-  float y = -1.0 + float((gl_VertexID & 2) << 1);
-  gl_Position = vec4(x, y, 0.0, 1.0);
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec2 aTexCoords;
+
+out vec2 TexCoords;
+
+void main ( ) { 
+    TexCoords = aTexCoords;
+    gl_Position = vec4(aPos, 1.0); 
 }

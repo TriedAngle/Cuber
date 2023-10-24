@@ -8,6 +8,7 @@ const opengl_path = "libs/gl.zig";
 // modules
 const sdfui_path = "sdfui/sdfui.zig";
 const cuber_path = "cuber/cuber.zig";
+const glutils_path = "glutils/glutils.zig";
 
 // examples
 const sdfui_samples = [_][2][]const u8{
@@ -30,10 +31,18 @@ pub fn build(b: *Builder) void {
         .source_file = .{ .path = opengl_path },
     });
 
+    const glutils = b.addModule("glutils", .{
+        .source_file = .{ .path = glutils_path },
+        .dependencies = &.{
+            .{ .name = "gl", .module = opengl },
+        },
+    });
+
     const sdfui = b.addModule("sdfui", .{
         .source_file = .{ .path = sdfui_path },
         .dependencies = &.{
             .{ .name = "gl", .module = opengl },
+            .{ .name = "glutils", .module = glutils },
         },
     });
 

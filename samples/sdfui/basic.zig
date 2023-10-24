@@ -43,11 +43,11 @@ pub fn main() !void {
     defer context.deinit();
 
     var circle = sdfui.Shape{
-        .position = [_]f32{ 3, 2, 1 },
+        .position = [_]f32{ 3, 2 },
         .shape = .{ .Circle = .{ .radius = 10.0 } },
     };
     var box = sdfui.Shape{
-        .position = [_]f32{ 3, 2, 1 },
+        .position = [_]f32{ 3, 2 },
         .shape = .{ .Box = .{ .width = 20, .height = 10 } },
     };
     const tag_circle = read_tag_value(&circle);
