@@ -2,9 +2,6 @@
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout (rgba32f, binding = 0) uniform image2D image;
-layout (r32f, binding = 1) uniform image2D sdf;
-
 struct Shape {
     vec2 pos;
     int material_id;
@@ -31,9 +28,6 @@ struct Command {
     int idx;
 };
 
-uniform int command_offset;
-uniform uint command_count;
-
 layout(std430, binding = 0) buffer Commands {
     Command commands[];
 };
@@ -50,6 +44,11 @@ layout(std430, binding = 3) buffer Shapes {
     Shape shapes[];
 };
 
+layout (rgba32f, binding = 0) uniform image2D imagePresent;
+layout (r32f, binding = 1) uniform image2D imageSdf;
+
+uniform int command_offset;
+uniform uint command_count;
 
 uniform ivec2 resolution;
 uniform vec2 cursor;
@@ -59,13 +58,17 @@ void main() {
     float d = 1e10;
     vec2 currentDs = vec2(d, d);
     bool setFirst = true;
+    ivec2 texPos = ivec2(gl_GlobalInvocationID.xy);
 
-    for (int i = 0; i < command_count; i++) {
-        Command c = commands[command_offset + i];
-        switch (c.kind) {
-            case 1:
-                SDFOp op = sdfops[c.idx];
-                break;
-        }
-    };
+    // for (int i = 0; i < command_count; i++) {
+    //     Command c = commands[command_offset + i];
+    //     switch (c.kind) {
+    //         case 1:
+    //             SDFOp op = sdfops[c.idx];
+    //             break;
+    //     }
+    // };
+
+    vec4 color = vec4(1.0, 0.0, 0.2, 1.0);
+    imageStore(imagePresent, texPos, color);
 }

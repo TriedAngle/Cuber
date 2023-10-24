@@ -36,29 +36,42 @@ pub fn main() !void {
     defer window.destroy();
 
     glfw.makeContextCurrent(window);
+
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
-    var context = sdfui.Context.init(gpa);
-    defer context.deinit();
+    var sctx = sdfui.Context.init(gpa);
+    defer sctx.deinit();
 
-    var circle = sdfui.Shape{
-        .position = [_]f32{ 3, 2 },
-        .shape = .{ .Circle = .{ .radius = 10.0 } },
-    };
-    var box = sdfui.Shape{
-        .position = [_]f32{ 3, 2 },
-        .shape = .{ .Box = .{ .width = 20, .height = 10 } },
-    };
-    const tag_circle = read_tag_value(&circle);
-    std.debug.print("circle: {}  tag: {}\n", .{ circle, tag_circle });
+    sctx.resolution = [_]i32{ 1280, 720 };
 
-    const tag_box = read_tag_value(&box);
-    std.debug.print("box: {}  tag: {}\n", .{ box, tag_box });
+    // var circle = sdfui.Shape{
+    //     .position = [_]f32{ 3, 2 },
+    //     .shape = .{ .Circle = .{ .radius = 10.0 } },
+    // };
+    // _ = circle;
+    // var box = sdfui.Shape{
+    //     .position = [_]f32{ 3, 2 },
+    //     .shape = .{ .Box = .{ .width = 20, .height = 10 } },
+    // };
+    // _ = box;
+    // const tag_circle = read_tag_value(&circle);
+    // std.debug.print("circle: {}  tag: {}\n", .{ circle, tag_circle });
+
+    // const tag_box = read_tag_value(&box);
+    // std.debug.print("box: {}  tag: {}\n", .{ box, tag_box });
 
     while (!window.shouldClose()) {
         gl.clearColor(1, 0, 1, 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
+
+        sctx.frame();
+        sctx.record();
+
+        sctx.finish();
+        sctx.render();
+
+        sctx.time += 1;
         glfw.pollEvents();
         window.swapBuffers();
     }
