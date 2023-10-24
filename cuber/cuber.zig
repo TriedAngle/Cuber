@@ -6,9 +6,9 @@ const gl = @import("gl");
 const shaders = @import("shaders.zig");
 const textures = @import("textures.zig");
 
-const c = @cImport({
-    @cInclude("microui/src/microui.h");
-});
+// const c = @cImport({
+//     @cInclude("microui/src/microui.h");
+// });
 
 fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
     _ = p;
@@ -29,18 +29,6 @@ const present_vertices = [_]f32{
     1.0, 1.0, 0.0, 1.0, 1.0, //noformat
     1.0, -1.0, 0.0, 1.0, 0.0, //noformat
 };
-
-fn text_width(font: c.mu_Font, text: [*c]const u8, len: i32) callconv(.C) i32 {
-    _ = len;
-    _ = text;
-    _ = font;
-    return 16;
-}
-
-fn text_height(font: c.mu_Font) callconv(.C) i32 {
-    _ = font;
-    return 18;
-}
 
 pub fn main() !void {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -68,12 +56,6 @@ pub fn main() !void {
     glfw.makeContextCurrent(window);
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
-
-    // var mux = gpa.create(c.mu_Context) catch unreachable;
-    // c.mu_init(mux);
-    // mux.text_width = text_width;
-    // mux.text_height = text_height;
-    // defer gpa.destroy(mux);
 
     const present_program = shaders.make_simple_program(vertex_shader, fragment_shader);
     const compute_program = shaders.make_compute_program(compute_shader);
@@ -120,35 +102,6 @@ pub fn main() !void {
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(0);
         gl.useProgram(0);
-
-        // c.mu_begin(mux);
-        // c.mu_label(mux, "First:");
-        // if (c.mu_button(mux, "Button1") == 1) {
-        //     std.debug.print("Button1 pressed\n", .{});
-        // }
-
-        // c.mu_end(mux);
-
-        // if (c.mu_begin_window(mux, "My Window", c.mu_rect(10, 10, 140, 86)) == 1) {
-        //     // mu_layout_row(ctx, 2, (int[]) { 60, -1 }, 0);
-
-        //     c.mu_label(mux, "First:");
-        //     if (c.mu_button(mux, "Button1") == 1) {
-        //         std.debug.print("Button1 pressed\n", .{});
-        //     }
-
-        //     c.mu_label(mux, "Second:");
-        //     if (c.mu_button(mux, "Button2") == 1) {
-        //         c.mu_open_popup(mux, "My Popup");
-        //     }
-
-        //     if (c.mu_begin_popup(mux, "My Popup") == 1) {
-        //         c.mu_label(mux, "Hello world!");
-        //         c.mu_end_popup(mux);
-        //     }
-
-        //     c.mu_end_window(mux);
-        // }
 
         window.swapBuffers();
         glfw.pollEvents();
