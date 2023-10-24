@@ -198,10 +198,11 @@ const GLResources = struct {
         self.buffers.bind();
     }
 
-    fn reset_textures(self: *Self, width: u32, height: u32) void {
-        gl.deleteTextures(2, &.{ self.compute_texture, self.present_texture });
-        self.compute_texture = textures.make(width, height, gl.R32F);
-        self.present_program = textures.make(width, height, gl.RGBA32F);
+    fn reset_textures(self: *Self, resolution: [2]i32) void {
+        const texs = [_]u32{ self.compute_texture, self.present_texture };
+        gl.deleteTextures(2, &texs);
+        self.present_texture = textures.make(resolution[0], resolution[1], gl.RGBA32F);
+        self.compute_texture = textures.make(resolution[0], resolution[1], gl.R32F);
     }
 
     fn bind_compute_uniforms(
@@ -220,7 +221,6 @@ const GLResources = struct {
         gl.programUniform2i(comp, cu.resolution, resolution[0], resolution[1]);
         gl.programUniform2f(comp, cu.cursor, cursor[0], cursor[1]);
         gl.programUniform1f(comp, cu.time, time);
-
         gl.bindImageTexture(
             0,
             self.present_texture,
@@ -228,7 +228,7 @@ const GLResources = struct {
             gl.FALSE,
             0,
             gl.READ_WRITE,
-            gl.RGBA16F,
+            gl.RGBA32F,
         );
 
         gl.bindImageTexture(
@@ -238,7 +238,7 @@ const GLResources = struct {
             gl.FALSE,
             0,
             gl.READ_WRITE,
-            gl.R16F,
+            gl.R32F,
         );
     }
 
@@ -249,7 +249,7 @@ const GLResources = struct {
         gl.programUniform1i(prep, pu.present_texture, 0);
     }
 
-    fn bind_vao(self: *Self) void {
+    fn draw_vao(self: *Self) void {
         gl.vertexArrayVertexBuffer(self.vao, 0, self.vbo, 0, 5 * @sizeOf(f32));
         gl.bindVertexArray(self.vao);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -341,6 +341,11 @@ pub const Context = struct {
         self.resources.deinit();
     }
 
+    pub fn update_resolution(self: *Self, resolution: [2]i32) void {
+        self.resolution = resolution;
+        self.resources.reset_textures(resolution);
+    }
+
     pub fn frame(self: *Self) void {
         for (self.last_records.items) |*item| {
             item.deinit();
@@ -374,7 +379,6 @@ pub const Context = struct {
         var resources = &self.resources;
 
         resources.bind_buffers();
-
         gl.useProgram(resources.compute_program);
         resources.bind_compute_uniforms(
             &self.counters,
@@ -382,6 +386,7 @@ pub const Context = struct {
             self.cursor,
             self.time,
         );
+
         gl.dispatchCompute(
             @intCast(self.resolution[0]),
             @intCast(self.resolution[1]),
@@ -390,9 +395,11 @@ pub const Context = struct {
         gl.memoryBarrier(gl.SHADER_IMAGE_ACCESS_BARRIER_BIT);
         gl.useProgram(0);
 
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+
         gl.useProgram(resources.present_program);
         resources.bind_present_uniforms();
-        resources.bind_vao();
+        resources.draw_vao();
         gl.bindVertexArray(0);
         gl.useProgram(0);
     }

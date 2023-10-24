@@ -43,7 +43,7 @@ pub fn main() !void {
     var sctx = sdfui.Context.init(gpa);
     defer sctx.deinit();
 
-    sctx.resolution = [_]i32{ 1280, 720 };
+    sctx.update_resolution([_]i32{ 1280, 720 });
 
     // var circle = sdfui.Shape{
     //     .position = [_]f32{ 3, 2 },
