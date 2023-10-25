@@ -45,22 +45,6 @@ pub fn main() !void {
 
     sctx.update_resolution([_]i32{ 1280, 720 });
 
-    // var circle = sdfui.Shape{
-    //     .position = [_]f32{ 3, 2 },
-    //     .shape = .{ .Circle = .{ .radius = 10.0 } },
-    // };
-    // _ = circle;
-    // var box = sdfui.Shape{
-    //     .position = [_]f32{ 3, 2 },
-    //     .shape = .{ .Box = .{ .width = 20, .height = 10 } },
-    // };
-    // _ = box;
-    // const tag_circle = read_tag_value(&circle);
-    // std.debug.print("circle: {}  tag: {}\n", .{ circle, tag_circle });
-
-    // const tag_box = read_tag_value(&box);
-    // std.debug.print("box: {}  tag: {}\n", .{ box, tag_box });
-
     while (!window.shouldClose()) {
         gl.clearColor(1, 0, 1, 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
@@ -69,21 +53,23 @@ pub fn main() !void {
         sctx.record();
 
         sctx.record_shape(.{
-            .position = [_]f32{ 600, 400 },
+            .x = 600,
+            .y = 400,
+            .material = sctx.material(.{ .Color = .{ .r = 1 } }),
             .shape = .{ .Circle = .{ .radius = 30.0 } },
         });
 
+        sctx.record_sdfop(.{ .kind = .Min });
+
         sctx.record_shape(.{
-            .position = [_]f32{ 700, 300 },
+            .x = 700,
+            .y = 300,
+            .material = sctx.material(.{ .Color = .{ .b = 1, .g = 1 } }),
             .shape = .{ .Box = .{ .width = 60.0, .height = 30.0 } },
         });
 
-        sctx.record_sdfop(.{.kind = 1});
-
-        // sctx.record_shape(.{
-        //     .position = [_]f32{ 600, 400 },
-        //     .shape = .{ .Circle = .{ .radius = 30.0 } },
-        // });
+        sctx.record_sdfop(.{ .kind = .Min });
+        sctx.draw();
 
         sctx.finish();
         sctx.render();

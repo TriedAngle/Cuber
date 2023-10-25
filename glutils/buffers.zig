@@ -43,9 +43,9 @@ pub fn resize(
         new_buffer,
         0,
         0,
-        current * @sizeOf(T),
+        @intCast(current * @sizeOf(T)),
     );
-    gl.deleteBuffers(1, buffer);
+    // gl.deleteBuffers(1, buffer);
     return new_buffer;
 }
 

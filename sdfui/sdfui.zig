@@ -16,33 +16,35 @@ const present_vertices = [_]f32{
     1.0, -1.0, 0.0, 1.0, 0.0, //noformat
 };
 
-pub const Circle = struct { radius: f32, padding: [3]f32 = [3]f32{ 0, 0, 0 } };
+pub const Circle = packed struct { tag: u32 = 1, radius: f32, padding: u96 = 0 };
 
-pub const Box = struct { width: f32, height: f32, padding: [2]f32 = [2]f32{ 0, 0 } };
+pub const Box = packed struct { tag: u32 = 2, width: f32, height: f32, padding: u64 = 0 };
 
-pub const Shape = struct {
-    position: [2]f32,
+pub const Shape = packed struct {
+    x: f32,
+    y: f32,
     material: u32 = 0,
-    shape: union(enum(u32)) {
-        EmptyShape: struct { data: [4]f32 = [_]f32{ 0, 0, 0, 0 } }, // basically for "debugging" so 0 tag is this
+    shape: packed union {
+        EmptyShape: packed struct { tag: u32 = 0, padding: u128 = 0 },
         Circle: Circle,
         Box: Box,
     },
 };
 
-pub const Material = struct {
-    kind: u32,
-    data: [3]f32,
-    color: [4]f32,
+// 32 bytes
+pub const Material = packed union {
+    Color: packed struct { tag: u32 = 1, r: f32 = 0, g: f32 = 0, b: f32 = 0, a: f32 = 1, padding: i96 = 0 },
 };
 
-// kinds:
-// 1: min | min(d1, d2) -> d1
-// 2: max | max(d1, d2) -> d1
-// 3: smin | smin(d1, d2) -> d1
-// 4: smax | smax(d1, d2) -> d1
+pub const SDFKind = enum(u32) {
+    Min = 1,
+    Max,
+    SmoothMin,
+    SmoothMax,
+};
+
 pub const SDFOp = struct {
-    kind: i32,
+    kind: SDFKind,
     padding: i32 = 0,
     data0: f32 = 0,
     data1: f32 = 0,
@@ -56,7 +58,7 @@ pub const SDFOp = struct {
 // 5: draw
 pub const Command = struct {
     const Self = @This();
-    kind: i32,
+    kind: u32,
     idx: i32,
     data1: i32 = 0,
     data2: i32 = 0,
@@ -92,9 +94,8 @@ pub const Command = struct {
         return .{ .kind = 4, .idx = idx, .data1 = reg };
     }
 
-    // 1: d1, 2: d2
-    pub fn draw(idx: i32, reg: i32) Self {
-        return .{ .kind = 5, .idx = idx, .data1 = reg };
+    pub fn draw() Self {
+        return .{ .kind = 5, .idx = 0 };
     }
 };
 
@@ -114,12 +115,13 @@ const GLBuffers = struct {
     fn init() Self {
         var buffers: [4]u32 = undefined;
         gl.createBuffers(4, &buffers);
+        glu.buffers.reset(buffers[1], Material, 8, gl.DYNAMIC_COPY);
         return Self{
             .commands = buffers[0],
             .materials = buffers[1],
             .sdfops = buffers[2],
             .shapes = buffers[3],
-            .sizes = .{},
+            .sizes = .{ .materials = 10 },
         };
     }
 
@@ -169,7 +171,9 @@ const GLResources = struct {
         time: i32,
     };
     const PresentUniforms = struct {
+        compute_texture: i32,
         present_texture: i32,
+        weight_texture: i32,
     };
 
     buffers: GLBuffers,
@@ -179,6 +183,7 @@ const GLResources = struct {
     present_program: u32,
     compute_texture: u32 = 0,
     present_texture: u32 = 0,
+    weight_texture: u32 = 0,
     compute_uniforms: ComputeUniforms,
     present_uniforms: PresentUniforms,
 
@@ -210,9 +215,7 @@ const GLResources = struct {
             .time = glu.uniform_location(compute_program, "time"),
         };
 
-        const present_uniforms = .{
-            .present_texture = glu.uniform_location(present_program, "tex"),
-        };
+        const present_uniforms = .{ .compute_texture = glu.uniform_location(present_program, "sdf"), .present_texture = glu.uniform_location(present_program, "present"), .weight_texture = glu.uniform_location(present_program, "weights") };
 
         const buffers = GLBuffers.init();
 
@@ -243,8 +246,9 @@ const GLResources = struct {
     fn reset_textures(self: *Self, resolution: [2]i32) void {
         const texs = [_]u32{ self.compute_texture, self.present_texture };
         gl.deleteTextures(2, &texs);
-        self.present_texture = textures.make(resolution[0], resolution[1], gl.RGBA32F);
         self.compute_texture = textures.make(resolution[0], resolution[1], gl.R32F);
+        self.present_texture = textures.make(resolution[0], resolution[1], gl.RGBA32F);
+        self.weight_texture = textures.make(resolution[0], resolution[1], gl.R32F);
     }
 
     fn set_buffers(self: *Self, recorders: []const Recorder, maxs: Offsets) void {
@@ -278,32 +282,22 @@ const GLResources = struct {
         gl.programUniform2i(comp, cu.resolution, resolution[0], resolution[1]);
         gl.programUniform2f(comp, cu.cursor, cursor[0], cursor[1]);
         gl.programUniform1f(comp, cu.time, time);
-        gl.bindImageTexture(
-            0,
-            self.present_texture,
-            0,
-            gl.FALSE,
-            0,
-            gl.READ_WRITE,
-            gl.RGBA32F,
-        );
-
-        gl.bindImageTexture(
-            1,
-            self.compute_texture,
-            0,
-            gl.FALSE,
-            0,
-            gl.READ_WRITE,
-            gl.R32F,
-        );
+        gl.bindImageTexture(0, self.compute_texture, 0, gl.FALSE, 0, gl.READ_WRITE, gl.R32F);
+        gl.bindImageTexture(1, self.present_texture, 0, gl.FALSE, 0, gl.READ_WRITE, gl.RGBA32F);
+        gl.bindImageTexture(2, self.weight_texture, 0, gl.FALSE, 0, gl.READ_WRITE, gl.R32F);
     }
 
     fn bind_present_uniforms(self: *Self) void {
         const pu = &self.present_uniforms;
         const prep = self.present_program;
-        gl.bindTextureUnit(0, self.present_texture);
-        gl.programUniform1i(prep, pu.present_texture, 0);
+        gl.bindTextureUnit(0, self.compute_texture);
+        gl.programUniform1i(prep, pu.compute_texture, 0);
+
+        gl.bindTextureUnit(1, self.present_texture);
+        gl.programUniform1i(prep, pu.present_texture, 1);
+
+        gl.bindTextureUnit(2, self.weight_texture);
+        gl.programUniform1i(prep, pu.weight_texture, 2);
     }
 
     fn draw_vao(self: *Self) void {
@@ -347,9 +341,13 @@ const Recorder = struct {
 
     fn add_shape(self: *Self, shape: Shape, id: usize) void {
         self.shapes.append(shape) catch unreachable;
-        const reg: usize = id % 2 + 1;
+        const reg: usize = 2;
         const command = Command.shape(@intCast(id), @intCast(reg));
         self.commands.append(command) catch unreachable;
+    }
+
+    fn add_draw(self: *Self) void {
+        self.commands.append(Command.draw()) catch unreachable;
     }
 };
 
@@ -364,6 +362,8 @@ pub const Context = struct {
     const Self = @This();
     allocator: mem.Allocator,
     resources: GLResources,
+    materials: std.AutoHashMap(u256, u32),
+    material_count: u32 = 0,
     last_records: std.ArrayList(Recorder),
     recorders: std.ArrayList(Recorder),
     active: ?Recorder = null,
@@ -376,8 +376,10 @@ pub const Context = struct {
     pub fn init(allocator: mem.Allocator) Self {
         const resources = GLResources.init();
         const recorders = std.ArrayList(Recorder).init(allocator);
+        const materials = std.AutoHashMap(u256, u32).init(allocator);
         return Self{
             .resources = resources,
+            .materials = materials,
             .allocator = allocator,
             .last_records = recorders.clone() catch unreachable,
             .recorders = recorders,
@@ -397,7 +399,7 @@ pub const Context = struct {
         if (self.active) |*item| {
             item.deinit();
         }
-
+        self.materials.deinit();
         self.resources.deinit();
     }
 
@@ -467,5 +469,22 @@ pub const Context = struct {
         self.active.?.add_shape(shape, self.counters.shapes);
         self.counters.shapes += 1;
         self.counters.commands += 1;
+    }
+
+    pub fn draw(self: *Self) void {
+        self.active.?.add_draw();
+        self.counters.commands += 1;
+    }
+
+    pub fn material(self: *Self, mat: Material) u32 {
+        const roflmao: u256 = @bitCast(mat);
+        if (self.materials.get(roflmao)) |id| {
+            return id;
+        }
+        const id = self.material_count;
+        self.materials.put(roflmao, id) catch unreachable;
+        self.resources.buffers.set_material(mat, id);
+        self.material_count += 1;
+        return id;
     }
 };

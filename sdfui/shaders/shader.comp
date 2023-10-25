@@ -1,4 +1,4 @@
-#version 430
+#version 450
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
@@ -6,26 +6,25 @@ layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 struct Shape {
     vec2 pos;
     int material_id;
-    int tag;
+    uint tag;
     vec4 data;
 };
 
 struct Material {
-    int kind;
-    vec3 data;
-    vec4 color;
+    uint kind;
+    float data[7];
 };
 
 
 struct SDFOp {
-    int kind;
+    uint kind;
     int padding;
     vec2 dat;
     vec4 data;
 };
 // 4*4 = 16
 struct Command {
-    int kind;
+    uint kind;
     int idx;
     int data1;
     int data2;
@@ -47,8 +46,9 @@ layout(std430, binding = 3) buffer Shapes {
     Shape shapes[];
 };
 
-layout (rgba32f, binding = 0) uniform image2D imagePresent;
-layout (r32f, binding = 1) uniform image2D sdf;
+layout (r32f, binding = 0) uniform image2D sdf;
+layout (rgba32f, binding = 1) uniform image2D imagePresent;
+layout (r32f, binding = 2) uniform image2D colorWeights;
 
 uniform int command_offset;
 uniform uint command_count;
@@ -82,12 +82,20 @@ void main() {
     ivec2 texPos = ivec2(gl_GlobalInvocationID.xy);
     vec2 pos = vec2(gl_GlobalInvocationID.xy);
 
+    imageStore(sdf, texPos, vec4(1e10));
+
     float reg1 = 1e10;
     float reg2 = 1e10;
     float tmp = 0.0;
 
-    Shape s1; Shape s2; Shape st;
-    SDFOp sdfop; 
+    vec4 bgColor = vec4(0.0, 0.0, 0.0, 0.0);
+    vec4 color = vec4(0.0);
+    vec4 tmpColor = vec4(0.0);
+    float weight = 0.0;
+
+    Shape st;
+    SDFOp sdfop;
+    Material material;
 
     for (int i = 0; i < command_count; i++) {
         Command c = commands[command_offset + i];
@@ -121,23 +129,31 @@ void main() {
             }
             break;
         case 4:
-            if (c.data1 == 1) { s1 = shapes[c.idx]; st = s1; } else { s2 = shapes[c.idx]; st = s2; }
+            st = shapes[c.idx];
             switch (st.tag) {
             case 1: tmp = sdCircle(pos, st.pos, st.data.x); break;
             case 2: tmp = sdBox(pos, st.pos, st.data.xy); break;
             }
-            if (c.data1 == 1) { reg1 = tmp; } else { reg2 = tmp; }
+            reg2 = tmp;
+            material = materials[st.material_id];
+            switch (material.kind) {
+            case 1:
+                float md[7] = material.data;
+                tmpColor = vec4(md[0], md[1], md[2], md[3]); 
+                float w = 1.0 / (1.0 + exp(10.0 * tmp));
+                weight += w;
+                color += w * tmpColor;
+                break;
+            }
             break;
-        default:
+        case 5:
+            if (weight > 0.0) {
+                color /= weight;
+            };
+            imageStore(sdf, texPos, vec4(reg1));
+            imageStore(imagePresent, texPos, color);
+            imageStore(colorWeights, texPos, vec4(weight));
             break;
         }
     };
-    vec4 color;
-    if (reg1 <= 0.0) {
-        color = vec4(0.9, 0.15, 0.4, 1.0);
-    } else {
-        color = vec4(0.0, 0.0, 0.0, 1.0);
-    }
-    
-    imageStore(imagePresent, texPos, color);
 }
