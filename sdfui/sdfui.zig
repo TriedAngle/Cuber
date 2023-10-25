@@ -24,6 +24,7 @@ pub const Shape = struct {
     position: [2]f32,
     material: u32 = 0,
     shape: union(enum(u32)) {
+        EmptyShape: struct { data: [4]f32 = [_]f32{ 0, 0, 0, 0 } }, // basically for "debugging" so 0 tag is this
         Circle: Circle,
         Box: Box,
     },
@@ -35,24 +36,65 @@ pub const Material = struct {
     color: [4]f32,
 };
 
+// kinds:
+// 1: min | min(d1, d2) -> d1
+// 2: max | max(d1, d2) -> d1
+// 3: smin | smin(d1, d2) -> d1
+// 4: smax | smax(d1, d2) -> d1
 pub const SDFOp = struct {
     kind: i32,
-    padding: i32,
-    dat: [2]f32,
-    data: [4]f32,
+    padding: i32 = 0,
+    data0: f32 = 0,
+    data1: f32 = 0,
+    data: [4]f32 = [_]f32{ 0, 0, 0, 0 },
 };
 
+// 1: mov
+// 2: math
+// 3: sdfop
+// 4: shape
+// 5: draw
 pub const Command = struct {
     const Self = @This();
     kind: i32,
     idx: i32,
+    data1: i32 = 0,
+    data2: i32 = 0,
 
-    pub fn sdfop(idx: i32) Self {
+    // 1: d1->sdf
+    // 2: d2->sdf
+    // 3: sdf->d1
+    // 4: sdf->d2
+    // 5: d1<->d2
+    pub fn mov(idx: i32) Self {
         return .{ .kind = 1, .idx = idx };
     }
 
-    pub fn shape(idx: i32) Self {
-        return .{ .kind = 2, .idx = idx };
+    // 1 + 2: neg  | -d      -> d
+    // 3 + 4: sqrt | sqrt d  -> d
+    // 5 + 6: exp  | exp d   -> d
+    // 7 + 8: ln   | ln d    -> d
+    // 9:     +    | d1 + d2 -> d1
+    // 10:    -    | d1 - d2 -> d1
+    pub fn math(idx: i32) Self {
+        return .{
+            .kind = 2,
+            .idx = idx,
+        };
+    }
+
+    pub fn sdfop(idx: i32) Self {
+        return .{ .kind = 3, .idx = idx };
+    }
+
+    // 1: d1, 2: d2
+    pub fn shape(idx: i32, reg: i32) Self {
+        return .{ .kind = 4, .idx = idx, .data1 = reg };
+    }
+
+    // 1: d1, 2: d2
+    pub fn draw(idx: i32, reg: i32) Self {
+        return .{ .kind = 5, .idx = idx, .data1 = reg };
     }
 };
 
@@ -64,8 +106,8 @@ const GLBuffers = struct {
     shapes: u32,
     sizes: struct {
         commands: usize = 0,
-        sdfops: usize = 0,
         materials: usize = 0,
+        sdfops: usize = 0,
         shapes: usize = 0,
     } = .{},
 
@@ -74,8 +116,8 @@ const GLBuffers = struct {
         gl.createBuffers(4, &buffers);
         return Self{
             .commands = buffers[0],
-            .sdfops = buffers[1],
-            .materials = buffers[2],
+            .materials = buffers[1],
+            .sdfops = buffers[2],
             .shapes = buffers[3],
             .sizes = .{},
         };
@@ -87,10 +129,10 @@ const GLBuffers = struct {
     }
 
     fn bind(self: *Self) void {
-        const buffers = [_]u32{ self.commands, self.sdfops, self.materials, self.shapes };
-        for (buffers, 0..) |buffer, i| {
-            gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, @intCast(i), buffer);
-        }
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, self.commands);
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 1, self.materials);
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 2, self.sdfops);
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 3, self.shapes);
     }
 
     fn set_material(self: *Self, material: Material, id: usize) void {
@@ -111,9 +153,9 @@ const GLBuffers = struct {
 
     fn reset_dynamic_buffers(self: *Self, commands: usize, sdfops: usize, shapes: usize) void {
         self.sizes = .{ .commands = commands, .sdfops = sdfops, .shapes = shapes };
-        glu.buffers.reset(self.commands, Command, commands, gl.DYNAMIC_DRAW);
-        glu.buffers.reset(self.sdfops, SDFOp, sdfops, gl.DYNAMIC_DRAW);
-        glu.buffers.reset(self.shapes, Shape, shapes, gl.DYNAMIC_DRAW);
+        glu.buffers.reset(self.commands, Command, commands, gl.DYNAMIC_COPY);
+        glu.buffers.reset(self.sdfops, SDFOp, sdfops, gl.DYNAMIC_COPY);
+        glu.buffers.reset(self.shapes, Shape, shapes, gl.DYNAMIC_COPY);
     }
 };
 
@@ -205,6 +247,21 @@ const GLResources = struct {
         self.compute_texture = textures.make(resolution[0], resolution[1], gl.R32F);
     }
 
+    fn set_buffers(self: *Self, recorders: []const Recorder, maxs: Offsets) void {
+        var bufs = &self.buffers;
+        bufs.reset_dynamic_buffers(maxs.commands, maxs.sdfops, maxs.shapes);
+        var offsets: Offsets = .{};
+
+        for (recorders) |*rec| {
+            glu.buffers.write(bufs.commands, Command, offsets.commands, rec.commands.items);
+            glu.buffers.write(bufs.sdfops, SDFOp, offsets.sdfops, rec.sdfops.items);
+            glu.buffers.write(bufs.shapes, Shape, offsets.shapes, rec.shapes.items);
+            offsets.commands += rec.commands.items.len;
+            offsets.sdfops += rec.sdfops.items.len;
+            offsets.shapes += rec.shapes.items.len;
+        }
+    }
+
     fn bind_compute_uniforms(
         self: *Self,
         counters: *const Offsets,
@@ -279,17 +336,20 @@ const Recorder = struct {
 
     fn deinit(self: *Self) void {
         self.commands.deinit();
+        self.sdfops.deinit();
         self.shapes.deinit();
     }
 
-    fn add_sdfop(self: *Self, op: SDFOp, id: u32) void {
-        self.sdfops.append(op);
-        self.commands.append(Command.sdfop(id));
+    fn add_sdfop(self: *Self, op: SDFOp, id: usize) void {
+        self.sdfops.append(op) catch unreachable;
+        self.commands.append(Command.sdfop(@intCast(id))) catch unreachable;
     }
 
-    fn add_shape(self: *Self, shape: Shape, id: u32) void {
-        self.shapes.append(shape);
-        self.commands.append(Command.shape(id));
+    fn add_shape(self: *Self, shape: Shape, id: usize) void {
+        self.shapes.append(shape) catch unreachable;
+        const reg: usize = id % 2 + 1;
+        const command = Command.shape(@intCast(id), @intCast(reg));
+        self.commands.append(command) catch unreachable;
     }
 };
 
@@ -358,26 +418,9 @@ pub const Context = struct {
         self.counters = .{};
     }
 
-    fn set_buffers(self: *Self) void {
-        var buffers = &self.resources.buffers;
-        const sizes = self.counters;
-        buffers.reset_dynamic_buffers(sizes.commands, sizes.sdfops, sizes.shapes);
-        var offsets: Offsets = .{};
-
-        for (self.recorders.items) |*rec| {
-            glu.buffers.write(buffers.commands, Command, offsets.commands, rec.commands.items);
-            glu.buffers.write(buffers.commands, SDFOp, offsets.sdfops, rec.sdfops.items);
-            glu.buffers.write(buffers.commands, Shape, offsets.shapes, rec.shapes.items);
-            offsets.commands += rec.commands.items.len;
-            offsets.sdfops += rec.sdfops.items.len;
-            offsets.shapes += rec.shapes.items.len;
-        }
-    }
-
     pub fn render(self: *Self) void {
-        self.set_buffers();
         var resources = &self.resources;
-
+        resources.set_buffers(self.recorders.items, self.counters);
         resources.bind_buffers();
         gl.useProgram(resources.compute_program);
         resources.bind_compute_uniforms(
@@ -411,18 +454,18 @@ pub const Context = struct {
     pub fn finish(self: *Self) void {
         self.recorders.append(self.active.?) catch unreachable;
         self.active = null;
-        self.record_counter +%= 1;
+        self.record_counter += 1;
     }
 
     pub fn record_sdfop(self: *Self, op: SDFOp) void {
         self.active.?.add_sdfop(op, self.counters.sdfops);
-        self.counters.sdfops +%= 1;
-        self.counters.commands +%= 1;
+        self.counters.sdfops += 1;
+        self.counters.commands += 1;
     }
 
     pub fn record_shape(self: *Self, shape: Shape) void {
         self.active.?.add_shape(shape, self.counters.shapes);
-        self.counters.shapes +%= 1;
-        self.counters.commands +%= 1;
+        self.counters.shapes += 1;
+        self.counters.commands += 1;
     }
 };

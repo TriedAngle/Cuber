@@ -25,7 +25,7 @@ pub fn main() !void {
     }
     defer glfw.terminate();
 
-    const window = glfw.Window.create(640, 480, "sdfui", null, null, .{
+    const window = glfw.Window.create(1280, 720, "sdfui", null, null, .{
         .opengl_profile = .opengl_core_profile,
         .context_version_major = 4,
         .context_version_minor = 6,
@@ -67,6 +67,23 @@ pub fn main() !void {
 
         sctx.frame();
         sctx.record();
+
+        sctx.record_shape(.{
+            .position = [_]f32{ 600, 400 },
+            .shape = .{ .Circle = .{ .radius = 30.0 } },
+        });
+
+        sctx.record_shape(.{
+            .position = [_]f32{ 700, 300 },
+            .shape = .{ .Box = .{ .width = 60.0, .height = 30.0 } },
+        });
+
+        sctx.record_sdfop(.{.kind = 1});
+
+        // sctx.record_shape(.{
+        //     .position = [_]f32{ 600, 400 },
+        //     .shape = .{ .Circle = .{ .radius = 30.0 } },
+        // });
 
         sctx.finish();
         sctx.render();

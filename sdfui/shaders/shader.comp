@@ -2,6 +2,7 @@
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
+// 2*4 + 4 + 4 + 4*4 = 32
 struct Shape {
     vec2 pos;
     int material_id;
@@ -22,22 +23,24 @@ struct SDFOp {
     vec2 dat;
     vec4 data;
 };
-
+// 4*4 = 16
 struct Command {
     int kind;
     int idx;
+    int data1;
+    int data2;
 };
 
 layout(std430, binding = 0) buffer Commands {
     Command commands[];
 };
 
-layout(std430, binding = 1) buffer SDFOps {
-    SDFOp sdfops[];
+layout(std430, binding = 1) buffer Materials {
+    Material materials[];
 };
 
-layout(std430, binding = 2) buffer Materials {
-    Material materials[];
+layout(std430, binding = 2) buffer SDFOps {
+    SDFOp sdfops[];
 };
 
 layout(std430, binding = 3) buffer Shapes {
@@ -45,7 +48,7 @@ layout(std430, binding = 3) buffer Shapes {
 };
 
 layout (rgba32f, binding = 0) uniform image2D imagePresent;
-layout (r32f, binding = 1) uniform image2D imageSdf;
+layout (r32f, binding = 1) uniform image2D sdf;
 
 uniform int command_offset;
 uniform uint command_count;
@@ -54,22 +57,87 @@ uniform ivec2 resolution;
 uniform vec2 cursor;
 uniform float time;
 
+// primitives
+float sdCircle(vec2 p, vec2 c, float r) {
+    return length(p - c) - r;
+}
+
+float sdBox(vec2 p, vec2 c, vec2 size) {
+    vec2 d = abs(p - c) - size;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+// unions
+float smoothMax(float a, float b, float k) {
+  return log(exp(k * a) + exp(k * b)) / k;
+}
+
+float smoothMin(float a, float b, float k) {
+  return -smoothMax(-a, -b, k);
+}
+
+
+// TODO: scaling
 void main() {
-    float d = 1e10;
-    vec2 currentDs = vec2(d, d);
-    bool setFirst = true;
     ivec2 texPos = ivec2(gl_GlobalInvocationID.xy);
+    vec2 pos = vec2(gl_GlobalInvocationID.xy);
 
-    // for (int i = 0; i < command_count; i++) {
-    //     Command c = commands[command_offset + i];
-    //     switch (c.kind) {
-    //         case 1:
-    //             SDFOp op = sdfops[c.idx];
-    //             break;
-    //     }
-    // };
+    float reg1 = 1e10;
+    float reg2 = 1e10;
+    float tmp = 0.0;
 
-    vec4 color = vec4(0.9, 0.15, 0.4, 1.0);
+    Shape s1; Shape s2; Shape st;
+    SDFOp sdfop; 
+
+    for (int i = 0; i < command_count; i++) {
+        Command c = commands[command_offset + i];
+        switch (c.kind) {
+        case 1: // mov instruction
+            switch (c.idx) {
+            case 1: imageStore(sdf, texPos, vec4(reg1)); break;
+            case 2: imageStore(sdf, texPos, vec4(reg2)); break;
+            case 3: reg1 = imageLoad(sdf, texPos).r; break;
+            case 4: reg2 = imageLoad(sdf, texPos).r; break;
+            case 5: tmp = reg1; reg1 = reg2; reg2 = tmp; break;
+            }
+            break;
+        case 2:
+            switch (c.idx) {
+            case 1: reg1 = -reg1; break;        case 2: reg1 = -reg2; break;
+            case 3: reg1 = sqrt(reg1); break;   case 4: reg2 = sqrt(reg2); break;
+            case 5: reg1 = exp(reg1); break;    case 6: reg2 = exp(reg2); break;
+            case 7: reg1 = log(reg1); break;    case 8: reg2 = log(reg2); break;
+            case 9: reg1 = reg1 + reg2; break;
+            case 10: reg1 = reg1 - reg2; break;
+            }
+            break;
+        case 3:
+            sdfop = sdfops[c.idx];
+            switch (sdfop.kind) {
+            case 1: reg1 = min(reg1, reg2); break;
+            case 2: reg1 = max(reg1, reg2); break;
+            case 3: reg1 = smoothMin(reg1, reg2, sdfop.dat.x); break;
+            case 4: reg1 = smoothMax(reg1, reg2, sdfop.dat.x); break;
+            }
+            break;
+        case 4:
+            if (c.data1 == 1) { s1 = shapes[c.idx]; st = s1; } else { s2 = shapes[c.idx]; st = s2; }
+            switch (st.tag) {
+            case 1: tmp = sdCircle(pos, st.pos, st.data.x); break;
+            case 2: tmp = sdBox(pos, st.pos, st.data.xy); break;
+            }
+            if (c.data1 == 1) { reg1 = tmp; } else { reg2 = tmp; }
+            break;
+        default:
+            break;
+        }
+    };
+    vec4 color;
+    if (reg1 <= 0.0) {
+        color = vec4(0.9, 0.15, 0.4, 1.0);
+    } else {
+        color = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    
     imageStore(imagePresent, texPos, color);
-    imageStore(imageSdf, texPos, vec4(0.8));
 }
