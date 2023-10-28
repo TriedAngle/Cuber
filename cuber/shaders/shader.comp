@@ -17,7 +17,7 @@ float sdBox( vec3 p, vec3 b ) {
 }
 	
 bool getVoxel(ivec3 c) {
-	// vec3 p = vec3(c) + vec3(0.5);
+	// vec3 p = vec3(0.0, 0.0, 0.0)
     vec3 p = vec3(0.0, 0.0, 0.0) - c;
     float d = 1e10;
 	d = min(d, max(-sdSphere(p, 23.5), sdBox(p, vec3(20.0))));
@@ -33,7 +33,7 @@ void main ( ) {
 	vec3 cameraPlaneV = vec3(0.0, 1.0, 0.0);
 
     vec3 rayDir = cameraDir + screenPos.x * cameraPlaneU + screenPos.y * cameraPlaneV;
-    vec3 rayPos = vec3(0.0, 0.0, 10.0);
+    vec3 rayPos = vec3(0.0, 0.0, 0.0);
 
     rayPos /= gridScale;
 

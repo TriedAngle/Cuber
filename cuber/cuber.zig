@@ -3,6 +3,8 @@ const sdfui = @import("sdfui");
 const glfw = @import("mach-glfw");
 const gl = @import("gl");
 
+const m = @import("math");
+const cam = @import("camera.zig");
 const shaders = @import("shaders.zig");
 const textures = @import("textures.zig");
 
@@ -87,6 +89,9 @@ pub fn main() !void {
 
     const loc = gl.getUniformLocation(present_program, "tex");
     gl.uniform1i(loc, 0);
+
+    var camera = cam.Camera.new(m.vec3(0, 0, 0), m.vec3(0, 1, 0));
+    _ = camera;
 
     while (!window.shouldClose()) {
         gl.bindTextureUnit(0, present_texture);
