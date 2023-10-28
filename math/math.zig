@@ -340,12 +340,17 @@ pub const Mat4 = struct {
     }
 };
 
+comptime {
+    _ = @import("std").math;
+}
+
 pub const vec2 = Vec2.new;
 pub const vec3 = Vec3.new;
 pub const vec4 = Vec4.new;
 pub const mat2 = Mat2.new;
 pub const mat3 = Mat3.new;
 pub const mat4 = Mat4.new;
+pub const look_at = Mat4.look_at;
 
 test "vectors" {
     const v1 = vec3(1, 2, 3);
@@ -396,7 +401,7 @@ test "matrices" {
         vec3(95, -18, -12),
     )));
 }
-
+//*
 test "lookAt" {
     const eye = vec3(4, 5, 6);
     const center = vec3(7, 8, 9);

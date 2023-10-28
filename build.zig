@@ -9,6 +9,7 @@ const opengl_path = "libs/gl.zig";
 const sdfui_path = "sdfui/sdfui.zig";
 const cuber_path = "cuber/cuber.zig";
 const glutils_path = "glutils/glutils.zig";
+const math_path = "math/math.zig";
 
 // examples
 const sdfui_samples = [_][2][]const u8{
@@ -38,17 +39,22 @@ pub fn build(b: *Builder) void {
         },
     });
 
+    const math = b.addModule("math", .{
+        .source_file = .{ .path = math_path },
+    });
+
     const sdfui = b.addModule("sdfui", .{
         .source_file = .{ .path = sdfui_path },
         .dependencies = &.{
             .{ .name = "gl", .module = opengl },
             .{ .name = "glutils", .module = glutils },
+            .{ .name = "math", .module = math },
         },
     });
 
     build_sdfui(b, optimize, target, sdfui, opengl, glfw);
 
-    build_cuber(b, optimize, target, sdfui, opengl, glfw);
+    build_cuber(b, optimize, target, sdfui, opengl, glfw, math);
 }
 
 pub fn executable_name(b: *Builder, module: []const u8, name: []const u8) []const u8 {
@@ -117,6 +123,7 @@ pub fn build_cuber(
     sdfui: *std.Build.Module,
     opengl: *std.Build.Module,
     glfw: *std.Build.Dependency,
+    math: *std.Build.Module,
 ) void {
     var cflags = [_][]const u8{ "-Wall", "-O3", "-g" };
 
@@ -135,6 +142,7 @@ pub fn build_cuber(
     exe.addModule("mach-glfw", glfw.module("mach-glfw"));
     @import("mach_glfw").link(glfw.builder, exe);
     exe.addModule("gl", opengl);
+    exe.addModule("math", math);
     exe.addIncludePath(.{ .path = "libs/" });
     exe.addCSourceFiles(.{
         .files = &cfiles,

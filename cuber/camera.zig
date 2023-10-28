@@ -37,11 +37,12 @@ pub const Camera = struct {
     }
 
     pub fn update(self: *Self) void {
-        self.front = m.vec3(
+        const front = m.vec3(
             math.cos(math.degreesToRadians(f32, self.yaw)) * math.cos(math.degreesToRadians(f32, self.pitch)),
             math.sin(math.degreesToRadians(f32, self.pitch)),
             math.sin(math.degreesToRadians(f32, self.yaw)) * math.cos(math.degreesToRadians(f32, self.pitch)),
-        ).normalize();
+        );
+        self.front = front.normalize();
         self.right = self.front.cross(self.world_up).normalize();
         self.up = self.right.cross(self.front).normalize();
     }
