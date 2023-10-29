@@ -109,7 +109,7 @@ fn implVector(comptime Self: type, comptime n: comptime_int) type {
     };
 }
 
-pub const Vec2 = struct {
+pub const Vec2 = extern struct {
     const Self = @This();
     inner: [1][2]f32,
     pub usingnamespace implMatrix(Self, 2, 1);
@@ -139,7 +139,7 @@ pub const Vec2 = struct {
     }
 };
 
-pub const Vec3 = struct {
+pub const Vec3 = extern struct {
     const Self = @This();
     inner: [1][3]f32,
     pub usingnamespace implMatrix(Self, 3, 1);
@@ -184,7 +184,7 @@ pub const Vec3 = struct {
     }
 };
 
-pub const Vec4 = struct {
+pub const Vec4 = extern struct {
     const Self = @This();
     inner: [1][4]f32,
     pub usingnamespace implMatrix(Self, 4, 1);
@@ -230,7 +230,7 @@ pub const Vec4 = struct {
     }
 };
 
-pub const Mat2 = struct {
+pub const Mat2 = extern struct {
     const Self = @This();
     inner: [2][2]f32, // [column][row] / [n][m]
     pub usingnamespace implMatrix(Self, 2, 2);
@@ -259,7 +259,7 @@ pub const Mat2 = struct {
     }
 };
 
-pub const Mat3 = struct {
+pub const Mat3 = extern struct {
     const Self = @This();
     inner: [3][3]f32, // [column][row] / [n][m]
     pub usingnamespace implMatrix(Self, 3, 3);
@@ -291,7 +291,7 @@ pub const Mat3 = struct {
     }
 };
 
-pub const Mat4 = struct {
+pub const Mat4 = extern struct {
     const Self = @This();
     inner: [4][4]f32, // [column][row] / [n][m]
     pub usingnamespace implMatrix(Self, 4, 4);
@@ -319,6 +319,19 @@ pub const Mat4 = struct {
             vec4(v.gx(), v.gy(), v.gz(), -v.dot(eye)),
             vec4(0, 0, 0, 1),
         );
+    }
+
+    pub fn perspective(fovy: f32, aspect_ratio: f32, z_near: f32, z_far: f32) Self {
+        var result = Self.identity();
+        const f = 1 / @tan(std.math.degreesToRadians(f32, fovy) * 0.5);
+
+        result.inner[0][0] = f / aspect_ratio;
+        result.inner[1][1] = f;
+        result.inner[2][2] = (z_near + z_far) / (z_near - z_far);
+        result.inner[2][3] = -1;
+        result.inner[3][2] = 2 * z_far * z_near / (z_near - z_far);
+        result.inner[3][3] = 0;
+        return result;
     }
 
     /// construction via rows for mental
@@ -351,6 +364,7 @@ pub const mat2 = Mat2.new;
 pub const mat3 = Mat3.new;
 pub const mat4 = Mat4.new;
 pub const look_at = Mat4.look_at;
+pub const perspective = Mat4.perspective;
 
 test "vectors" {
     const v1 = vec3(1, 2, 3);

@@ -1,6 +1,48 @@
 const std = @import("std");
 const gl = @import("gl");
 
+pub const Buffer = struct {
+    const Self = @This();
+    handle: gl.GLuint = 0,
+    t_size: usize,
+    size: usize = 0,
+    usage: u32,
+
+    pub fn new(comptime T: type, usage: u32) Self {
+        var self = Self{ .t_size = @sizeOf(T), .usage = usage };
+        gl.createBuffers(1, &self.handle);
+        return self;
+    }
+
+    pub fn new_sized(comptime T: type, size: usize, usage: u32) Self {
+        var self = Self.new(T, usage);
+        gl.namedBufferData(self.handle, size * self.t_size, null, self.usage);
+        self.resize(size);
+        return self;
+    }
+
+    pub fn new_data(comptime T: type, data: []const T, usage: u32) Self {
+        var self = Self.new(T, usage);
+        self.reset(data);
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        gl.deleteBuffers(1, &[_]u32{self.handle});
+    }
+
+    pub fn resize(self: *Self, size: usize) void {
+        self.size = size;
+        gl.namedBufferData(self.handle, size * self.size, null, self.usage);
+    }
+
+    pub fn reset(self: *Self, data: anytype) void {
+        self.size = data.len;
+        gl.namedBufferData(self.handle, data.len * self.t_size, data.ptr, self.usage);
+    }
+};
+
+// TODO: remove the functions
 pub fn reset(buffer: u32, comptime T: type, size: usize, usage: u32) void {
     gl.namedBufferData(buffer, @intCast(size * @sizeOf(T)), null, usage);
 }
