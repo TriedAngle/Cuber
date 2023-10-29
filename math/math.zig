@@ -112,8 +112,8 @@ fn implVector(comptime Self: type, comptime n: comptime_int) type {
 pub const Vec2 = struct {
     const Self = @This();
     inner: [1][2]f32,
-    usingnamespace implMatrix(Self, 2, 1);
-    usingnamespace implVector(Self, 2);
+    pub usingnamespace implMatrix(Self, 2, 1);
+    pub usingnamespace implVector(Self, 2);
 
     pub fn new(x: f32, y: f32) Self {
         return .{ .inner = .{.{ x, y }} };
@@ -142,8 +142,8 @@ pub const Vec2 = struct {
 pub const Vec3 = struct {
     const Self = @This();
     inner: [1][3]f32,
-    usingnamespace implMatrix(Self, 3, 1);
-    usingnamespace implVector(Self, 3);
+    pub usingnamespace implMatrix(Self, 3, 1);
+    pub usingnamespace implVector(Self, 3);
 
     pub fn new(x: f32, y: f32, z: f32) Self {
         return .{ .inner = .{.{ x, y, z }} };
@@ -187,8 +187,8 @@ pub const Vec3 = struct {
 pub const Vec4 = struct {
     const Self = @This();
     inner: [1][4]f32,
-    usingnamespace implMatrix(Self, 4, 1);
-    usingnamespace implVector(Self, 4);
+    pub usingnamespace implMatrix(Self, 4, 1);
+    pub usingnamespace implVector(Self, 4);
 
     pub fn new(x: f32, y: f32, z: f32, w: f32) Self {
         return .{ .inner = .{.{ x, y, z, w }} };
@@ -233,8 +233,8 @@ pub const Vec4 = struct {
 pub const Mat2 = struct {
     const Self = @This();
     inner: [2][2]f32, // [column][row] / [n][m]
-    usingnamespace implMatrix(Self, 2, 2);
-    usingnamespace implSquareMatrix(Self, 2);
+    pub usingnamespace implMatrix(Self, 2, 2);
+    pub usingnamespace implSquareMatrix(Self, 2);
 
     pub fn new(r0: Vec2, r1: Vec2) Self {
         return Self.new_raw(.{
@@ -262,8 +262,8 @@ pub const Mat2 = struct {
 pub const Mat3 = struct {
     const Self = @This();
     inner: [3][3]f32, // [column][row] / [n][m]
-    usingnamespace implMatrix(Self, 3, 3);
-    usingnamespace implSquareMatrix(Self, 3);
+    pub usingnamespace implMatrix(Self, 3, 3);
+    pub usingnamespace implSquareMatrix(Self, 3);
 
     pub fn new(r0: Vec3, r1: Vec3, r2: Vec3) Self {
         return Self.new_raw(.{
@@ -294,8 +294,8 @@ pub const Mat3 = struct {
 pub const Mat4 = struct {
     const Self = @This();
     inner: [4][4]f32, // [column][row] / [n][m]
-    usingnamespace implMatrix(Self, 4, 4);
-    usingnamespace implSquareMatrix(Self, 4);
+    pub usingnamespace implMatrix(Self, 4, 4);
+    pub usingnamespace implSquareMatrix(Self, 4);
 
     pub fn format(a: Self, comptime _: []const u8, _: std.fmt.FormatOptions, stream: anytype) !void {
         const r0 = a.row(0);
