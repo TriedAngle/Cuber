@@ -18,12 +18,16 @@ pub const Camera = struct {
     front: m.Vec3 = m.vec3(0, 0, -1),
     up: m.Vec3 = m.vec3(0, 1, 0),
     right: m.Vec3 = m.vec3(1, 0, 0),
+    width: f32 = 0,
+    height: f32 = 0,
     world_up: m.Vec3,
     yaw: f32 = yaw,
     pitch: f32 = pitch,
     speed: f32 = speed,
     sensitivity: f32 = sensitivity,
     zoom: f32 = zoom,
+    z_near: f32 = 0.1,
+    z_far: f32 = 100.0,
 
     pub fn new(position: m.Vec3, up: m.Vec3) Self {
         var self = Camera{ .position = position, .world_up = up };
@@ -31,8 +35,11 @@ pub const Camera = struct {
         return self;
     }
 
-    pub fn matrix(self: *Self) m.Mat4 {
-        m.Mat4.look_at(self.position, self.position.add(self.front), self.up);
+    pub fn matrix(self: *Self) struct { view: m.Mat4, projection: m.Mat4 } {
+        return .{
+            .view = m.look_at(self.position, self.position.add(self.front), self.up),
+            .projection = m.perspective(self.zoom, self.width / self.height, self.z_near, self.z_far),
+        };
     }
 
     pub fn update_direction(self: *Self, directions: Directions, time: f32) void {
@@ -67,6 +74,11 @@ pub const Camera = struct {
 
     pub fn change_zoom(self: *Self, value: f32) void {
         self.zoom -= value;
+    }
+
+    pub fn update_resolution(self: *Self, width: u32, height: u32) void {
+        self.width = @floatFromInt(width);
+        self.height = @floatFromInt(height);
     }
 
     pub fn update(self: *Self) void {

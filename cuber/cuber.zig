@@ -2,6 +2,7 @@ const std = @import("std");
 const sdfui = @import("sdfui");
 const glfw = @import("mach-glfw");
 const gl = @import("gl");
+const glu = @import("glutils");
 
 const m = @import("math");
 const cam = @import("camera.zig");
@@ -36,7 +37,6 @@ pub fn main() !void {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(allocator.deinit() == .ok);
     const gpa = allocator.allocator();
-    _ = gpa;
 
     glfw.setErrorCallback(errorCallback);
     if (!glfw.init(.{})) {
@@ -59,10 +59,10 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
-    const present_program = shaders.make_simple_program(vertex_shader, fragment_shader);
-    const compute_program = shaders.make_compute_program(compute_shader);
-    defer gl.deleteProgram(present_program);
-    defer gl.deleteProgram(compute_program);
+    var present = glu.Program.new_simple(gpa, vertex_shader, fragment_shader);
+    var compute = glu.Program.new_compute(gpa, compute_shader);
+    defer present.deinit();
+    defer compute.deinit();
 
     var vao: u32 = undefined;
     var vbo: u32 = undefined;
@@ -83,30 +83,32 @@ pub fn main() !void {
     gl.vertexArrayAttribFormat(vao, 1, 2, gl.FLOAT, gl.FALSE, 3 * @sizeOf(f32));
     gl.vertexArrayAttribBinding(vao, 1, 0);
 
-    var present_texture = textures.make_present(1280, 720);
-    defer textures.free(present_texture);
-    gl.bindImageTexture(0, present_texture, 0, gl.FALSE, 0, gl.READ_WRITE, gl.RGBA32F);
-
-    const loc = gl.getUniformLocation(present_program, "tex");
-    gl.uniform1i(loc, 0);
+    var present_texture = glu.Texture.new(1280, 720, gl.TEXTURE_2D, gl.RGBA32F, 1);
+    defer present_texture.deinit();
 
     var camera = cam.Camera.new(m.vec3(0, 0, 0), m.vec3(0, 1, 0));
-    _ = camera;
+    camera.update_resolution(1280, 720);
 
     while (!window.shouldClose()) {
-        gl.bindTextureUnit(0, present_texture);
-        gl.useProgram(compute_program);
-        gl.dispatchCompute(1280, 720, 1);
+        present_texture.bind(0, 0, 0);
+        present.uniform("tex", *glu.Texture, &present_texture);
+
+        const matrix = camera.matrix();
+        compute.uniform("viewMatrix", m.Mat4, matrix.view);
+        compute.uniform("projectionMatrix", m.Mat4, matrix.projection);
+
+        compute.use();
+        compute.dispatch(1280, 720, 1);
         gl.memoryBarrier(gl.SHADER_IMAGE_ACCESS_BARRIER_BIT);
-        gl.useProgram(0);
+        compute.unuse();
 
         gl.clear(gl.DEPTH_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
 
-        gl.useProgram(present_program);
+        present.use();
         gl.bindVertexArray(vao);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(0);
-        gl.useProgram(0);
+        present.unuse();
 
         window.swapBuffers();
         glfw.pollEvents();

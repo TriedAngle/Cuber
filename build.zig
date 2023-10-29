@@ -32,15 +32,16 @@ pub fn build(b: *Builder) void {
         .source_file = .{ .path = opengl_path },
     });
 
+    const math = b.addModule("math", .{
+        .source_file = .{ .path = math_path },
+    });
+
     const glutils = b.addModule("glutils", .{
         .source_file = .{ .path = glutils_path },
         .dependencies = &.{
             .{ .name = "gl", .module = opengl },
+            .{ .name = "math", .module = math },
         },
-    });
-
-    const math = b.addModule("math", .{
-        .source_file = .{ .path = math_path },
     });
 
     const sdfui = b.addModule("sdfui", .{
@@ -54,7 +55,7 @@ pub fn build(b: *Builder) void {
 
     build_sdfui(b, optimize, target, sdfui, opengl, glfw);
 
-    build_cuber(b, optimize, target, sdfui, opengl, glfw, math);
+    build_cuber(b, optimize, target, sdfui, opengl, glfw, math, glutils);
 }
 
 pub fn executable_name(b: *Builder, module: []const u8, name: []const u8) []const u8 {
@@ -124,6 +125,7 @@ pub fn build_cuber(
     opengl: *std.Build.Module,
     glfw: *std.Build.Dependency,
     math: *std.Build.Module,
+    glutils: *std.Build.Module,
 ) void {
     var cflags = [_][]const u8{ "-Wall", "-O3", "-g" };
 
@@ -143,6 +145,7 @@ pub fn build_cuber(
     @import("mach_glfw").link(glfw.builder, exe);
     exe.addModule("gl", opengl);
     exe.addModule("math", math);
+    exe.addModule("glutils", glutils);
     exe.addIncludePath(.{ .path = "libs/" });
     exe.addCSourceFiles(.{
         .files = &cfiles,
