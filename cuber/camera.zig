@@ -8,14 +8,14 @@ const speed: f32 = 2.5;
 const sensitivity: f32 = 0.1;
 const zoom: f32 = 45.0;
 
-pub const Direction = enum { Front, Back, Left, Right };
+pub const Direction = enum { Front, Back, Left, Right, Up, Down };
 pub const Directions = std.EnumSet(Direction);
 
 pub const Camera = struct {
     const Self = @This();
 
     position: m.Vec3 = m.vec3(0, 0, 0),
-    front: m.Vec3 = m.vec3(0, 0, -1),
+    front: m.Vec3 = m.vec3(1, 0, 0),
     up: m.Vec3 = m.vec3(0, 1, 0),
     right: m.Vec3 = m.vec3(1, 0, 0),
     width: f32 = 0,
@@ -24,6 +24,9 @@ pub const Camera = struct {
     yaw: f32 = yaw,
     pitch: f32 = pitch,
     speed: f32 = speed,
+    last_cursor_x: f32 = 0,
+    last_cursor_y: f32 = 0,
+    first_enter: bool = true,
     sensitivity: f32 = sensitivity,
     zoom: f32 = zoom,
     z_near: f32 = 0.1,
@@ -42,25 +45,39 @@ pub const Camera = struct {
         };
     }
 
-    pub fn update_direction(self: *Self, directions: Directions, time: f32) void {
+    // pub fn info(self: *Self) struct { pos: m.Vec3, dir: m.Vec3, right: m.Vec3, up: m.Vec3 } {
+    //     return .{
+    //         .pos = self.position,
+    //         .dir = self.front,
+    //         .
+    //     };
+    // }
+
+    pub fn update_direction(self: *Self, direction: Direction, time: f32) void {
         const velocity = self.speed * time;
-        if (directions.contains(Direction.Front)) {
-            self.position += self.front * velocity;
+        if (direction == .Front) {
+            self.position = self.position.add(self.front.scale(velocity));
         }
-        if (directions.contains(Direction.Front)) {
-            self.position -= self.front * velocity;
+        if (direction == .Back) {
+            self.position = self.position.sub(self.front.scale(velocity));
         }
-        if (directions.contains(Direction.Front)) {
-            self.position -= self.right * velocity;
+        if (direction == .Left) {
+            self.position = self.position.sub(self.right.scale(velocity));
         }
-        if (directions.contains(Direction.Front)) {
-            self.position += self.right * velocity;
+        if (direction == .Right) {
+            self.position = self.position.add(self.right.scale(velocity));
+        }
+        if (direction == .Up) {
+            self.position = self.position.add(self.up.scale(velocity));
+        }
+        if (direction == .Down) {
+            self.position = self.position.sub(self.up.scale(velocity));
         }
     }
 
-    pub fn update_rotation(self: *Self, x: f32, y: f32) void {
-        x *= self.sensitivity;
-        y *= self.sensitivity;
+    pub fn update_rotation(self: *Self, x_in: f32, y_in: f32) void {
+        const x = x_in * self.sensitivity;
+        const y = y_in * self.sensitivity;
         self.yaw += x;
         self.pitch += y;
         if (self.pitch > 89.5) {

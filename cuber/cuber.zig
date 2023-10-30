@@ -45,7 +45,7 @@ pub fn main() !void {
     }
     defer glfw.terminate();
 
-    const window = glfw.Window.create(1280, 720, "Cuber", null, null, .{
+    var window = glfw.Window.create(1280, 720, "Cuber", null, null, .{
         .opengl_profile = .opengl_core_profile,
         .context_version_major = 4,
         .context_version_minor = 5,
@@ -87,17 +87,32 @@ pub fn main() !void {
     defer present_texture.deinit();
 
     var camera = cam.Camera.new(m.vec3(0, 0, 0), m.vec3(0, 1, 0));
-    camera.update_resolution(1280, 720);
+    var delta_time: f32 = 1.0;
 
+    var window_data = WindowData{
+        .camera = &camera,
+        .time = &delta_time,
+    };
+    window.setUserPointer(&window_data);
+    window.setCursorPosCallback(cursorMoveCallback);
+    window.setInputModeCursor(.disabled);
+
+    // window.setKeyCallback(keyCallback);
+    // camera.update_resolution(1280, 720);
+
+    var last_time = std.time.milliTimestamp();
     while (!window.shouldClose()) {
-        present_texture.bind(0, 0, 0);
-        present.uniform("tex", *glu.Texture, &present_texture);
-
-        const matrix = camera.matrix();
-        compute.uniform("viewMatrix", m.Mat4, matrix.view);
-        compute.uniform("projectionMatrix", m.Mat4, matrix.projection);
-
+        const current_time = std.time.milliTimestamp();
+        const dtime: f32 = @floatFromInt(current_time - last_time);
+        delta_time = dtime;
+        last_time = current_time;
+        processKeyboard(&window);
         compute.use();
+        present_texture.bind(0, 0, 0);
+        compute.uniform("cameraPos", m.Vec3, camera.position);
+        compute.uniform("cameraDir", m.Vec3, camera.front);
+        compute.uniform("cameraU", m.Vec3, camera.right);
+        compute.uniform("cameraV", m.Vec3, camera.up);
         compute.dispatch(1280, 720, 1);
         gl.memoryBarrier(gl.SHADER_IMAGE_ACCESS_BARRIER_BIT);
         compute.unuse();
@@ -105,6 +120,8 @@ pub fn main() !void {
         gl.clear(gl.DEPTH_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
 
         present.use();
+        present_texture.bind(0, 0, 0);
+        present.uniform("tex", *glu.Texture, &present_texture);
         gl.bindVertexArray(vao);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.bindVertexArray(0);
@@ -113,4 +130,66 @@ pub fn main() !void {
         window.swapBuffers();
         glfw.pollEvents();
     }
+}
+
+const WindowData = struct {
+    camera: *cam.Camera,
+    time: *f32,
+};
+
+fn processKeyboard(window: *glfw.Window) void {
+    const maybe_data = window.getUserPointer(WindowData);
+    if (maybe_data == null) {
+        return;
+    }
+    var data = maybe_data.?;
+    var dtime = data.time.*;
+    dtime /= 100;
+    if (window.getKey(.escape) == .press) {
+        window.setShouldClose(true);
+    }
+    if (window.getKey(.w) == .press) {
+        data.camera.update_direction(.Front, dtime);
+    }
+    if (window.getKey(.s) == .press) {
+        data.camera.update_direction(.Back, dtime);
+    }
+    if (window.getKey(.a) == .press) {
+        data.camera.update_direction(.Left, dtime);
+    }
+    if (window.getKey(.d) == .press) {
+        data.camera.update_direction(.Right, dtime);
+    }
+    if (window.getKey(.space) == .press) {
+        data.camera.update_direction(.Up, dtime);
+    }
+    if (window.getKey(.left_shift) == .press) {
+        data.camera.update_direction(.Down, dtime);
+    }
+}
+
+fn cursorMoveCallback(window: glfw.Window, xpos_in: f64, ypos_in: f64) void {
+    const maybe_data = window.getUserPointer(WindowData);
+    if (maybe_data == null) {
+        return;
+    }
+    var data = maybe_data.?;
+
+    const xpos: f32 = @floatCast(xpos_in);
+    const ypos: f32 = @floatCast(ypos_in);
+    var camera = data.camera;
+
+    if (camera.first_enter) {
+        camera.last_cursor_x = xpos;
+        camera.last_cursor_y = ypos;
+        camera.first_enter = false;
+    }
+
+    const xoffset = xpos - camera.last_cursor_x;
+    const yoffset = camera.last_cursor_y - ypos; // reversed! y-coordinates go bottom->top in gl while window is top->bottom
+
+    camera.last_cursor_x = xpos;
+    camera.last_cursor_y = ypos;
+
+    camera.update_rotation(xoffset, yoffset);
 }

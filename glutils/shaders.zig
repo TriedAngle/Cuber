@@ -66,7 +66,8 @@ pub const Program = struct {
         gl.useProgram(0);
     }
 
-    pub fn dispatch(groups_x: u32, groups_y: u32, groups_z: u32) void {
+    pub fn dispatch(self: *Self, groups_x: u32, groups_y: u32, groups_z: u32) void {
+        _ = self;
         gl.dispatchCompute(groups_x, groups_y, groups_z);
     }
 };
