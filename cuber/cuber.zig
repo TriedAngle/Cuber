@@ -6,6 +6,7 @@ const glu = @import("glutils");
 
 const m = @import("math");
 const cam = @import("camera.zig");
+const gen = @import("worldgen.zig");
 
 // const c = @cImport({
 //     @cInclude("microui/src/microui.h");
