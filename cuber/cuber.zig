@@ -6,8 +6,6 @@ const glu = @import("glutils");
 
 const m = @import("math");
 const cam = @import("camera.zig");
-const shaders = @import("shaders.zig");
-const textures = @import("textures.zig");
 
 // const c = @cImport({
 //     @cInclude("microui/src/microui.h");
