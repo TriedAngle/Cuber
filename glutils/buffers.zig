@@ -33,12 +33,16 @@ pub const Buffer = struct {
 
     pub fn resize(self: *Self, size: usize) void {
         self.size = size;
-        gl.namedBufferData(self.handle, size * self.size, null, self.usage);
+        gl.namedBufferData(self.handle, @intCast(size * self.size), null, self.usage);
     }
 
     pub fn reset(self: *Self, data: anytype) void {
         self.size = data.len;
-        gl.namedBufferData(self.handle, data.len * self.t_size, data.ptr, self.usage);
+        gl.namedBufferData(self.handle, @intCast(data.len * self.t_size), data.ptr, self.usage);
+    }
+
+    pub fn bind(self: *const Self, index: u32) void {
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, index, self.handle);
     }
 };
 

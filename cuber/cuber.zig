@@ -93,14 +93,14 @@ pub fn main() !void {
         .time = &delta_time,
     };
 
-    var world_gen = gen.WorldGenerator.new();
-    const test_chunk = world_gen.new_random_chunk();
-    _ = test_chunk;
-    
-
     window.setUserPointer(&window_data);
     window.setCursorPosCallback(cursorMoveCallback);
     window.setInputModeCursor(.disabled);
+
+    var world_gen = gen.WorldGenerator.new();
+    const test_chunk = world_gen.new_random_chunk();
+
+    var chunk_buffer = glu.Buffer.new_data(gen.Chunk, &[_]gen.Chunk{test_chunk}, gl.STATIC_DRAW);
 
     // window.setKeyCallback(keyCallback);
     // camera.update_resolution(1280, 720);
@@ -113,6 +113,7 @@ pub fn main() !void {
         last_time = current_time;
         processKeyboard(&window);
         compute.use();
+        chunk_buffer.bind(0);
         present_texture.bind(0, 0, 0);
         compute.uniform("cameraPos", m.Vec3, camera.position);
         compute.uniform("cameraDir", m.Vec3, camera.front);

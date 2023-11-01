@@ -1,9 +1,17 @@
 #version 450
 
 const int MAX_RAY_STEPS = 128;
-const float gridScale = 4.0;
+const float gridScale = 1.0;
+
+struct Chunk {
+    uint voxels[16];
+};
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer Chunks {
+    Chunk chunks[];
+};
 
 layout (rgba32f, binding = 0) uniform image2D imgOutput;
 
@@ -11,6 +19,16 @@ uniform vec3 cameraPos;
 uniform vec3 cameraDir;
 uniform vec3 cameraU;
 uniform vec3 cameraV;
+
+bool hitVoxel(Chunk chunk, ivec3 pos) {
+    int index = pos.x * 64 + pos.y * 8 + pos.z;
+    int pack_index = index % 32;
+    int array_index = index / 32;
+    uint pack = chunk.voxels[array_index];
+    uint mask = 1 << pack_index;
+    bool value = (pack & mask) != 0;
+    return value;
+}
 
 float sdSphere(vec3 p, float d) { 
     return length(p) - d; 
@@ -50,9 +68,17 @@ void main ( ) {
     vec3 sideDist = 
         (sign(rayDir) * (vec3(mapPos) - rayPos) + (sign(rayDir) * 0.5) + 0.5) * deltaDist;
 
+    Chunk test_chunk = chunks[0];
     bool hit = false;
     bvec3 mask;
     for (int i = 0; i < MAX_RAY_STEPS; i++) {
+        if (mapPos.x >= 0 && mapPos.x < 8 &&
+            mapPos.y >= 0 && mapPos.y < 8 &&
+            mapPos.z >= 0 && mapPos.z < 8 &&
+            hitVoxel(test_chunk, mapPos)) {
+            hit = true;
+            break;
+        }
         if(getVoxel(mapPos)) {
             hit = true;
             break; 
