@@ -92,6 +92,12 @@ pub fn main() !void {
         .camera = &camera,
         .time = &delta_time,
     };
+
+    var world_gen = gen.WorldGenerator.new();
+    const test_chunk = world_gen.new_random_chunk();
+    _ = test_chunk;
+    
+
     window.setUserPointer(&window_data);
     window.setCursorPosCallback(cursorMoveCallback);
     window.setInputModeCursor(.disabled);

@@ -10,6 +10,9 @@ pub const Chunk = extern struct {
     pub fn empty() Self {
         var voxels: [16]u32 = undefined;
         @memset(&voxels, 0);
+        return Self{
+            .voxels = voxels,
+        };
     }
 
     pub fn is_block(self: *Self, x: u32, y: u32, z: u32) bool {
@@ -34,9 +37,33 @@ pub const Chunk = extern struct {
             self.voxels[array_index] &= mask;
         }
     }
+
+    pub fn new_random(random: rand.Random) Self {
+        var self = Self.empty();
+        randomize_array(random, &self.voxels);
+        return self;
+    }
 };
 
 pub const WorldGenerator = struct {
     const Self = @This();
-    
+    xoshiro: rand.DefaultPrng,
+
+    pub fn new() Self {
+        var xoshiro = rand.DefaultPrng.init(69420333666);
+        return Self{
+            .xoshiro = xoshiro,
+        };
+    }
+
+    pub fn new_random_chunk(self: *Self) Chunk {
+        return Chunk.new_random(self.xoshiro.random());
+    }
+    // pub fn 
 };
+
+fn randomize_array(random: rand.Random, array: []u32) void {
+    for (array) |*item| {
+        item.* = random.int(u32);
+    }
+}
