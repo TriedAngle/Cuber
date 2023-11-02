@@ -1,7 +1,7 @@
 #version 450
 
+const int RAY_BOUNCES = 8;
 const int MAX_RAY_STEPS = 128;
-const float gridScale = 1.0;
 
 struct Chunk {
     uint voxels[16];
@@ -19,6 +19,62 @@ uniform vec3 cameraPos;
 uniform vec3 cameraDir;
 uniform vec3 cameraU;
 uniform vec3 cameraV;
+uniform uint timer;
+uniform float randomSeed;
+
+uint hash(uint x) {
+    x += (x << 10u);
+    x ^= (x >>  6u);
+    x += (x <<  3u);
+    x ^= (x >> 11u);
+    x += (x << 15u);
+    return x;
+}
+uint hash(uvec2 v) {
+    return hash(v.x^hash(v.y));
+}
+uint hash(uvec3 v) {
+    return hash(v.x^hash(v.y)^hash(v.z));
+}
+uint hash(uvec4 v) {
+    return hash(v.x^hash(v.y)^hash(v.z)^hash(v.w));
+}
+float random(float f) {
+    const uint mantissaMask = 0x007FFFFFu;
+    const uint one = 0x3F800000u;
+   
+    uint h = hash(floatBitsToUint(f));
+    h &= mantissaMask;
+    h |= one;
+    
+    float  r2 = uintBitsToFloat(h);
+    return r2 - 1.0;
+}
+float random(vec2 v) {
+    return random(floatBitsToUint(hash(uvec2(v.x, v.y))));
+}
+float random(vec3 v) {
+    return random(floatBitsToUint(hash(uvec3(v.x, v.y, v.z))));
+}
+float random(vec4 v) {
+    return random(floatBitsToUint(hash(uvec4(v.x, v.y, v.z, v.w))));
+}
+
+float sdSphere(vec3 p, float d) { 
+    return length(p) - d; 
+} 
+
+float sdBox(vec3 p, vec3 b) {
+  vec3 d = abs(p) - b;
+  return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
+}
+	
+bool getVoxel(ivec3 c) {
+    vec3 p = vec3(0.0, 0.0, 0.0) - c;
+    float d = 1e10;
+	d = min(d, max(-sdSphere(p, 23.5), sdBox(p, vec3(20.0))));
+	return d < 0.0;
+}
 
 bool hitVoxel(Chunk chunk, ivec3 pos) {
     int index = pos.x * 64 + pos.y * 8 + pos.z;
@@ -30,77 +86,105 @@ bool hitVoxel(Chunk chunk, ivec3 pos) {
     return value;
 }
 
-float sdSphere(vec3 p, float d) { 
-    return length(p) - d; 
-} 
+bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3 mask, ivec3 gridStep, vec3 deltaDist) {
+    ivec3 chunk_pos = ivec3(gridPos.x % 8, gridPos.y % 8, gridPos.z % 8);
+    for (int i = 0; i < 8; i++) {
+        if (any(lessThan(chunk_pos, ivec3(0))) || any(greaterThanEqual(chunk_pos, ivec3(8)))) {
+            break;
+        }
+        if (hitVoxel(chunk, chunk_pos)) {
+            return true;
+        }
+        mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
+        sideDist += vec3(mask) * deltaDist;
+        chunk_pos += ivec3(vec3(mask)) * gridStep;
+        gridPos += ivec3(vec3(mask)) * gridStep;
+    }
+    return false;
+}
 
-float sdBox( vec3 p, vec3 b ) {
-  vec3 d = abs(p) - b;
-  return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
+struct RayHit {
+    vec3 pos;
+    vec3 dir;
+    bvec3 mask;
+};
+
+RayHit traceRay(vec3 pos, vec3 dir) {
+    ivec3 gridPos = ivec3(floor(pos));
+    vec3 deltaDist = abs(vec3(length(dir)) / dir);
+
+    ivec3 gridStep = ivec3(sign(dir));
+
+    vec3 sideDist = 
+        (sign(dir) * (vec3(gridPos) - pos) + (sign(dir) * 0.5) + 0.5) * deltaDist;
+
+    Chunk test_chunk = chunks[0];
+    bool hit = false;
+    bvec3 mask;
+
+    for (int i = 0; i < MAX_RAY_STEPS; i++) {
+        if (gridPos.x >= 0 && gridPos.x < 8 &&
+            gridPos.y >= 0 && gridPos.y < 8 &&
+            gridPos.z >= 0 && gridPos.z < 8 &&
+            hitChunk(test_chunk, gridPos, sideDist, mask, gridStep, deltaDist)) {
+            hit = true;
+            break;
+        }
+        if(getVoxel(gridPos)) {
+            hit = true;
+            break; 
+        }
+        mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
+        sideDist += vec3(mask) * deltaDist;
+        gridPos += ivec3(vec3(mask)) * gridStep;
+    }
+
+    if (!hit) {
+        return RayHit(vec3(0.0), vec3(0.0), bvec3(0));
+    }
+
+    float hitDistance;
+
+    if (mask.x) {
+        hitDistance = (sideDist.x - deltaDist.x) / dir.x;
+    } else if (mask.y) {
+        hitDistance = (sideDist.y - deltaDist.y) / dir.y;
+    } else {
+        hitDistance = (sideDist.z - deltaDist.z) / dir.z;
+    }
+
+    vec3 hitPosition = pos + hitDistance * dir;
+    return RayHit(hitPosition, dir, mask);
 }
-	
-bool getVoxel(ivec3 c) {
-	// vec3 p = vec3(c) + vec3(0.5);
-    vec3 p = vec3(0.0, 0.0, 0.0) - c;
-    float d = 1e10;
-	d = min(d, max(-sdSphere(p, 23.5), sdBox(p, vec3(20.0))));
-	return d < 0.0;
-}
+
+
+
 
 void main ( ) { 
     ivec2 texPos = ivec2(gl_GlobalInvocationID.xy);
+    float aspectRatio = 1280.0 / 720.0;
     vec2 screenPos = vec2(gl_GlobalInvocationID.xy) / vec2(1280.0, 720.0) * 2.0 - 1.0;
+    screenPos.x *= aspectRatio;
 
-    // vec3 cameraDir = vec3(0.0, 1.0, 0.8);
     vec3 cameraPlaneU = cameraU;
 	vec3 cameraPlaneV = cameraV;
 
     vec3 rayDir = cameraDir + screenPos.x * cameraPlaneU + screenPos.y * cameraPlaneV;
     vec3 rayPos = cameraPos;
 
-    rayPos /= gridScale;
+    RayHit hit = traceRay(rayPos, rayDir);
 
-    ivec3 mapPos = ivec3(floor(rayPos + 0.0));
-    vec3 deltaDist = abs(vec3(length(rayDir)) / rayDir);
-
-    ivec3 rayStep = ivec3(sign(rayDir));
-
-    vec3 sideDist = 
-        (sign(rayDir) * (vec3(mapPos) - rayPos) + (sign(rayDir) * 0.5) + 0.5) * deltaDist;
-
-    Chunk test_chunk = chunks[0];
-    bool hit = false;
-    bvec3 mask;
-    for (int i = 0; i < MAX_RAY_STEPS; i++) {
-        if (mapPos.x >= 0 && mapPos.x < 8 &&
-            mapPos.y >= 0 && mapPos.y < 8 &&
-            mapPos.z >= 0 && mapPos.z < 8 &&
-            hitVoxel(test_chunk, mapPos)) {
-            hit = true;
-            break;
-        }
-        if(getVoxel(mapPos)) {
-            hit = true;
-            break; 
-        }
-        mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
-        sideDist += vec3(mask) * deltaDist;
-        mapPos += ivec3(vec3(mask)) * rayStep;
-    }
-    if (!hit) {
-        imageStore(imgOutput, texPos, vec4(0.0));
-        return;
-    }
 	vec3 color;
-	if (mask.x) {
+	if (hit.mask.x) {
 		color = vec3(0.5);
-	}
-	if (mask.y) {
+	} else if (hit.mask.y) {
 		color = vec3(1.0);
-	}
-	if (mask.z) {
+	} else if (hit.mask.z) {
 		color = vec3(0.75);
-	}
+	} else {
+        imageStore(imgOutput, texPos, vec4(0.0));
+        return; 
+    }
 
     vec4 value = vec4(color, 1.0);
     

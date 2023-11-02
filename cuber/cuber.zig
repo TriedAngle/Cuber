@@ -97,11 +97,13 @@ pub fn main() !void {
     window.setCursorPosCallback(cursorMoveCallback);
     window.setInputModeCursor(.disabled);
 
+    var frame_idx: u32 = 0;
+    var xoshiro = std.rand.DefaultPrng.init(69420666);
+    var random = xoshiro.random();
     var world_gen = gen.WorldGenerator.new();
     const test_chunk = world_gen.new_random_chunk();
 
     var chunk_buffer = glu.Buffer.new_data(gen.Chunk, &[_]gen.Chunk{test_chunk}, gl.STATIC_DRAW);
-
     // window.setKeyCallback(keyCallback);
     // camera.update_resolution(1280, 720);
 
@@ -119,6 +121,8 @@ pub fn main() !void {
         compute.uniform("cameraDir", m.Vec3, camera.front);
         compute.uniform("cameraU", m.Vec3, camera.right);
         compute.uniform("cameraV", m.Vec3, camera.up);
+        compute.uniform("timer", u32, frame_idx);
+        compute.uniform("randomSeed", f32, random.float(f32));
         compute.dispatch(1280, 720, 1);
         gl.memoryBarrier(gl.SHADER_IMAGE_ACCESS_BARRIER_BIT);
         compute.unuse();
@@ -133,6 +137,7 @@ pub fn main() !void {
         gl.bindVertexArray(0);
         present.unuse();
 
+        frame_idx +%= 1;
         window.swapBuffers();
         glfw.pollEvents();
     }
