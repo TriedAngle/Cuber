@@ -10,22 +10,6 @@ const gen = @import("worldgen.zig");
 const mat = @import("materials.zig");
 const render = @import("render.zig");
 
-// const DebugTexture = enum {
-//     Albedo,
-//     Depth,
-//     Normal,
-
-//     fn next(current: DebugTexture) DebugTexture {
-//         const enumInt = @intFromEnum(current);
-//         const enumCount = @typeInfo(DebugTexture).Enum.fields.len;
-//         const nextInt = (enumInt + 1) % enumCount;
-//         return @enumFromInt(nextInt);
-//     }
-// };
-// const c = @cImport({
-//     @cInclude("microui/src/microui.h");
-// });
-
 fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
     _ = p;
     return glfw.getProcAddress(proc);
@@ -34,17 +18,6 @@ fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
 fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
     std.log.err("glfw: {}: {s}\n", .{ error_code, description });
 }
-
-// const vertex_shader = @embedFile("shaders/shader.vert");
-// const fragment_shader = @embedFile("shaders/shader.frag");
-// const compute_shader = @embedFile("shaders/shader.comp");
-
-// const present_vertices = [_]f32{
-//     -1.0, 1.0, 0.0, 0.0, 1.0, //noformat
-//     -1.0, -1.0, 0.0, 0.0, 0.0, //noformat
-//     1.0, 1.0, 0.0, 1.0, 1.0, //noformat
-//     1.0, -1.0, 0.0, 1.0, 0.0, //noformat
-// };
 
 pub fn main() !void {
     var allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -185,7 +158,6 @@ fn keyCallback(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.A
         return;
     }
     var data = maybe_data.?;
-    // Check if the 'N' key was pressed
     if (data.renderer.config.debug_texture) |*debug_texture| {
         if (key == .n and action == .press) {
             debug_texture.* = debug_texture.next();
