@@ -41,7 +41,6 @@ pub fn main() !void {
     };
     defer window.destroy();
 
-    
     window.setCursorPosCallback(cursorMoveCallback);
     window.setKeyCallback(keyCallback);
     window.setInputModeCursor(.disabled);
@@ -166,7 +165,11 @@ fn keyCallback(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.A
 }
 
 fn resizeCallback(window: glfw.Window, width: u32, height: u32) void {
-    _ = height;
-    _ = width;
-    _ = window;
+    std.debug.print("resize: {} {}\n", .{width, height});
+    const maybe_data = window.getUserPointer(WindowData);
+    if (maybe_data == null) {
+        return;
+    }
+    var data = maybe_data.?;
+    data.renderer.resize(width, height);
 }

@@ -132,6 +132,7 @@ pub const Renderer = struct {
         compute.uniform("cameraV", m.Vec3, camera.up);
         compute.uniform("timer", u32, @intCast(self.dtime));
         compute.uniform("randomSeed", f32, self.random.float(f32));
+        compute.uniform("resolution", [2]u32, [_]u32{ self.width, self.height });
         compute.dispatch(self.width, self.height, 1);
         compute.unuse();
     }
@@ -155,10 +156,11 @@ pub const Renderer = struct {
         present.unuse();
     }
 
-    pub fn resize(self: *Self, width: i32, height: i32) void {
-        self.width = @intCast(width);
-        self.height = @intCast(height);
-        self.resources.resize_screen_textures(width, height);
+    pub fn resize(self: *Self, width: u32, height: u32) void {
+        self.width = width;
+        self.height = height;
+        self.resources.resize_screen_textures(@intCast(width), @intCast(height));
+        gl.viewport(0, 0, @intCast(width), @intCast(height));
     }
 
     pub fn add_chunk(self: *Self, chunk: world.Chunk) void {
