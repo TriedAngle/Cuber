@@ -26,6 +26,10 @@ pub const Texture = struct {
         return Self{ .handle = texture, .kind = kind, .format = format, .levels = levels };
     }
 
+    pub fn new_dummy(kind: u32, format: u32, levels: i32) Self {
+        return Self{ .handle = 0, .kind = kind, .format = format, .levels = levels };
+    }
+
     pub fn deinit(self: *Self) void {
         gl.deleteTextures(1, &[_]u32{self.handle});
     }
@@ -45,6 +49,11 @@ pub const Texture = struct {
         }
         gl.bindTextureUnit(binding, self.handle);
         gl.bindImageTexture(binding, self.handle, level, layered, layer, gl.READ_WRITE, self.format);
+    }
+
+    pub fn resize(self: *Self, width: i32, height: i32) void {
+        self.deinit();
+        self.* = Self.new(width, height, self.kind, self.format, self.levels);
     }
 };
 
