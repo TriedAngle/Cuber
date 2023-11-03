@@ -179,18 +179,22 @@ void main ( ) {
 
     RayHit hit = traceRay(rayPos, rayDir);
 
-    vec3 albedo;
+    vec3 albedo = vec3(0.0);
+    vec3 normal = vec3(0.0);
     if (hit.mask.x) {
         albedo = vec3(0.5);
+        if (hit.dir.x >= 0.0) normal = vec3(1.0, 0.0, 0.0);
+        else normal = vec3(-1.0, 0.0, 0.0);
     } else if (hit.mask.y) {
         albedo = vec3(1.0);
+        if (hit.dir.y >= 0.0) normal = vec3(0.0, 1.0, 0.0);
+        else normal = vec3(0.0, -1.0, 0.0);
     } else if (hit.mask.z) {
         albedo = vec3(0.75);
-    } else {
-        imageStore(albedoTexture, texPos, vec4(0.0));
-        imageStore(depthTexture, texPos, vec4(1.0));
-        return; 
+        if (hit.dir.z >= 0.0) normal = vec3(0.0, 0.0, 1.0);
+        else normal = vec3(0.0, 0.0, -1.0);
     }
     imageStore(albedoTexture, texPos, vec4(albedo, 1.0));
     imageStore(depthTexture, texPos, vec4(length(hit.dist)) / float(MAX_RAY_STEPS));
+    imageStore(normalTexture, texPos, vec4(normal, 1.0));
 }
