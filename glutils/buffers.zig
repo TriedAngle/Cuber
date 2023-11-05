@@ -16,8 +16,8 @@ pub const Buffer = struct {
 
     pub fn new_sized(comptime T: type, size: usize, usage: u32) Self {
         var self = Self.new(T, usage);
-        gl.namedBufferData(self.handle, size * self.t_size, null, self.usage);
-        self.resize(size);
+        self.size = size;
+        gl.namedBufferData(self.handle, @intCast(size * self.t_size), null, self.usage);
         return self;
     }
 
@@ -32,8 +32,24 @@ pub const Buffer = struct {
     }
 
     pub fn resize(self: *Self, size: usize) void {
-        self.size = size;
-        gl.namedBufferData(self.handle, @intCast(size * self.size), null, self.usage);
+        var next = Self{
+            .t_size = self.t_size,
+            .size = size,
+            .usage = self.usage,
+        };
+        gl.createBuffers(1, &next.handle);
+        gl.namedBufferData(next.handle, @intCast(size * next.t_size), null, next.usage);
+
+        gl.copyNamedBufferSubData(
+            self.handle,
+            next.handle,
+            0,
+            0,
+            @intCast(self.size * self.t_size),
+        );
+
+        self.deinit();
+        self.* = next;
     }
 
     pub fn reset(self: *Self, data: anytype) void {
@@ -43,6 +59,15 @@ pub const Buffer = struct {
 
     pub fn bind(self: *const Self, index: u32) void {
         gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, index, self.handle);
+    }
+
+    pub fn write_at(self: *Self, offset: u32, value: *const anyopaque) void {
+        gl.namedBufferSubData(
+            self.handle,
+            offset * self.t_size,
+            @intCast(self.t_size),
+            value,
+        );
     }
 };
 

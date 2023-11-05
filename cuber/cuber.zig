@@ -9,6 +9,7 @@ const cam = @import("camera.zig");
 const gen = @import("worldgen.zig");
 const mat = @import("materials.zig");
 const render = @import("render.zig");
+const brick = @import("brickmap.zig");
 
 fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
     _ = p;
@@ -66,9 +67,36 @@ pub fn main() !void {
     };
     window.setUserPointer(&window_data);
 
+    _ = renderer.add_material(&mat.Material{}); // offset by 1, empty material so indices make sense lol
+    const violet_material = renderer.add_material(&mat.Material{
+        .albedo = [_]f32{ 0.70, 0.08, 0.42 },
+    });
+    const green_material = renderer.add_material(&mat.Material{
+        .albedo = [_]f32{ 0.10, 0.8, 0.22 },
+    });
+    const blue_material = renderer.add_material(&mat.Material{
+        .albedo = [_]f32{ 0.0, 0.3, 0.9 },
+    });
+
+    var palettes = brick.Palettes.init(gpa);
+    defer palettes.deinit();
+
+    const test_palette_materials = [_]u32{ violet_material, green_material, blue_material };
+    const test_palette = brick.Palette.new_unchecked(gpa, &test_palette_materials);
+    const test_palette_id = palettes.insert_palette(test_palette);
+    _ = test_palette_id;
+    renderer.resources.palette_buffer.reset(&test_palette_materials);
+
     var world_gen = gen.WorldGenerator.new();
-    const test_chunk = world_gen.new_random_chunk();
-    renderer.add_chunk(test_chunk);
+    const test_chunk = world_gen.new_random_chunk(0, 3);
+
+    const palette_chunk = brick.construct_palette_chunk(&test_chunk, 0);
+    const palette_chunks = [_]brick.PaletteChunk{palette_chunk};
+    renderer.resources.palette_chunk_buffer.reset(&palette_chunks);
+
+    const brick_chunk = brick.construct_brick_chunk(&test_chunk, 0);
+    const brick_chunks = [_]brick.BrickChunk{brick_chunk};
+    renderer.resources.chunk_buffer.reset(&brick_chunks);
 
     var last_time = std.time.milliTimestamp();
     while (!window.shouldClose()) {
@@ -165,7 +193,7 @@ fn keyCallback(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.A
 }
 
 fn resizeCallback(window: glfw.Window, width: u32, height: u32) void {
-    std.debug.print("resize: {} {}\n", .{width, height});
+    std.debug.print("resize: {} {}\n", .{ width, height });
     const maybe_data = window.getUserPointer(WindowData);
     if (maybe_data == null) {
         return;

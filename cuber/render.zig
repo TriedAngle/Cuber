@@ -6,7 +6,7 @@ const glu = @import("glutils");
 const m = @import("math");
 const cam = @import("camera.zig");
 const mat = @import("materials.zig");
-const world = @import("world.zig");
+const brick = @import("brickmap.zig");
 
 const vertex_shader = @embedFile("shaders/shader.vert");
 const fragment_shader = @embedFile("shaders/shader.frag");
@@ -29,16 +29,21 @@ const Resources = struct {
 
     chunk_buffer: glu.Buffer,
     palette_chunk_buffer: glu.Buffer,
+    palette_buffer: glu.Buffer,
     material_buffer: glu.Buffer,
+    materials: std.AutoHashMap(u256, u32),
+    material_count: u32 = 0,
 
     fn init(allocator: mem.Allocator) Self {
         const albedo_texture = glu.Texture.new_dummy(gl.TEXTURE_2D, gl.RGBA32F, 1);
         const depth_texture = glu.Texture.new_dummy(gl.TEXTURE_2D, gl.R16F, 1);
         const normal_texture = glu.Texture.new_dummy(gl.TEXTURE_2D, gl.RGBA16F, 1);
-        const chunk_buffer = glu.Buffer.new(world.Chunk, gl.DYNAMIC_COPY);
-        const material_buffer = glu.Buffer.new(mat.Material, gl.DYNAMIC_COPY);
-        // TODO: use actual palette compression
-        const palette_chunk_buffer = glu.Buffer.new(u32, gl.DYNAMIC_COPY);
+
+        const chunk_buffer = glu.Buffer.new(brick.BrickChunk, gl.DYNAMIC_COPY);
+        const palette_chunk_buffer = glu.Buffer.new(brick.PaletteChunk, gl.DYNAMIC_COPY);
+        const palette_buffer = glu.Buffer.new(u32, gl.DYNAMIC_COPY);
+        const material_buffer = glu.Buffer.new_sized(mat.Material, 32, gl.DYNAMIC_COPY);
+        const materials = std.AutoHashMap(u256, u32).init(allocator);
         return Self{
             .allocator = allocator,
             .albedo_texture = albedo_texture,
@@ -46,14 +51,10 @@ const Resources = struct {
             .normal_texture = normal_texture,
             .chunk_buffer = chunk_buffer,
             .palette_chunk_buffer = palette_chunk_buffer,
+            .palette_buffer = palette_buffer,
             .material_buffer = material_buffer,
+            .materials = materials,
         };
-    }
-
-    fn resize_screen_textures(self: *Self, width: i32, height: i32) void {
-        self.albedo_texture.resize(width, height);
-        self.depth_texture.resize(width, height);
-        self.normal_texture.resize(width, height);
     }
 
     fn deinit(self: *Self) void {
@@ -63,7 +64,34 @@ const Resources = struct {
 
         self.chunk_buffer.deinit();
         self.palette_chunk_buffer.deinit();
+        self.palette_buffer.deinit();
         self.material_buffer.deinit();
+        self.materials.deinit();
+    }
+
+    fn resize_screen_textures(self: *Self, width: i32, height: i32) void {
+        self.albedo_texture.resize(width, height);
+        self.depth_texture.resize(width, height);
+        self.normal_texture.resize(width, height);
+    }
+
+    fn add_material_buffer(self: *Self, material: *const mat.Material, offset: u32) void {
+        if (offset >= self.material_buffer.size) {
+            self.material_buffer.resize(self.material_buffer.size * 2);
+        }
+        self.material_buffer.write_at(offset, material);
+    }
+
+    fn add_material(self: *Self, material: *const mat.Material) u32 {
+        const hash = material.hash();
+        if (self.materials.get(hash)) |id| {
+            return id;
+        }
+        const id = self.material_count;
+        self.materials.put(hash, id) catch unreachable;
+        self.add_material_buffer(material, id);
+        self.material_count += 1;
+        return id;
     }
 };
 
@@ -80,6 +108,7 @@ pub const Renderer = struct {
     width: u32 = 0,
     height: u32 = 0,
     resources: Resources,
+
     compute: glu.Program,
     present: glu.Program,
     randomer: std.rand.DefaultPrng,
@@ -106,6 +135,13 @@ pub const Renderer = struct {
         };
     }
 
+    pub fn deinit(self: *Self) void {
+        self.resources.deinit();
+        self.present.deinit();
+        self.compute.deinit();
+        gl.deleteVertexArrays(1, &[_]u32{self.vao});
+    }
+
     pub fn update(self: *Self, dtime: i64) void {
         self.dtime = dtime;
         self.frame +%= 1;
@@ -123,6 +159,9 @@ pub const Renderer = struct {
 
         compute.use();
         resources.chunk_buffer.bind(0);
+        resources.palette_chunk_buffer.bind(1);
+        resources.palette_buffer.bind(2);
+        resources.material_buffer.bind(3);
         resources.albedo_texture.bind(0, 0, 0);
         resources.depth_texture.bind(1, 0, 0);
         resources.normal_texture.bind(2, 0, 0);
@@ -131,7 +170,7 @@ pub const Renderer = struct {
         compute.uniform("cameraU", m.Vec3, camera.right);
         compute.uniform("cameraV", m.Vec3, camera.up);
         compute.uniform("timer", u32, @intCast(self.dtime));
-        compute.uniform("randomSeed", f32, self.random.float(f32));
+        // compute.uniform("randomSeed", f32, self.random.float(f32));
         compute.uniform("resolution", [2]u32, [_]u32{ self.width, self.height });
         compute.dispatch(self.width, self.height, 1);
         compute.unuse();
@@ -163,17 +202,14 @@ pub const Renderer = struct {
         gl.viewport(0, 0, @intCast(width), @intCast(height));
     }
 
-    pub fn add_chunk(self: *Self, chunk: world.Chunk) void {
+    pub fn add_chunk(self: *Self, chunk: brick.BrickChunk) void {
         var resources = &self.resources;
         resources.chunk_buffer.deinit();
-        resources.chunk_buffer = glu.Buffer.new_data(world.Chunk, &[_]world.Chunk{chunk}, gl.STATIC_DRAW);
+        resources.chunk_buffer = glu.Buffer.new_data(brick.BrickChunk, &[_]brick.BrickChunk{chunk}, gl.STATIC_DRAW);
     }
 
-    pub fn deinit(self: *Self) void {
-        self.resources.deinit();
-        self.present.deinit();
-        self.compute.deinit();
-        gl.deleteVertexArrays(1, &[_]u32{self.vao});
+    pub fn add_material(self: *Self, material: *const mat.Material) u32 {
+        return self.resources.add_material(material);
     }
 };
 

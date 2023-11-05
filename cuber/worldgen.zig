@@ -15,7 +15,7 @@ pub const WorldGenerator = struct {
         };
     }
 
-    pub fn new_random_chunk(self: *Self) world.Chunk {
-        return world.Chunk.new_random(self.xoshiro.random());
+    pub fn new_random_chunk(self: *Self, from: u8, to: u8) world.Chunk {
+        return world.Chunk.new_random(self.xoshiro.random(), from, to);
     }
 };

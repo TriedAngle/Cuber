@@ -5,6 +5,14 @@ const int MAX_RAY_STEPS = 128;
 
 struct Chunk {
     uint voxels[16];
+    uint palette_chunk;
+    uint lod;
+};
+
+struct PaletteChunk {
+    uint palette;
+    uint lod_materil; // TODO: implement this
+    uint materials[128];
 };
 
 struct Material {
@@ -21,7 +29,15 @@ layout(std430, binding = 0) buffer Chunks {
     Chunk chunks[];
 };
 
-layout(std430, binding = 1) buffer Materials {
+layout(std430, binding = 1) buffer PaletteChunks {
+    PaletteChunk palette_chunks[];
+};
+
+layout(std430, binding = 2) buffer Palettes {
+    uint palettes[];
+};
+
+layout(std430, binding = 3) buffer Materials {
     Material materials[];
 };
 
@@ -104,7 +120,7 @@ bool hitVoxel(Chunk chunk, ivec3 pos) {
     return value;
 }
 
-bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3 mask, ivec3 gridStep, vec3 deltaDist) {
+bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3 mask, ivec3 gridStep, vec3 deltaDist, inout ivec3 chunkHitPos) {
     ivec3 chunk_pos = ivec3(gridPos.x % 8, gridPos.y % 8, gridPos.z % 8);
     for (int i = 0; i < 8; i++) {
         if (any(lessThan(chunk_pos, ivec3(0))) || any(greaterThanEqual(chunk_pos, ivec3(8)))) {
@@ -112,6 +128,7 @@ bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3
         }
         if (hitVoxel(chunk, chunk_pos)) {
             return true;
+            chunkHitPos = chunk_pos;
         }
         mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
         sideDist += vec3(mask) * deltaDist;
@@ -126,7 +143,7 @@ struct RayHit {
     vec3 dir;    
     bvec3 mask;
     float dist;
-    uint material_id;
+    ivec3 chunkPos;
 };
 
 RayHit traceRay(vec3 pos, vec3 dir) {
@@ -142,11 +159,12 @@ RayHit traceRay(vec3 pos, vec3 dir) {
     bool hit = false;
     bvec3 mask;
 
+    ivec3 chunk_pos;
     for (int i = 0; i < MAX_RAY_STEPS; i++) {
         if (gridPos.x >= 0 && gridPos.x < 8 &&
             gridPos.y >= 0 && gridPos.y < 8 &&
             gridPos.z >= 0 && gridPos.z < 8 &&
-            hitChunk(test_chunk, gridPos, sideDist, mask, gridStep, deltaDist)) {
+            hitChunk(test_chunk, gridPos, sideDist, mask, gridStep, deltaDist, chunk_pos)) {
             hit = true;
             break;
         }
@@ -171,14 +189,21 @@ RayHit traceRay(vec3 pos, vec3 dir) {
     vec3 hitPosition = pos + hitDistance * dir;
 
     if (!hit) {
-        return RayHit(hitPosition, dir, bvec3(0), hitDistance, 0);
+        return RayHit(hitPosition, dir, bvec3(0), hitDistance, ivec3(0));
     }
 
-    return RayHit(hitPosition, dir, mask, hitDistance, 0);
+    return RayHit(hitPosition, dir, mask, hitDistance, chunk_pos);
 }
 
 
-
+uint palette_material(PaletteChunk palette_chunk, ivec3 pos) {
+    int index = pos.x * 64 + pos.y * 8 + pos.z; 
+    int uint_index = index / 4;
+    int sub_index = index % 4;
+    uint packedMaterials = palette_chunk.materials[uint_index];
+    uint materialID = (packedMaterials >> (sub_index * 8)) & 0xFF;
+    return materialID;
+}
 
 void main() { 
     ivec2 texPos = ivec2(gl_GlobalInvocationID.xy);
@@ -195,11 +220,26 @@ void main() {
 
     RayHit hit = traceRay(rayPos, rayDir);
 
+
     vec3 albedo = vec3(0.0);
     vec3 normal = vec3(0.0);
     float depth;
-    if (hit.mask == bvec3(0)) depth = 1.0;
-    else depth = length(hit.dist) / float(MAX_RAY_STEPS);
+    if (hit.mask == bvec3(0)) { 
+        depth = 1.0 ;
+        imageStore(albedoTexture, texPos, vec4(albedo, 1.0));
+        imageStore(depthTexture, texPos, vec4(depth));
+        imageStore(normalTexture, texPos, vec4(normal, 1.0));
+        return;
+    }
+
+    depth = length(hit.dist) / float(MAX_RAY_STEPS); 
+
+    // PaletteChunk palette_chunk = palette_chunks[hit.paletteChunk];
+    PaletteChunk palette_chunk = palette_chunks[0];
+    uint palette_material = palette_material(palette_chunk, hit.chunkPos);
+    uint material_index = palettes[palette_chunk.palette + palette_material - 1];
+    Material material = materials[material_index];
+
     if (hit.mask.x) {
         albedo = vec3(0.5);
         if (hit.dir.x >= 0.0) normal = vec3(1.0, 0.0, 0.0);
@@ -209,7 +249,8 @@ void main() {
         if (hit.dir.y >= 0.0) normal = vec3(0.0, 1.0, 0.0);
         else normal = vec3(0.0, -1.0, 0.0);
     } else if (hit.mask.z) {
-        albedo = vec3(0.75);
+        albedo = material.albedo;
+        // albedo = vec3(0.75);
         if (hit.dir.z >= 0.0) normal = vec3(0.0, 0.0, 1.0);
         else normal = vec3(0.0, 0.0, -1.0);
     }
