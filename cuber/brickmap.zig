@@ -72,9 +72,9 @@ pub const Palettes = struct {
 // an additional issue is spacial reuse, but I think we already know the sizes this could take
 // so a simple free-list tracking on the cpu side could hopefully do the job.
 pub const PaletteChunk = extern struct {
+    material_mappings: [512]u8,
     palette: u32,
     lod_material: u32 = 0, // TODO: implement this
-    material_mappings: [512]u8,
 };
 
 pub const BrickChunk = extern struct {

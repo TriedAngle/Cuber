@@ -10,9 +10,9 @@ struct Chunk {
 };
 
 struct PaletteChunk {
+    uint chunk_materials[128];
     uint palette;
     uint lod_materil; // TODO: implement this
-    uint materials[128];
 };
 
 struct Material {
@@ -94,22 +94,6 @@ float random(vec4 v) {
     return random(floatBitsToUint(hash(uvec4(v.x, v.y, v.z, v.w))));
 }
 
-float sdSphere(vec3 p, float d) { 
-    return length(p) - d; 
-} 
-
-float sdBox(vec3 p, vec3 b) {
-  vec3 d = abs(p) - b;
-  return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
-}
-	
-bool getVoxel(ivec3 c) {
-    vec3 p = vec3(0.0, 0.0, 0.0) - c;
-    float d = 1e10;
-	d = min(d, max(-sdSphere(p, 23.5), sdBox(p, vec3(20.0))));
-	return d < 0.0;
-}
-
 bool hitVoxel(Chunk chunk, ivec3 pos) {
     int index = pos.x * 64 + pos.y * 8 + pos.z;
     int pack_index = index % 32;
@@ -120,15 +104,30 @@ bool hitVoxel(Chunk chunk, ivec3 pos) {
     return value;
 }
 
-bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3 mask, ivec3 gridStep, vec3 deltaDist, inout ivec3 chunkHitPos) {
+uint palette_material(PaletteChunk chunk, ivec3 pos) {
+    uint index = pos.x * 64 + pos.y * 8 + pos.z;
+    uint array_index = index / 4;
+    uint byte_index = index % 4;
+    uint material = (chunk.chunk_materials[array_index] >> (8 * byte_index)) & 0xFF;
+    return material;
+}
+
+uint material_ids[8];
+uint current_ray_index = 0;
+
+bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3 mask, ivec3 gridStep, vec3 deltaDist) {
     ivec3 chunk_pos = ivec3(gridPos.x % 8, gridPos.y % 8, gridPos.z % 8);
     for (int i = 0; i < 8; i++) {
         if (any(lessThan(chunk_pos, ivec3(0))) || any(greaterThanEqual(chunk_pos, ivec3(8)))) {
             break;
         }
         if (hitVoxel(chunk, chunk_pos)) {
+            PaletteChunk palette_chunk = palette_chunks[chunk.palette_chunk];
+            uint palette_material = palette_material(palette_chunk, chunk_pos);
+            uint material_index = palettes[palette_chunk.palette + palette_material - 1];
+
+            material_ids[current_ray_index] = material_index;
             return true;
-            chunkHitPos = chunk_pos;
         }
         mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
         sideDist += vec3(mask) * deltaDist;
@@ -143,7 +142,6 @@ struct RayHit {
     vec3 dir;    
     bvec3 mask;
     float dist;
-    ivec3 chunkPos;
 };
 
 RayHit traceRay(vec3 pos, vec3 dir) {
@@ -164,13 +162,9 @@ RayHit traceRay(vec3 pos, vec3 dir) {
         if (gridPos.x >= 0 && gridPos.x < 8 &&
             gridPos.y >= 0 && gridPos.y < 8 &&
             gridPos.z >= 0 && gridPos.z < 8 &&
-            hitChunk(test_chunk, gridPos, sideDist, mask, gridStep, deltaDist, chunk_pos)) {
+            hitChunk(test_chunk, gridPos, sideDist, mask, gridStep, deltaDist)) {
             hit = true;
             break;
-        }
-        if(getVoxel(gridPos)) {
-            hit = true;
-            break; 
         }
         mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
         sideDist += vec3(mask) * deltaDist;
@@ -189,20 +183,10 @@ RayHit traceRay(vec3 pos, vec3 dir) {
     vec3 hitPosition = pos + hitDistance * dir;
 
     if (!hit) {
-        return RayHit(hitPosition, dir, bvec3(0), hitDistance, ivec3(0));
+        return RayHit(hitPosition, dir, bvec3(0), hitDistance);
     }
 
-    return RayHit(hitPosition, dir, mask, hitDistance, chunk_pos);
-}
-
-
-uint palette_material(PaletteChunk palette_chunk, ivec3 pos) {
-    int index = pos.x * 64 + pos.y * 8 + pos.z; 
-    int uint_index = index / 4;
-    int sub_index = index % 4;
-    uint packedMaterials = palette_chunk.materials[uint_index];
-    uint materialID = (packedMaterials >> (sub_index * 8)) & 0xFF;
-    return materialID;
+    return RayHit(hitPosition, dir, mask, hitDistance);
 }
 
 void main() { 
@@ -235,17 +219,17 @@ void main() {
     depth = length(hit.dist) / float(MAX_RAY_STEPS); 
 
     // PaletteChunk palette_chunk = palette_chunks[hit.paletteChunk];
-    PaletteChunk palette_chunk = palette_chunks[0];
-    uint palette_material = palette_material(palette_chunk, hit.chunkPos);
-    uint material_index = palettes[palette_chunk.palette + palette_material - 1];
+    uint material_index = material_ids[0];
     Material material = materials[material_index];
 
     if (hit.mask.x) {
-        albedo = vec3(0.5);
+        albedo = material.albedo;
+        // albedo = vec3(0.5);
         if (hit.dir.x >= 0.0) normal = vec3(1.0, 0.0, 0.0);
         else normal = vec3(-1.0, 0.0, 0.0);
     } else if (hit.mask.y) {
-        albedo = vec3(1.0);
+        albedo = material.albedo;
+        // albedo = vec3(1.0);
         if (hit.dir.y >= 0.0) normal = vec3(0.0, 1.0, 0.0);
         else normal = vec3(0.0, -1.0, 0.0);
     } else if (hit.mask.z) {

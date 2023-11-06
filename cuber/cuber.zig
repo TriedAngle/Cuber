@@ -51,7 +51,7 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
-    var camera = cam.Camera.new(m.vec3(0, 0, 0), m.vec3(0, 1, 0));
+    var camera = cam.Camera.new(m.vec3(-3, 4, 15), m.vec3(0, 1, 0));
     var dtime: f32 = 1.0;
 
     var renderer = render.Renderer.init(gpa, .{
