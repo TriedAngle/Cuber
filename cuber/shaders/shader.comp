@@ -1,7 +1,7 @@
 #version 460
 
 const int RAY_BOUNCES = 4;
-const int MAX_RAY_STEPS = 128;
+const int MAX_RAY_STEPS = 32;
 
 struct Chunk {
     uint voxels[16];
@@ -13,6 +13,10 @@ struct PaletteChunk {
     uint chunk_materials[128];
     uint palette;
     uint lod_materil; // TODO: implement this
+};
+
+struct Brick {
+    uint info;
 };
 
 struct Material {
@@ -33,11 +37,15 @@ layout(std430, binding = 1) buffer PaletteChunks {
     PaletteChunk palette_chunks[];
 };
 
-layout(std430, binding = 2) buffer Palettes {
+layout(std430, binding = 2) buffer Bricks {
+    Brick bricks[];
+};
+
+layout(std430, binding = 3) buffer Palettes {
     uint palettes[];
 };
 
-layout(std430, binding = 3) buffer Materials {
+layout(std430, binding = 4) buffer Materials {
     Material materials[];
 };
 
@@ -55,6 +63,7 @@ uniform vec3 cameraV;
 uniform uint timer;
 uniform float randomSeed;
 uniform uvec2 resolution;
+uniform uvec3 brickGridSize;
 
 uint hash(uint x) {
     x += (x << 10u);
@@ -95,98 +104,106 @@ float random(vec4 v) {
 }
 
 bool hitVoxel(Chunk chunk, ivec3 pos) {
-    int index = pos.x * 64 + pos.y * 8 + pos.z;
-    int pack_index = index % 32;
-    int array_index = index / 32;
-    uint pack = chunk.voxels[array_index];
-    uint mask = 1 << pack_index;
-    bool value = (pack & mask) != 0;
-    return value;
+    uint index = pos.x + pos.y * 8 + pos.z * 64;
+    uint array_index = index / 32;
+    uint bit_index = index % 32;
+    uint voxel = (chunk.voxels[array_index] >> bit_index) & 1;
+    return voxel == 1;
 }
 
 uint palette_material(PaletteChunk chunk, ivec3 pos) {
-    uint index = pos.x * 64 + pos.y * 8 + pos.z;
+    uint index = pos.x + pos.y * 8 + pos.z * 64;
     uint array_index = index / 4;
     uint byte_index = index % 4;
     uint material = (chunk.chunk_materials[array_index] >> (8 * byte_index)) & 0xFF;
     return material;
 }
 
-uint material_ids[8];
-uint current_ray_index = 0;
-
-bool hitChunk(Chunk chunk, inout ivec3 gridPos, inout vec3 sideDist, inout bvec3 mask, ivec3 gridStep, vec3 deltaDist) {
-    ivec3 chunk_pos = ivec3(gridPos.x % 8, gridPos.y % 8, gridPos.z % 8);
-    for (int i = 0; i < 8; i++) {
-        if (any(lessThan(chunk_pos, ivec3(0))) || any(greaterThanEqual(chunk_pos, ivec3(8)))) {
-            break;
-        }
-        if (hitVoxel(chunk, chunk_pos)) {
-            PaletteChunk palette_chunk = palette_chunks[chunk.palette_chunk];
-            uint palette_material = palette_material(palette_chunk, chunk_pos);
-            uint material_index = palettes[palette_chunk.palette + palette_material - 1];
-
-            material_ids[current_ray_index] = material_index;
-            return true;
-        }
-        mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
-        sideDist += vec3(mask) * deltaDist;
-        chunk_pos += ivec3(vec3(mask)) * gridStep;
-        gridPos += ivec3(vec3(mask)) * gridStep;
-    }
-    return false;
-}
+uint materialIds[8];
+uint currentRayIndex = 0;
 
 struct RayHit {
     vec3 pos;
-    vec3 dir;    
+    bool hit;
     bvec3 mask;
-    float dist;
 };
 
-RayHit traceRay(vec3 pos, vec3 dir) {
-    ivec3 gridPos = ivec3(floor(pos));
-    vec3 deltaDist = abs(vec3(length(dir)) / dir);
+float aabbIntersect(const vec3 b_min, const vec3 b_max, const vec3 origin, const vec3 inv_dir) {
+    const vec3 t0 = (b_min - origin) * inv_dir;
+    const vec3 t1 = (b_max - origin) * inv_dir;
 
-    ivec3 gridStep = ivec3(sign(dir));
+    const vec3 v_min = min(t0, t1);
+    const vec3 v_max = max(t0, t1);
 
-    vec3 sideDist = 
-        (sign(dir) * (vec3(gridPos) - pos) + (sign(dir) * 0.5) + 0.5) * deltaDist;
+    const float t_min = max(v_min.x, max(v_min.y, v_min.z));
+    const float t_max = min(v_max.x, min(v_max.y, v_max.z));
 
-    Chunk test_chunk = chunks[0];
-    bool hit = false;
-    bvec3 mask;
+    if (!(t_max < t_min) && (t_max >= 0)) return max(0, t_min);
+    return -1;
+}
 
-    ivec3 chunk_pos;
-    for (int i = 0; i < MAX_RAY_STEPS; i++) {
-        if (gridPos.x >= 0 && gridPos.x < 8 &&
-            gridPos.y >= 0 && gridPos.y < 8 &&
-            gridPos.z >= 0 && gridPos.z < 8 &&
-            hitChunk(test_chunk, gridPos, sideDist, mask, gridStep, deltaDist)) {
-            hit = true;
-            break;
+Brick getBrick(ivec3 gridPos) {
+    uint index = gridPos.z * brickGridSize.x * brickGridSize.y + gridPos.y * brickGridSize.y + gridPos.x;
+    return bricks[index]; 
+}
+
+RayHit traceBrickGrid(vec3 rayPos, vec3 rayDir) {
+    const vec3 invRayDir = 1.0 / rayDir;
+    const vec3 deltaDist = abs(invRayDir);
+
+    const vec3 raySign = sign(rayDir);
+    const vec3 deltaDistPartial = ((raySign * 0.5) + 0.5) * deltaDist;
+    const vec3 deltaDistSign = raySign * deltaDist;
+
+    const vec3 rayPos8 = rayPos / 8.0;
+    const vec3 rayPos8Floor = floor(rayPos8); 
+
+    vec3 gridPos = ivec3(rayPos8Floor);
+    vec3 sideDist = (rayPos8Floor - rayPos8) * deltaDistSign + deltaDistPartial;
+    vec3 mask;
+
+    while (
+        gridPos.x >=   0.0 && gridPos.y >=   0.0 && gridPos.z >=   0.0 &&
+        gridPos.x  < brickGridSize.x && gridPos.y  < brickGridSize.y && gridPos.z  < brickGridSize.z
+    ) {
+        Brick brick = getBrick(ivec3(gridPos));
+        if (brick.info != 0) {
+            Chunk chunk = chunks[brick.info];
+            const vec3 bounds = gridPos * 8.0;
+            const vec3 boundsMax = bounds + 8.0;
+
+            const float intersect = aabbIntersect(bounds, boundsMax, rayPos, invRayDir);
+
+            rayPos += rayDir * (intersect + 0.0001);
+            vec3 voxelPos = floor(rayPos);
+
+            sideDist = (voxelPos - rayPos) * deltaDistSign + deltaDistPartial;
+            while (
+                voxelPos.x >= bounds.x    && voxelPos.y >=     bounds.y && voxelPos.z >=     bounds.z &&
+                voxelPos.x  < boundsMax.x && voxelPos.y  < boundsMax.y  && voxelPos.z  < boundsMax.z
+            ) {
+                ivec3 chunkPos = ivec3(mod(voxelPos, 8.0));
+                if (hitVoxel(chunk, chunkPos)) {
+                    PaletteChunk palette_chunk = palette_chunks[chunk.palette_chunk];
+                    uint palette_material = palette_material(palette_chunk, chunkPos);
+                    uint material_index = palettes[palette_chunk.palette + palette_material - 1];
+                    materialIds[currentRayIndex] = material_index;
+                    return RayHit(voxelPos, true, bvec3(mask));
+                }
+                mask = vec3(lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy)));
+                sideDist += mask * deltaDist;
+                voxelPos += mask * raySign;
+            }
+
+            sideDist = (gridPos - rayPos / 8.0) * deltaDistSign + deltaDistPartial;
         }
-        mask = lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy));
-        sideDist += vec3(mask) * deltaDist;
-        gridPos += ivec3(vec3(mask)) * gridStep;
+
+        mask = vec3(lessThanEqual(sideDist.xyz, min(sideDist.yzx, sideDist.zxy)));
+        sideDist += mask * deltaDist;
+        gridPos += mask * raySign;
     }
 
-    float hitDistance;
-
-    if (mask.x) {
-        hitDistance = (sideDist.x - deltaDist.x) / dir.x;
-    } else if (mask.y) {
-        hitDistance = (sideDist.y - deltaDist.y) / dir.y;
-    } else {
-        hitDistance = (sideDist.z - deltaDist.z) / dir.z;
-    }
-    vec3 hitPosition = pos + hitDistance * dir;
-
-    if (!hit) {
-        return RayHit(hitPosition, dir, bvec3(0), hitDistance);
-    }
-
-    return RayHit(hitPosition, dir, mask, hitDistance);
+    return RayHit(vec3(0.0), false, bvec3(0));
 }
 
 void main() { 
@@ -196,48 +213,39 @@ void main() {
     vec2 screenPos = vec2(gl_GlobalInvocationID.xy) / res * 2.0 - 1.0;
     screenPos.x *= aspectRatio;
 
-    vec3 cameraPlaneU = cameraU;
-	vec3 cameraPlaneV = cameraV;
+    const vec3 cameraPlaneU = cameraU;
+	const vec3 cameraPlaneV = cameraV;
 
     vec3 rayDir = cameraDir + screenPos.x * cameraPlaneU + screenPos.y * cameraPlaneV;
     vec3 rayPos = cameraPos;
 
-    RayHit hit = traceRay(rayPos, rayDir);
+    const float intersect = aabbIntersect(vec3(0.0), vec3(brickGridSize * 8 - 1), rayPos, 1.0 / rayDir); 
 
-
-    vec3 albedo = vec3(0.0);
     vec3 normal = vec3(0.0);
-    float depth;
-    if (hit.mask == bvec3(0)) { 
-        depth = 1.0 ;
-        imageStore(albedoTexture, texPos, vec4(albedo, 1.0));
-        imageStore(depthTexture, texPos, vec4(depth));
-        imageStore(normalTexture, texPos, vec4(normal, 1.0));
-        return;
+    vec3 albedo = vec3(0.52, 0.80, 0.92);
+    float depth = 1.0;
+    if (intersect >= 0) {
+        rayPos = rayDir * (intersect + 0.001) + rayPos;
+        const RayHit hit = traceBrickGrid(rayPos, rayDir);
+        if (hit.hit) {
+            depth = pow(distance(rayPos, hit.pos) / 16.0, 2);
+            albedo = materials[materialIds[0]].albedo;
+
+            if (hit.mask.x) {
+                if (rayDir.x >= 0.0) normal = vec3(1.0, 0.0, 0.0);
+                else normal = vec3(-1.0, 0.0, 0.0);
+            } else if (hit.mask.y) {
+                albedo /= 1.2;
+                if (rayDir.y >= 0.0) normal = vec3(0.0, 1.0, 0.0);
+                else normal = vec3(0.0, -1.0, 0.0);
+            } else if (hit.mask.z) {
+                albedo /= 1.5;
+                if (rayDir.z >= 0.0) normal = vec3(0.0, 0.0, 1.0);
+                else normal = vec3(0.0, 0.0, -1.0);
+            }
+        }
     }
 
-    depth = length(hit.dist) / float(MAX_RAY_STEPS); 
-
-    // PaletteChunk palette_chunk = palette_chunks[hit.paletteChunk];
-    uint material_index = material_ids[0];
-    Material material = materials[material_index];
-
-    if (hit.mask.x) {
-        albedo = material.albedo;
-        // albedo = vec3(0.5);
-        if (hit.dir.x >= 0.0) normal = vec3(1.0, 0.0, 0.0);
-        else normal = vec3(-1.0, 0.0, 0.0);
-    } else if (hit.mask.y) {
-        albedo = material.albedo;
-        // albedo = vec3(1.0);
-        if (hit.dir.y >= 0.0) normal = vec3(0.0, 1.0, 0.0);
-        else normal = vec3(0.0, -1.0, 0.0);
-    } else if (hit.mask.z) {
-        albedo = material.albedo;
-        // albedo = vec3(0.75);
-        if (hit.dir.z >= 0.0) normal = vec3(0.0, 0.0, 1.0);
-        else normal = vec3(0.0, 0.0, -1.0);
-    }
     imageStore(albedoTexture, texPos, vec4(albedo, 1.0));
     imageStore(depthTexture, texPos, vec4(depth));
     imageStore(normalTexture, texPos, vec4(normal, 1.0));

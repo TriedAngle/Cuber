@@ -104,3 +104,47 @@ pub fn construct_brick_chunk(chunk: *const world.Chunk, palette_chunk: u32) Bric
     }
     return result;
 }
+
+pub const Brick = extern struct {
+    chunk: u32,
+
+    pub fn empty() Brick {
+        return .{ .chunk = 0 };
+    }
+
+    pub fn chunk(handle: u32) Brick {
+        return .{ .chunk = handle };
+    }
+
+    pub fn lod(color: u24, flags: u8) Brick {
+        var data: u32 = color;
+        data = data << 8 | flags;
+
+        return .{ .chunk = data };
+    }
+};
+
+pub const BrickGrid = struct {
+    const Self = @This();
+    allocator: mem.Allocator,
+    x: u32,
+    y: u32,
+    z: u32,
+    bricks: []Brick,
+
+    pub fn new(allocator: mem.Allocator, x: u32, y: u32, z: u32) Self {
+        const size = x * y * z;
+        var bricks = allocator.alloc(Brick, size) catch unreachable;
+        @memset(bricks, Brick.empty());
+        return .{ .x = x, .y = y, .z = z, .bricks = bricks, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.allocator.free(self.bricks);
+    }
+
+    pub fn set_at(self: *Self, x: u32, y: u32, z: u32, brick: Brick) void {
+        const index = x * self.x * self.y + y * self.x + z;
+        self.bricks[index] = brick;
+    }
+};

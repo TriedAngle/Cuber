@@ -1,4 +1,5 @@
 const std = @import("std");
+const rand = std.rand;
 const sdfui = @import("sdfui");
 const glfw = @import("mach-glfw");
 const gl = @import("gl");
@@ -6,6 +7,7 @@ const glu = @import("glutils");
 
 const m = @import("math");
 const cam = @import("camera.zig");
+const world = @import("world.zig");
 const gen = @import("worldgen.zig");
 const mat = @import("materials.zig");
 const render = @import("render.zig");
@@ -51,7 +53,7 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
-    var camera = cam.Camera.new(m.vec3(-3, 4, 15), m.vec3(0, 1, 0));
+    var camera = cam.Camera.new(m.vec3(4, 5, 4), m.vec3(0, 1, 0));
     var dtime: f32 = 1.0;
 
     var renderer = render.Renderer.init(gpa, .{
@@ -77,26 +79,57 @@ pub fn main() !void {
     const blue_material = renderer.add_material(&mat.Material{
         .albedo = [_]f32{ 0.0, 0.3, 0.9 },
     });
+    const white_material = renderer.add_material(&mat.Material{
+        .albedo = [_]f32{ 1.0, 1.0, 1.0 },
+    });
 
     var palettes = brick.Palettes.init(gpa);
     defer palettes.deinit();
 
-    const test_palette_materials = [_]u32{ violet_material, green_material, blue_material };
+    const test_palette_materials = [_]u32{ violet_material, green_material, blue_material, white_material };
     const test_palette = brick.Palette.new_unchecked(gpa, &test_palette_materials);
     const test_palette_id = palettes.insert_palette(test_palette);
     _ = test_palette_id;
     renderer.resources.palette_buffer.reset(&test_palette_materials);
 
+    var xoshiro: rand.DefaultPrng = rand.DefaultPrng.init(420);
+    var random = xoshiro.random();
+
     var world_gen = gen.WorldGenerator.new();
-    const test_chunk = world_gen.new_random_chunk(0, 3);
 
-    const palette_chunk = brick.construct_palette_chunk(&test_chunk, 0);
-    const palette_chunks = [_]brick.PaletteChunk{palette_chunk};
-    renderer.resources.palette_chunk_buffer.reset(&palette_chunks);
+    var chunks = std.ArrayList(world.Chunk).init(gpa);
+    var palette_chunks = std.ArrayList(brick.PaletteChunk).init(gpa);
+    var brick_chunks = std.ArrayList(brick.BrickChunk).init(gpa);
+    defer chunks.deinit();
+    defer palette_chunks.deinit();
+    defer brick_chunks.deinit();
 
-    const brick_chunk = brick.construct_brick_chunk(&test_chunk, 0);
-    const brick_chunks = [_]brick.BrickChunk{brick_chunk};
-    renderer.resources.chunk_buffer.reset(&brick_chunks);
+    for (0..16) |x| {
+        for (0..16) |y| {
+            for (0..16) |z| {
+                if (random.intRangeAtMost(u32, 0, 10) > 6) {
+                    continue;
+                }
+                const chunk = world_gen.new_random_chunk(0, 4);
+                chunks.append(chunk) catch unreachable;
+                const palette_chunk_id = palette_chunks.items.len;
+                const palette_chunk = brick.construct_palette_chunk(&chunk, 0);
+                palette_chunks.append(palette_chunk) catch unreachable;
+                const brick_chunk_id = brick_chunks.items.len;
+                const brick_chunk = brick.construct_brick_chunk(&chunk, @intCast(palette_chunk_id));
+                brick_chunks.append(brick_chunk) catch unreachable;
+                renderer.grid.set_at(
+                    @intCast(x),
+                    @intCast(y),
+                    @intCast(z),
+                    brick.Brick.chunk(@intCast(brick_chunk_id)),
+                );
+            }
+        }
+    }
+    renderer.resources.palette_chunk_buffer.reset(&palette_chunks.items);
+    renderer.resources.chunk_buffer.reset(&brick_chunks.items);
+    renderer.resources.brick_buffer.reset(&renderer.grid.bricks);
 
     var last_time = std.time.milliTimestamp();
     while (!window.shouldClose()) {

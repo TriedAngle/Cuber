@@ -20,12 +20,12 @@ pub const Chunk = extern struct {
     }
 
     pub fn is_block(self: *Self, x: u32, y: u32, z: u32) bool {
-        const index = x * 64 + y * 8 + z;
+        const index = x + y * 8 + z * 64;
         return self.voxels[index] == 0;
     }
 
     pub fn set_block(self: *Self, x: u32, y: u32, z: u32, value: u8) void {
-        const index = x * 64 + y * 8 + z;
+        const index = x + y * 8 + z * 64;
         self.voxels[index] = value;
     }
 

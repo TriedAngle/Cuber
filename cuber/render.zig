@@ -29,6 +29,7 @@ const Resources = struct {
 
     chunk_buffer: glu.Buffer,
     palette_chunk_buffer: glu.Buffer,
+    brick_buffer: glu.Buffer,
     palette_buffer: glu.Buffer,
     material_buffer: glu.Buffer,
     materials: std.AutoHashMap(u256, u32),
@@ -41,6 +42,7 @@ const Resources = struct {
 
         const chunk_buffer = glu.Buffer.new(brick.BrickChunk, gl.DYNAMIC_COPY);
         const palette_chunk_buffer = glu.Buffer.new(brick.PaletteChunk, gl.DYNAMIC_COPY);
+        const brick_buffer = glu.Buffer.new(brick.Brick, gl.DYNAMIC_COPY);
         const palette_buffer = glu.Buffer.new(u32, gl.DYNAMIC_COPY);
         const material_buffer = glu.Buffer.new_sized(mat.Material, 32, gl.DYNAMIC_COPY);
         const materials = std.AutoHashMap(u256, u32).init(allocator);
@@ -51,6 +53,7 @@ const Resources = struct {
             .normal_texture = normal_texture,
             .chunk_buffer = chunk_buffer,
             .palette_chunk_buffer = palette_chunk_buffer,
+            .brick_buffer = brick_buffer,
             .palette_buffer = palette_buffer,
             .material_buffer = material_buffer,
             .materials = materials,
@@ -61,9 +64,9 @@ const Resources = struct {
         self.albedo_texture.deinit();
         self.depth_texture.deinit();
         self.normal_texture.deinit();
-
         self.chunk_buffer.deinit();
         self.palette_chunk_buffer.deinit();
+        self.brick_buffer.deinit();
         self.palette_buffer.deinit();
         self.material_buffer.deinit();
         self.materials.deinit();
@@ -97,6 +100,7 @@ const Resources = struct {
 
 pub const RenderConfig = struct {
     debug_texture: ?DebugTexture,
+    initial_brickgrid: struct { x: u32, y: u32, z: u32 } = .{ .x = 64, .y = 64, .z = 64 },
 };
 
 pub const Renderer = struct {
@@ -108,6 +112,7 @@ pub const Renderer = struct {
     width: u32 = 0,
     height: u32 = 0,
     resources: Resources,
+    grid: brick.BrickGrid,
 
     compute: glu.Program,
     present: glu.Program,
@@ -122,16 +127,19 @@ pub const Renderer = struct {
         const lol = vbovao_default();
         var present = glu.Program.new_simple(allocator, vertex_shader, fragment_shader);
         var compute = glu.Program.new_compute(allocator, compute_shader);
+        const grid_config = config.initial_brickgrid;
+        const grid = brick.BrickGrid.new(allocator, grid_config.x, grid_config.y, grid_config.z);
         return Self{
             .allocator = allocator,
             .config = config,
             .vao = lol.vao,
             .vbo = lol.vbo,
-            .randomer = randomer,
-            .random = randomer.random(),
             .resources = resources,
+            .grid = grid,
             .compute = compute,
             .present = present,
+            .randomer = randomer,
+            .random = randomer.random(),
         };
     }
 
@@ -139,6 +147,7 @@ pub const Renderer = struct {
         self.resources.deinit();
         self.present.deinit();
         self.compute.deinit();
+        self.grid.deinit();
         gl.deleteVertexArrays(1, &[_]u32{self.vao});
     }
 
@@ -157,11 +166,14 @@ pub const Renderer = struct {
         var compute = &self.compute;
         var resources = &self.resources;
 
+        const grid = &self.grid;
+
         compute.use();
         resources.chunk_buffer.bind(0);
         resources.palette_chunk_buffer.bind(1);
-        resources.palette_buffer.bind(2);
-        resources.material_buffer.bind(3);
+        resources.brick_buffer.bind(2);
+        resources.palette_buffer.bind(3);
+        resources.material_buffer.bind(4);
         resources.albedo_texture.bind(0, 0, 0);
         resources.depth_texture.bind(1, 0, 0);
         resources.normal_texture.bind(2, 0, 0);
@@ -172,6 +184,7 @@ pub const Renderer = struct {
         compute.uniform("timer", u32, @intCast(self.dtime));
         // compute.uniform("randomSeed", f32, self.random.float(f32));
         compute.uniform("resolution", [2]u32, [_]u32{ self.width, self.height });
+        compute.uniform("brickGridSize", [3]u32, [_]u32{ grid.x, grid.y, grid.z });
         compute.dispatch(self.width, self.height, 1);
         compute.unuse();
     }
