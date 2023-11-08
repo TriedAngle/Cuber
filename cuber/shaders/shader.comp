@@ -1,7 +1,6 @@
 #version 460
 
 const int RAY_BOUNCES = 4;
-const int MAX_RAY_STEPS = 32;
 
 struct Chunk {
     uint voxels[16];
@@ -219,7 +218,7 @@ void main() {
     vec3 rayDir = cameraDir + screenPos.x * cameraPlaneU + screenPos.y * cameraPlaneV;
     vec3 rayPos = cameraPos;
 
-    const float intersect = aabbIntersect(vec3(0.0), vec3(brickGridSize * 8 - 1), rayPos, 1.0 / rayDir); 
+    const float intersect = aabbIntersect(vec3(0.00), vec3(brickGridSize * 8 - 1), rayPos, 1.0 / rayDir); 
 
     vec3 normal = vec3(0.0);
     vec3 albedo = vec3(0.52, 0.80, 0.92);

@@ -12,6 +12,9 @@ const gen = @import("worldgen.zig");
 const mat = @import("materials.zig");
 const render = @import("render.zig");
 const brick = @import("brickmap.zig");
+const c = @cImport(
+    @cInclude("FastNoiseLite.h"),
+);
 
 fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
     _ = p;
@@ -53,11 +56,12 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
-    var camera = cam.Camera.new(m.vec3(4, 5, 4), m.vec3(0, 1, 0));
+    var camera = cam.Camera.new(m.vec3(200, 200, 200), m.vec3(0, 1, 0));
     var dtime: f32 = 1.0;
 
     var renderer = render.Renderer.init(gpa, .{
         .debug_texture = .Albedo,
+        .initial_brickgrid = .{ .x = 16, .y = 16, .z = 16 },
     });
     renderer.resize(1280, 720);
     defer renderer.deinit();
@@ -94,6 +98,11 @@ pub fn main() !void {
 
     var xoshiro: rand.DefaultPrng = rand.DefaultPrng.init(420);
     var random = xoshiro.random();
+    _ = random;
+
+    var noise = c.fnlCreateState();
+    const testing = c.fnlGetNoise3D(&noise, 5, 6, 3);
+    _ = testing;
 
     var world_gen = gen.WorldGenerator.new();
 
@@ -107,9 +116,6 @@ pub fn main() !void {
     for (0..16) |x| {
         for (0..16) |y| {
             for (0..16) |z| {
-                if (random.intRangeAtMost(u32, 0, 10) > 6) {
-                    continue;
-                }
                 const chunk = world_gen.new_random_chunk(0, 4);
                 chunks.append(chunk) catch unreachable;
                 const palette_chunk_id = palette_chunks.items.len;

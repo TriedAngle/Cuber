@@ -127,10 +127,15 @@ pub fn build_cuber(
     math: *std.Build.Module,
     glutils: *std.Build.Module,
 ) void {
-    var cflags = [_][]const u8{ "-Wall", "-O3", "-g" };
+    var cflags = [_][]const u8{
+        "-std=c99",
+        "-fno-sanitize=undefined",
+        "-g",
+        "-O3",
+    };
 
     var cfiles = [_][]const u8{
-        "libs/microui/src/microui.c",
+        "libs/FastNoiseLite/FastNoiseLite.c",
     };
 
     var exe = b.addExecutable(.{
@@ -147,6 +152,7 @@ pub fn build_cuber(
     exe.addModule("math", math);
     exe.addModule("glutils", glutils);
     exe.addIncludePath(.{ .path = "libs/" });
+    exe.addIncludePath(.{ .path = "libs/FastNoiseLite" });
     exe.addCSourceFiles(.{
         .files = &cfiles,
         .flags = &cflags,
