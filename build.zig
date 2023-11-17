@@ -127,12 +127,7 @@ pub fn build_cuber(
     math: *std.Build.Module,
     glutils: *std.Build.Module,
 ) void {
-    var cflags = [_][]const u8{
-        "-std=c99",
-        "-fno-sanitize=undefined",
-        "-g",
-        "-O3",
-    };
+    var cflags = [_][]const u8{ "-std=c99", "-fno-sanitize=undefined", "-g", "-O3" };
 
     var cfiles = [_][]const u8{
         "libs/FastNoiseLite/FastNoiseLite.c",
@@ -151,6 +146,32 @@ pub fn build_cuber(
     exe.addModule("gl", opengl);
     exe.addModule("math", math);
     exe.addModule("glutils", glutils);
+
+
+    const ZigImGui = b.dependency("ZigImGui", .{
+        .target = target,
+        .optimize = optimize,
+        .enable_freetype = true,
+        .enable_lunasvg = false,
+        .enable_opengl = true,
+    });
+
+    exe.addIncludePath(ZigImGui.path("zig-imgui/vendor/cimgui/imgui/"));
+    exe.addIncludePath(.{ .path = "libs/imgui/imgui_impl_glfw.h" });
+
+    exe.addCSourceFile(.{
+        .file = .{ .path = "libs/imgui/imgui_impl_glfw.cpp" },
+        .flags = &.{
+            "-std=c++11",
+            "-fno-sanitize=undefined",
+            "-fvisibility=hidden",
+            "-O3",
+        },
+    });
+
+    exe.addModule("Zig-ImGui", ZigImGui.module("Zig-ImGui"));
+    exe.linkLibrary(ZigImGui.artifact("cimgui"));
+
     exe.addIncludePath(.{ .path = "libs/" });
     exe.addIncludePath(.{ .path = "libs/FastNoiseLite" });
     exe.addCSourceFiles(.{

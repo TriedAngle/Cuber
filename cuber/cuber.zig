@@ -2,6 +2,7 @@ const std = @import("std");
 const rand = std.rand;
 const sdfui = @import("sdfui");
 const glfw = @import("mach-glfw");
+const zimgui = @import("Zig-ImGui");
 const gl = @import("gl");
 const glu = @import("glutils");
 
@@ -12,9 +13,14 @@ const gen = @import("worldgen.zig");
 const mat = @import("materials.zig");
 const render = @import("render.zig");
 const brick = @import("brickmap.zig");
-const c = @cImport(
-    @cInclude("FastNoiseLite.h"),
-);
+
+pub extern fn ImGui_ImplOpenGL3_Init(glsl_version: ?[*:0]const u8) bool;
+pub extern fn ImGui_ImplOpenGL3_Shutdown() void;
+pub extern fn ImGui_ImplOpenGL3_NewFrame() void;
+pub extern fn ImGui_ImplOpenGL3_RenderDrawData(draw_data: *const anyopaque) void;
+pub extern fn ImGui_ImplGlfw_InitForOpenGL(window: *anyopaque, install_callbacks: bool) bool;
+pub extern fn ImGui_ImplGlfw_Shutdown() void;
+pub extern fn ImGui_ImplGlfw_NewFrame() void;
 
 fn glGetProcAddress(p: glfw.GLProc, proc: [:0]const u8) ?gl.FunctionPointer {
     _ = p;
@@ -56,12 +62,26 @@ pub fn main() !void {
     const proc: glfw.GLProc = undefined;
     try gl.load(proc, glGetProcAddress);
 
-    var camera = cam.Camera.new(m.vec3(200, 200, 200), m.vec3(0, 1, 0));
+    const im_context = zimgui.CreateContext();
+    defer zimgui.DestroyContext();
+    zimgui.SetCurrentContext(im_context);
+    {
+        const im_io = zimgui.GetIO();
+        im_io.IniFilename = null;
+    }
+
+    zimgui.StyleColorsDark();
+    _ = ImGui_ImplGlfw_InitForOpenGL(@ptrCast(window.handle), true);
+    defer ImGui_ImplGlfw_Shutdown();
+    _ = ImGui_ImplOpenGL3_Init(null);
+    defer ImGui_ImplOpenGL3_Shutdown();
+
+    var camera = cam.Camera.new(m.vec3(0, 0, 0), m.vec3(0, 1, 0));
     var dtime: f32 = 1.0;
 
     var renderer = render.Renderer.init(gpa, .{
         .debug_texture = .Albedo,
-        .initial_brickgrid = .{ .x = 16, .y = 16, .z = 16 },
+        .initial_brickgrid = .{ .x = 32, .y = 32, .z = 32 },
     });
     renderer.resize(1280, 720);
     defer renderer.deinit();
@@ -98,13 +118,8 @@ pub fn main() !void {
 
     var xoshiro: rand.DefaultPrng = rand.DefaultPrng.init(420);
     var random = xoshiro.random();
-    _ = random;
 
-    var noise = c.fnlCreateState();
-    const testing = c.fnlGetNoise3D(&noise, 5, 6, 3);
-    _ = testing;
-
-    var world_gen = gen.WorldGenerator.new();
+    var world_gen = gen.WorldGenerator.new(gpa);
 
     var chunks = std.ArrayList(world.Chunk).init(gpa);
     var palette_chunks = std.ArrayList(brick.PaletteChunk).init(gpa);
@@ -113,9 +128,12 @@ pub fn main() !void {
     defer palette_chunks.deinit();
     defer brick_chunks.deinit();
 
-    for (0..16) |x| {
-        for (0..16) |y| {
-            for (0..16) |z| {
+    for (0..32) |x| {
+        for (0..32) |y| {
+            for (0..32) |z| {
+                if (random.intRangeAtMost(u32, 0, 10) > 4) {
+                    continue;
+                }
                 const chunk = world_gen.new_random_chunk(0, 4);
                 chunks.append(chunk) catch unreachable;
                 const palette_chunk_id = palette_chunks.items.len;
@@ -144,9 +162,24 @@ pub fn main() !void {
         dtime = @floatFromInt(delta_time);
         last_time = current_time;
         processKeyboard(&window);
+        const size = window.getFramebufferSize();
 
         renderer.update(delta_time);
         renderer.render(&camera);
+
+        ImGui_ImplOpenGL3_NewFrame();
+        var im_io = zimgui.GetIO();
+        im_io.DisplaySize = zimgui.Vec2.init(@floatFromInt(size.width), @floatFromInt(size.height));
+        zimgui.NewFrame();
+
+        if (zimgui.Begin("Example")) {
+            _ = zimgui.Text("Hello world!");
+        }
+        zimgui.End();
+
+        zimgui.EndFrame();
+        zimgui.Render();
+        ImGui_ImplOpenGL3_RenderDrawData(zimgui.GetDrawData());
 
         window.swapBuffers();
         glfw.pollEvents();
@@ -157,6 +190,7 @@ const WindowData = struct {
     camera: *cam.Camera,
     renderer: *render.Renderer,
     dtime: f32,
+    capture: bool = true,
 };
 
 fn processKeyboard(window: *glfw.Window) void {
@@ -167,26 +201,30 @@ fn processKeyboard(window: *glfw.Window) void {
     var data = maybe_data.?;
     var dtime = data.dtime;
     dtime /= 10;
+
     if (window.getKey(.escape) == .press) {
         window.setShouldClose(true);
     }
-    if (window.getKey(.w) == .press) {
-        data.camera.update_direction(.Front, dtime);
-    }
-    if (window.getKey(.s) == .press) {
-        data.camera.update_direction(.Back, dtime);
-    }
-    if (window.getKey(.a) == .press) {
-        data.camera.update_direction(.Left, dtime);
-    }
-    if (window.getKey(.d) == .press) {
-        data.camera.update_direction(.Right, dtime);
-    }
-    if (window.getKey(.space) == .press) {
-        data.camera.update_direction(.Up, dtime);
-    }
-    if (window.getKey(.left_shift) == .press) {
-        data.camera.update_direction(.Down, dtime);
+
+    if (data.capture) {
+        if (window.getKey(.w) == .press) {
+            data.camera.update_direction(.Front, dtime);
+        }
+        if (window.getKey(.s) == .press) {
+            data.camera.update_direction(.Back, dtime);
+        }
+        if (window.getKey(.a) == .press) {
+            data.camera.update_direction(.Left, dtime);
+        }
+        if (window.getKey(.d) == .press) {
+            data.camera.update_direction(.Right, dtime);
+        }
+        if (window.getKey(.space) == .press) {
+            data.camera.update_direction(.Up, dtime);
+        }
+        if (window.getKey(.left_shift) == .press) {
+            data.camera.update_direction(.Down, dtime);
+        }
     }
 }
 
@@ -196,24 +234,25 @@ fn cursorMoveCallback(window: glfw.Window, xpos_in: f64, ypos_in: f64) void {
         return;
     }
     var data = maybe_data.?;
+    if (data.capture) {
+        const xpos: f32 = @floatCast(xpos_in);
+        const ypos: f32 = @floatCast(ypos_in);
+        var camera = data.camera;
 
-    const xpos: f32 = @floatCast(xpos_in);
-    const ypos: f32 = @floatCast(ypos_in);
-    var camera = data.camera;
+        if (camera.first_enter) {
+            camera.last_cursor_x = xpos;
+            camera.last_cursor_y = ypos;
+            camera.first_enter = false;
+        }
 
-    if (camera.first_enter) {
+        const xoffset = xpos - camera.last_cursor_x;
+        const yoffset = camera.last_cursor_y - ypos; // reversed! y-coordinates go bottom->top in gl while window is top->bottom
+
         camera.last_cursor_x = xpos;
         camera.last_cursor_y = ypos;
-        camera.first_enter = false;
+
+        camera.update_rotation(xoffset, yoffset);
     }
-
-    const xoffset = xpos - camera.last_cursor_x;
-    const yoffset = camera.last_cursor_y - ypos; // reversed! y-coordinates go bottom->top in gl while window is top->bottom
-
-    camera.last_cursor_x = xpos;
-    camera.last_cursor_y = ypos;
-
-    camera.update_rotation(xoffset, yoffset);
 }
 
 fn keyCallback(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
@@ -227,6 +266,15 @@ fn keyCallback(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.A
     if (data.renderer.config.debug_texture) |*debug_texture| {
         if (key == .n and action == .press) {
             debug_texture.* = debug_texture.next();
+        }
+    }
+    if (key == .f and action == .press) {
+        if (data.capture) {
+            window.setInputModeCursor(.normal);
+            data.capture = false;
+        } else {
+            window.setInputModeCursor(.disabled);
+            data.capture = true;
         }
     }
 }

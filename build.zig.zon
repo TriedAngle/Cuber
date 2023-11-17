@@ -10,5 +10,9 @@
             .url = "https://pkg.machengine.org/mach-glfw/a13c2b7f6a27e407b6d8686208d96fa654864dec.tar.gz",
             .hash = "12208da63a18938cf0ac8fe0e9f538b87d796057684f090e15a8c8bbb9326ec8ea21",
         },
+        .ZigImGui = .{
+            .hash = "12202d28fa1c367fdbfac37c136e7cab4d1b8ed3b4a0cf0ef2494c8d2d2cde6d3e6f",
+            .url = "https://gitlab.com/joshua.software.dev/Zig-ImGui/-/archive/22a034c1b8bcc24566409a42163f37231b268d3b/Zig-ImGui-22a034c1b8bcc24566409a42163f37231b268d3b.tar.gz",
+        },
     },
 }
