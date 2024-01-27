@@ -50,8 +50,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .enable_opengl = true,
-        .enable_freetype = false,
-        .enable_lunasvg = false,
+        .enable_freetype = true,
+        .enable_lunasvg = true,
     });
 
     const imgui_dep = ZigImGui.builder.dependency("imgui", .{
@@ -116,6 +116,8 @@ fn build_cuber(
     imgui_opengl: *std.Build.Step.Compile,
     fastnoise: *std.Build.Step.Compile,
 ) void {
+    _ = fastnoise; // autofix
+
     const exe = b.addExecutable(.{
         .name = "cuber",
         .root_source_file = .{ .path = "cuber/cuber.zig" },
@@ -135,7 +137,13 @@ fn build_cuber(
     exe.linkLibrary(imgui_glfw);
     exe.linkLibrary(imgui_opengl);
 
-    exe.linkLibrary(fastnoise);
+    // exe.linkLibrary(fastnoise);
+
+    exe.addIncludePath(.{ .path = "libs/FastNoiseLite" });
+    exe.addCSourceFiles(.{
+        .files = &[_][]const u8{"libs/FastNoiseLite/FastNoiseLite.c"},
+        .flags = &[_][]const u8{ "-std=c99", "-fno-sanitize=undefined", "-g", "-O3" },
+    });
 
     const docs = exe;
     const doc = b.step(

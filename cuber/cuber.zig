@@ -77,7 +77,7 @@ pub fn main() !void {
     _ = ImGui_ImplOpenGL3_Init(null);
     defer ImGui_ImplOpenGL3_Shutdown();
 
-    var camera = cam.Camera.new(m.vec3(0, 0, 0), m.vec3(0, 1, 0));
+    var camera = cam.Camera.new(m.vec3(0, 100, 0), m.vec3(0, 1, 0));
     var dtime: f32 = 1.0;
 
     var renderer = render.Renderer.init(gpa, .{
@@ -117,8 +117,8 @@ pub fn main() !void {
     _ = test_palette_id;
     renderer.resources.palette_buffer.reset(&test_palette_materials);
 
-    var xoshiro: rand.DefaultPrng = rand.DefaultPrng.init(420);
-    var random = xoshiro.random();
+    // var xoshiro: rand.DefaultPrng = rand.DefaultPrng.init(420);
+    // var random = xoshiro.random();
 
     var world_gen = gen.WorldGenerator.new(gpa);
 
@@ -130,12 +130,9 @@ pub fn main() !void {
     defer brick_chunks.deinit();
 
     for (0..32) |x| {
-        for (0..32) |y| {
+        for (0..24) |y| {
             for (0..32) |z| {
-                if (random.intRangeAtMost(u32, 0, 10) > 4) {
-                    continue;
-                }
-                const chunk = world_gen.new_random_chunk(0, 4);
+                const chunk = world_gen.generate_chunk(@intCast(x), @intCast(y), @intCast(z));
                 chunks.append(chunk) catch unreachable;
                 const palette_chunk_id = palette_chunks.items.len;
                 const palette_chunk = brick.construct_palette_chunk(&chunk, 0);

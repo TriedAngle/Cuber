@@ -144,7 +144,7 @@ pub const BrickGrid = struct {
     }
 
     pub fn set_at(self: *Self, x: u32, y: u32, z: u32, brick: Brick) void {
-        const index = x * self.x * self.y + y * self.x + z;
+        const index = x + y * self.x + z * self.x * self.y;
         self.bricks[index] = brick;
     }
 };
