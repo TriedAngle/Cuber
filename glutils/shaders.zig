@@ -81,7 +81,7 @@ pub fn check_shader(shader: u32) !void {
     if (status != 1) {
         var log_length: i32 = undefined;
         gl.getShaderiv(shader, gl.INFO_LOG_LENGTH, &log_length);
-        var error_log = try std.heap.c_allocator.alloc(u8, @as(usize, @intCast(log_length)));
+        const error_log = try std.heap.c_allocator.alloc(u8, @as(usize, @intCast(log_length)));
         defer std.heap.c_allocator.free(error_log);
         gl.getShaderInfoLog(shader, log_length, null, error_log.ptr);
         std.debug.panic("OpengGL Error: {s}", .{error_log});
@@ -94,7 +94,7 @@ pub fn check_program(program: u32) !void {
     if (status != 1) {
         var log_length: i32 = undefined;
         gl.getProgramiv(program, gl.INFO_LOG_LENGTH, &log_length);
-        var error_log = try std.heap.c_allocator.alloc(u8, @as(usize, @intCast(log_length)));
+        const error_log = try std.heap.c_allocator.alloc(u8, @as(usize, @intCast(log_length)));
         defer std.heap.c_allocator.free(error_log);
         gl.getProgramInfoLog(program, log_length, null, error_log.ptr);
         std.debug.panic("OpengGL Error: {s}", .{error_log});
@@ -128,7 +128,7 @@ pub fn make_compute(source: [:0]const u8) u32 {
 }
 
 pub fn make_program(shaders: []const u32) u32 {
-    var program = gl.createProgram();
+    const program = gl.createProgram();
     for (shaders) |shader| {
         gl.attachShader(program, shader);
     }

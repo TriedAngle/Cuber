@@ -18,6 +18,7 @@ pub extern fn ImGui_ImplOpenGL3_Init(glsl_version: ?[*:0]const u8) bool;
 pub extern fn ImGui_ImplOpenGL3_Shutdown() void;
 pub extern fn ImGui_ImplOpenGL3_NewFrame() void;
 pub extern fn ImGui_ImplOpenGL3_RenderDrawData(draw_data: *const anyopaque) void;
+
 pub extern fn ImGui_ImplGlfw_InitForOpenGL(window: *anyopaque, install_callbacks: bool) bool;
 pub extern fn ImGui_ImplGlfw_Shutdown() void;
 pub extern fn ImGui_ImplGlfw_NewFrame() void;
@@ -233,7 +234,7 @@ fn cursorMoveCallback(window: glfw.Window, xpos_in: f64, ypos_in: f64) void {
     if (maybe_data == null) {
         return;
     }
-    var data = maybe_data.?;
+    const data = maybe_data.?;
     if (data.capture) {
         const xpos: f32 = @floatCast(xpos_in);
         const ypos: f32 = @floatCast(ypos_in);

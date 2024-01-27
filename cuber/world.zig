@@ -19,6 +19,25 @@ pub const Chunk = extern struct {
         };
     }
 
+    pub fn new(
+        data: *anyopaque,
+        generator: fn (data: *anyopaque, x: u32, y: u32, z: u32) u8,
+    ) Self {
+        var self = Self.empty();
+        for (0..8) |x| {
+            const chunk_x = x % 8;
+            for (0..8) |y| {
+                const chunk_y = y % 8;
+                for (0..8) |z| {
+                    const chunk_z = z % 8;
+                    const voxel = generator(data, x, y, z);
+                    self.set_block(chunk_x, chunk_y, chunk_z, voxel);
+                }
+            }
+        }
+        return self;
+    }
+
     pub fn is_block(self: *Self, x: u32, y: u32, z: u32) bool {
         const index = x + y * 8 + z * 64;
         return self.voxels[index] == 0;

@@ -3,7 +3,7 @@ const mem = std.mem;
 
 // TODO: fix this, no idea how sort function works, ask on discord lol
 pub fn dedupsort(allocator: mem.Allocator, list: []const u32) ![]u32 {
-    var sorted = try allocator.alloc(u32, list.len);
+    const sorted = try allocator.alloc(u32, list.len);
     defer allocator.free(sorted);
     @memcpy(sorted, list);
     std.mem.sort(u32, sorted, .{}, std.mem.lessThan);

@@ -108,7 +108,7 @@ pub fn resize(
     new: usize,
     usage: u32,
 ) u32 {
-    var new_buffer = empty(T, new, usage);
+    const new_buffer = empty(T, new, usage);
     gl.copyNamedBufferSubData(
         buffer,
         new_buffer,

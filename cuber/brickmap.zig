@@ -11,13 +11,13 @@ pub const Palette = struct {
     material_ids: []u32,
 
     pub fn new(allocator: mem.Allocator, materials: []const u32) Palette {
-        var ids = utils.dedupsort(allocator, materials) catch unreachable;
+        const ids = utils.dedupsort(allocator, materials) catch unreachable;
         return Palette{ .material_ids = ids };
     }
 
     // prefer to use this function, other places should have it safeguarded tbh.
     pub fn new_unchecked(allocator: mem.Allocator, materials: []const u32) Palette {
-        var ids = allocator.alloc(u32, materials.len) catch unreachable;
+        const ids = allocator.alloc(u32, materials.len) catch unreachable;
         @memcpy(ids, materials);
         return Palette{ .material_ids = ids };
     }
@@ -134,7 +134,7 @@ pub const BrickGrid = struct {
 
     pub fn new(allocator: mem.Allocator, x: u32, y: u32, z: u32) Self {
         const size = x * y * z;
-        var bricks = allocator.alloc(Brick, size) catch unreachable;
+        const bricks = allocator.alloc(Brick, size) catch unreachable;
         @memset(bricks, Brick.empty());
         return .{ .x = x, .y = y, .z = z, .bricks = bricks, .allocator = allocator };
     }

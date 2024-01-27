@@ -125,8 +125,8 @@ pub const Renderer = struct {
         const resources = Resources.init(allocator);
         var randomer = std.rand.DefaultPrng.init(69420666);
         const lol = vbovao_default();
-        var present = glu.Program.new_simple(allocator, vertex_shader, fragment_shader);
-        var compute = glu.Program.new_compute(allocator, compute_shader);
+        const present = glu.Program.new_simple(allocator, vertex_shader, fragment_shader);
+        const compute = glu.Program.new_compute(allocator, compute_shader);
         const grid_config = config.initial_brickgrid;
         const grid = brick.BrickGrid.new(allocator, grid_config.x, grid_config.y, grid_config.z);
         return Self{
@@ -228,7 +228,7 @@ pub const Renderer = struct {
 
 fn vbovao_default() struct { vao: u32, vbo: glu.Buffer } {
     var vao: u32 = undefined;
-    var vbo = glu.Buffer.new_data(f32, &present_vertices, gl.DYNAMIC_DRAW);
+    const vbo = glu.Buffer.new_data(f32, &present_vertices, gl.DYNAMIC_DRAW);
     gl.createVertexArrays(1, &vao);
     gl.vertexArrayVertexBuffer(vao, 0, vbo.handle, 0, 5 * @sizeOf(f32));
     gl.enableVertexArrayAttrib(vao, 0);

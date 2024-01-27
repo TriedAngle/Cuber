@@ -1,25 +1,8 @@
 const std = @import("std");
-const builtin = std.builtin;
-const Builder = std.build.Builder;
 
-// libraries
-const opengl_path = "libs/gl.zig";
+const ZigImGuiBuild = @import("ZigImGui");
 
-// modules
-const sdfui_path = "sdfui/sdfui.zig";
-const cuber_path = "cuber/cuber.zig";
-const glutils_path = "glutils/glutils.zig";
-const math_path = "math/math.zig";
-
-// examples
-const sdfui_samples = [_][2][]const u8{
-    [_][]const u8{ "basic", "samples/sdfui/basic.zig" },
-};
-
-// tests
-const sdfui_tests = "sdfui/tests.zig";
-
-pub fn build(b: *Builder) void {
+pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -28,156 +11,131 @@ pub fn build(b: *Builder) void {
         .optimize = optimize,
     });
 
-    const opengl = b.addModule("gl", .{
-        .source_file = .{ .path = opengl_path },
+    const glfw_dep = glfw.builder.dependency("glfw", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const gl_headers = b.dependency("opengl_headers", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const gl = b.addModule("gl", .{
+        .root_source_file = .{ .path = "libs/gl.zig" },
     });
 
     const math = b.addModule("math", .{
-        .source_file = .{ .path = math_path },
+        .root_source_file = .{ .path = "math/math.zig" },
     });
 
     const glutils = b.addModule("glutils", .{
-        .source_file = .{ .path = glutils_path },
-        .dependencies = &.{
-            .{ .name = "gl", .module = opengl },
-            .{ .name = "math", .module = math },
-        },
+        .root_source_file = .{ .path = "glutils/glutils.zig" },
     });
 
-    const sdfui = b.addModule("sdfui", .{
-        .source_file = .{ .path = sdfui_path },
-        .dependencies = &.{
-            .{ .name = "gl", .module = opengl },
-            .{ .name = "glutils", .module = glutils },
-            .{ .name = "math", .module = math },
-        },
-    });
+    glutils.addImport("gl", gl);
+    glutils.addImport("math", math);
 
-    build_sdfui(b, optimize, target, sdfui, opengl, glfw);
+    const sdfui = b.addModule("sdfui", .{ .root_source_file = .{
+        .path = "sdfui/sdfui.zig",
+    } });
 
-    build_cuber(b, optimize, target, sdfui, opengl, glfw, math, glutils);
-}
+    sdfui.addImport("math", math);
+    sdfui.addImport("gl", gl);
+    sdfui.addImport("glutils", glutils);
 
-pub fn executable_name(b: *Builder, module: []const u8, name: []const u8) []const u8 {
-    return b.fmt("{s}-{s}", .{ module, name });
-}
-
-pub fn build_sdfui(
-    b: *Builder,
-    optimize: builtin.OptimizeMode,
-    target: std.zig.CrossTarget,
-    sdfui: *std.Build.Module,
-    opengl: *std.Build.Module,
-    glfw: *std.Build.Dependency,
-) void {
-    for (sdfui_samples) |example| {
-        const name = example[0];
-        const source = example[1];
-        var exe = b.addExecutable(.{
-            .name = executable_name(b, "sdfui", name),
-            .root_source_file = .{ .path = source },
-            .optimize = optimize,
-        });
-        exe.linkLibC();
-        exe.addModule("sdfui", sdfui);
-        exe.addModule("mach-glfw", glfw.module("mach-glfw"));
-        @import("mach_glfw").link(glfw.builder, exe);
-
-        exe.addModule("gl", opengl);
-
-        const docs = exe;
-        const doc = b.step(
-            b.fmt("{s}-docs", .{name}),
-            "Generate documentation",
-        );
-        doc.dependOn(&docs.step);
-
-        const run_cmd = b.addRunArtifact(exe);
-        b.installArtifact(exe);
-        const exe_step = b.step(
-            executable_name(b, "sdfui", name),
-            b.fmt("run {s}.zig", .{name}),
-        );
-        exe_step.dependOn(&run_cmd.step);
-    }
-
-    const tests = b.addTest(.{
-        .root_source_file = std.build.FileSource{ .path = sdfui_tests },
-        .optimize = optimize,
-        .target = target,
-        .name = "tests",
-    });
-    tests.addModule("sdfui", sdfui);
-    b.installArtifact(tests);
-    const test_cmd = b.step(
-        executable_name(b, "sdfui", "tests"),
-        "Run the tests",
-    );
-    test_cmd.dependOn(b.getInstallStep());
-    test_cmd.dependOn(&b.addRunArtifact(tests).step);
-}
-
-pub fn build_cuber(
-    b: *Builder,
-    optimize: builtin.OptimizeMode,
-    target: std.zig.CrossTarget,
-    sdfui: *std.Build.Module,
-    opengl: *std.Build.Module,
-    glfw: *std.Build.Dependency,
-    math: *std.Build.Module,
-    glutils: *std.Build.Module,
-) void {
-    var cflags = [_][]const u8{ "-std=c99", "-fno-sanitize=undefined", "-g", "-O3" };
-
-    var cfiles = [_][]const u8{
-        "libs/FastNoiseLite/FastNoiseLite.c",
-    };
-
-    var exe = b.addExecutable(.{
-        .name = "cuber",
-        .root_source_file = .{ .path = cuber_path },
-        .optimize = optimize,
-        .target = target,
-    });
-    exe.linkLibC();
-    exe.addModule("sdfui", sdfui);
-    exe.addModule("mach-glfw", glfw.module("mach-glfw"));
-    @import("mach_glfw").link(glfw.builder, exe);
-    exe.addModule("gl", opengl);
-    exe.addModule("math", math);
-    exe.addModule("glutils", glutils);
-
+    const fastnoise = create_fastnoise_lib(b, target, optimize);
 
     const ZigImGui = b.dependency("ZigImGui", .{
         .target = target,
         .optimize = optimize,
-        .enable_freetype = true,
-        .enable_lunasvg = false,
         .enable_opengl = true,
+        .enable_freetype = false,
+        .enable_lunasvg = false,
     });
 
-    exe.addIncludePath(ZigImGui.path("zig-imgui/vendor/cimgui/imgui/"));
-    exe.addIncludePath(.{ .path = "libs/imgui/imgui_impl_glfw.h" });
-
-    exe.addCSourceFile(.{
-        .file = .{ .path = "libs/imgui/imgui_impl_glfw.cpp" },
-        .flags = &.{
-            "-std=c++11",
-            "-fno-sanitize=undefined",
-            "-fvisibility=hidden",
-            "-O3",
-        },
+    const imgui_dep = ZigImGui.builder.dependency("imgui", .{
+        .target = target,
+        .optimize = optimize,
     });
 
-    exe.addModule("Zig-ImGui", ZigImGui.module("Zig-ImGui"));
-    exe.linkLibrary(ZigImGui.artifact("cimgui"));
+    const imgui_glfw = create_imgui_glfw_lib(
+        b,
+        target,
+        optimize,
+        glfw_dep,
+        gl_headers,
+        imgui_dep,
+        ZigImGui,
+    );
 
-    exe.addIncludePath(.{ .path = "libs/" });
-    exe.addIncludePath(.{ .path = "libs/FastNoiseLite" });
-    exe.addCSourceFiles(.{
-        .files = &cfiles,
-        .flags = &cflags,
+    const imgui_opengl = create_imgui_opengl_lib(
+        b,
+        target,
+        optimize,
+        imgui_dep,
+        ZigImGui,
+    );
+
+    build_cuber(
+        b,
+        target,
+        optimize,
+        sdfui,
+        gl,
+        glutils,
+        math,
+        glfw,
+        ZigImGui,
+        imgui_glfw,
+        imgui_opengl,
+        fastnoise,
+    );
+
+    build_sdfui_samples(
+        b,
+        target,
+        optimize,
+        sdfui,
+        gl,
+        glfw,
+    );
+}
+
+fn build_cuber(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    sdfui: *std.Build.Module,
+    gl: *std.Build.Module,
+    glutils: *std.Build.Module,
+    math: *std.Build.Module,
+    glfw: *std.Build.Dependency,
+    ZigImGui: *std.Build.Dependency,
+    imgui_glfw: *std.Build.Step.Compile,
+    imgui_opengl: *std.Build.Step.Compile,
+    fastnoise: *std.Build.Step.Compile,
+) void {
+    const exe = b.addExecutable(.{
+        .name = "cuber",
+        .root_source_file = .{ .path = "cuber/cuber.zig" },
+        .target = target,
+        .optimize = optimize,
     });
+    exe.linkLibC();
+    exe.root_module.addImport("sdfui", sdfui);
+    exe.root_module.addImport("gl", gl);
+    exe.root_module.addImport("glutils", glutils);
+    exe.root_module.addImport("math", math);
+
+    exe.root_module.addImport("mach-glfw", glfw.module("mach-glfw"));
+    @import("mach_glfw").addPaths(exe);
+
+    exe.root_module.addImport("Zig-ImGui", ZigImGui.module("Zig-ImGui"));
+    exe.linkLibrary(imgui_glfw);
+    exe.linkLibrary(imgui_opengl);
+
+    exe.linkLibrary(fastnoise);
 
     const docs = exe;
     const doc = b.step(
@@ -193,4 +151,147 @@ pub fn build_cuber(
         "run cuber",
     );
     exe_step.dependOn(&run_cmd.step);
+}
+
+fn build_sdfui_samples(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    sdfui: *std.Build.Module,
+    gl: *std.Build.Module,
+    glfw: *std.Build.Dependency,
+) void {
+    const samples = [_][2][]const u8{
+        [_][]const u8{ "basic", "samples/sdfui/basic.zig" },
+    };
+    for (samples) |sample| {
+        const name = sample[0];
+        const source = sample[1];
+
+        var exe = b.addExecutable(.{
+            .name = b.fmt("sdfui-{s}", .{name}),
+            .root_source_file = .{ .path = source },
+            .target = target,
+            .optimize = optimize,
+        });
+        exe.linkLibC();
+        exe.root_module.addImport("sdfui", sdfui);
+        exe.root_module.addImport("gl", gl);
+        exe.root_module.addImport("mach-glfw", glfw.module("mach-glfw"));
+        @import("mach_glfw").addPaths(exe);
+
+        b.installArtifact(exe);
+
+        const run_cmd = b.addRunArtifact(exe);
+
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        }
+
+        const run_step = b.step(
+            b.fmt("sdfui-{s}", .{name}),
+            "run sdfui sample",
+        );
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    const tests = b.addTest(.{
+        .name = "sdfui-tests",
+        .root_source_file = .{ .path = "sdfui/tests.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    tests.root_module.addImport("sdfui", sdfui);
+
+    const run_tests = b.addRunArtifact(tests);
+
+    const test_cmd = b.step("sdfui-tests", "Run sdfui tests");
+    test_cmd.dependOn(b.getInstallStep());
+    test_cmd.dependOn(&run_tests.step);
+}
+
+fn create_imgui_glfw_lib(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    glfw: *std.Build.Dependency,
+    gl_headers: *std.Build.Dependency,
+    imgui: *std.Build.Dependency,
+    ZigImGui: *std.Build.Dependency,
+) *std.Build.Step.Compile {
+    const imgui_glfw = b.addStaticLibrary(.{
+        .name = "imgui_glfw",
+        .target = target,
+        .optimize = optimize,
+    });
+    imgui_glfw.linkLibCpp();
+    imgui_glfw.linkLibrary(ZigImGui.artifact("cimgui"));
+
+    for (ZigImGuiBuild.IMGUI_C_DEFINES) |c_define| {
+        imgui_glfw.root_module.addCMacro(c_define[0], c_define[1]);
+    }
+
+    imgui_glfw.addIncludePath(imgui.path("."));
+    imgui_glfw.addIncludePath(imgui.path("backends/"));
+
+    imgui_glfw.addIncludePath(gl_headers.path("."));
+    imgui_glfw.addIncludePath(glfw.path("include/"));
+
+    imgui_glfw.addCSourceFile(.{
+        .file = imgui.path("backends/imgui_impl_glfw.cpp"),
+        .flags = ZigImGuiBuild.IMGUI_C_FLAGS,
+    });
+
+    return imgui_glfw;
+}
+
+fn create_imgui_opengl_lib(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    imgui: *std.Build.Dependency,
+    ZigImGui: *std.Build.Dependency,
+) *std.Build.Step.Compile {
+    const imgui_opengl = b.addStaticLibrary(.{
+        .name = "imgui_opengl",
+        .target = target,
+        .optimize = optimize,
+    });
+    imgui_opengl.linkLibCpp();
+    imgui_opengl.linkLibrary(ZigImGui.artifact("cimgui"));
+
+    for (ZigImGuiBuild.IMGUI_C_DEFINES) |c_define| {
+        imgui_opengl.root_module.addCMacro(c_define[0], c_define[1]);
+    }
+
+    imgui_opengl.addIncludePath(imgui.path("."));
+    imgui_opengl.addIncludePath(imgui.path("backends/"));
+
+    imgui_opengl.addCSourceFile(.{
+        .file = imgui.path("backends/imgui_impl_opengl3.cpp"),
+        .flags = ZigImGuiBuild.IMGUI_C_FLAGS,
+    });
+
+    return imgui_opengl;
+}
+
+fn create_fastnoise_lib(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    const fastnoise = b.addStaticLibrary(.{
+        .name = "fastnoise",
+        .target = target,
+        .optimize = optimize,
+    });
+    fastnoise.linkLibC();
+
+    fastnoise.addIncludePath(.{ .path = "libs/FastNoiseLite" });
+    fastnoise.addCSourceFiles(.{
+        .files = &[_][]const u8{"libs/FastNoiseLite/FastNoiseLite.c"},
+        .flags = &[_][]const u8{ "-std=c99", "-fno-sanitize=undefined", "-g", "-O3" },
+    });
+
+    return fastnoise;
 }

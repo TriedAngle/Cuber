@@ -139,8 +139,8 @@ const GLBuffers = struct {
 
     fn set_material(self: *Self, material: Material, id: usize) void {
         if (id >= self.sizes.materials) {
-            var new_size: usize = self.sizes.materials * 2;
-            var new_buffer = glu.buffers.resize(
+            const new_size: usize = self.sizes.materials * 2;
+            const new_buffer = glu.buffers.resize(
                 self.commands,
                 Material,
                 self.sizes.materials,

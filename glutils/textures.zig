@@ -65,7 +65,7 @@ pub fn make_empty() u32 {
 }
 
 pub fn make(width: i32, height: i32, format: u32) u32 {
-    var texture = make_empty();
+    const texture = make_empty();
     gl.textureStorage2D(texture, 1, format, width, height);
     gl.textureParameteri(texture, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.textureParameteri(texture, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
