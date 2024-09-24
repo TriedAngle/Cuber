@@ -1,9 +1,0 @@
-[submodule "libs/microui"]
-	path = libs/microui
-	url = https://github.com/rxi/microui
-[submodule "libs/dear_bindings"]
-	path = libs/dear_bindings
-	url = https://github.com/dearimgui/dear_bindings
-[submodule "libs/imgui"]
-	path = libs/imgui
-	url = https://github.com/ocornut/imgui

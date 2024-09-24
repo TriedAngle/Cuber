@@ -1,0 +1,11 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "0.30.5"
+cvk = { version = "0.1", path = "../cvk" }
+game = { version = "0.1", path ="../game" }
+log = "0.4.22"
+env_logger = "0.11.5"
