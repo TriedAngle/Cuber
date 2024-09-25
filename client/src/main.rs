@@ -8,8 +8,8 @@ use winit::{
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::KeyCode,
-    platform::wayland::WindowAttributesExtWayland,
-    window::{Window, WindowAttributes},
+    platform::windows::WindowAttributesExtWindows,
+    window::Window,
 };
 
 pub struct App {
@@ -59,12 +59,12 @@ impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.window = Some(Arc::new(
             event_loop
-                .create_window(WindowAttributes::default().with_name("Cuber", "Cuber"))
+                .create_window(Window::default_attributes().with_class_name("Cuber"))
                 .unwrap(),
         ));
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::RequestExit => {
                 let _ = self.window.take();
