@@ -22,6 +22,7 @@ impl Input {
 
     pub fn update(&mut self, event: &WindowEvent) {
         self.released.clear();
+        let x = 0;
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
                 let key = match event.physical_key {

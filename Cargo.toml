@@ -4,6 +4,6 @@ members = [
     "cvk", 
     "game",
     "client",
-    "liverking",
+    "liverking", "cgpu",
 ]
 default-run = "game"
