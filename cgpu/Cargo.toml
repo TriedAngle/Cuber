@@ -8,3 +8,4 @@ wgpu = "23.0.0"
 log = "0.4.22"
 winit = "0.30.5" 
 raw-window-handle = "0.4.0"
+bytemuck = { version = "1.20.0", features = ["derive"] }
