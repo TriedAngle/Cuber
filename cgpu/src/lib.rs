@@ -140,6 +140,8 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
+        
+        
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -216,6 +218,82 @@ impl RenderContext {
         self.surface_config.width = new.width;
         self.surface_config.height = new.height;
         self.surface.configure(&self.device, &self.surface_config);
+    }
+
+    pub fn compute_test(&mut self) { 
+        let device = self.device;
+
+        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Compute Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("compute.wgsl").into()),
+        });
+        
+        let input_floats = &[1.0f32, 2.0f32];
+        let input: &[u8] = bytemuck::bytes_of(input_floats);
+        let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: input,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        });
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: input.len() as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+
+        let compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let compute_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&compute_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&compute_pipeline_layout),
+            module: &compute_shader,
+            entry_point: Some("main"),
+            cache: None,
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &compute_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: input_buffer.as_entire_binding(),
+            }],
+        });
+
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { 
+            label: Some("Compute Encoder"),
+        });
+
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { 
+                ..Default::default()
+            });
+            compute_pass.set_pipeline(&compute_pipeline);
+            compute_pass.set_bind_group(0, &compute_bind_group, &[]);
+            compute_pass.dispatch_workgroups(input_floats.len() as u32, 1, 1);
+        }
     }
 
     pub fn update(&mut self) {}
