@@ -83,8 +83,9 @@ impl App {
     }
 
     pub fn new_renderer(&mut self, window: Arc<Window>) {
-        let renderer = pollster::block_on(RenderContext::new(window.clone()));
+        let mut renderer = pollster::block_on(RenderContext::new(window.clone()));
         log::info!("Renderer Created");
+        renderer.compute_test();
         let renderer = Arc::new(renderer);
         self.renderers.insert(window.id(), renderer);
     }

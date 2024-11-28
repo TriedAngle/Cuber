@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::{mem, sync::Arc, time::Instant};
 
 use wgpu::util::{DeviceExt, RenderEncoder};
 use winit::{dpi::PhysicalSize, window::Window};
@@ -7,6 +7,7 @@ mod bricks;
 
 pub struct RenderContext {
     window: Arc<Window>,
+    instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
@@ -70,8 +71,6 @@ impl RenderContext {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
-            backends: wgpu::Backends::PRIMARY,
             #[cfg(target_arch = "wasm32")]
             backends: wgpu::Backends::GL,
             ..Default::default()
@@ -95,10 +94,18 @@ impl RenderContext {
             None => panic!("Error creating adapter"),
         };
 
+        let features = adapter.features();
+
+        if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+            panic!("TIMESTAMP QUERY REQUIRED");
+        };
+
         let (device, queue) = match adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
+                    required_features: wgpu::Features::empty()
+                        | wgpu::Features::TIMESTAMP_QUERY
+                        | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS,
                     required_limits: if cfg!(target_arch = "wasm32") {
                         wgpu::Limits::downlevel_webgl2_defaults()
                     } else {
@@ -140,8 +147,6 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        
-        
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -196,6 +201,7 @@ impl RenderContext {
         let num_vertices = VERTICES.len() as u32;
 
         Self {
+            instance,
             window,
             surface,
             surface_config,
@@ -220,14 +226,20 @@ impl RenderContext {
         self.surface.configure(&self.device, &self.surface_config);
     }
 
-    pub fn compute_test(&mut self) { 
-        let device = self.device;
+    pub fn compute_test(&mut self) {
+        let device = &self.device;
+
+        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            count: 2,
+            ty: wgpu::QueryType::Timestamp,
+            label: None,
+        });
 
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Compute Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("compute.wgsl").into()),
         });
-        
+
         let input_floats = &[1.0f32, 2.0f32];
         let input: &[u8] = bytemuck::bytes_of(input_floats);
         let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -237,6 +249,7 @@ impl RenderContext {
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
         });
+
         let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: input.len() as u64,
@@ -244,25 +257,40 @@ impl RenderContext {
             mapped_at_creation: false,
         });
 
+        let query_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 16,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::QUERY_RESOLVE,
+            mapped_at_creation: false,
+        });
 
-        let compute_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let query_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            size: 16,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
-        let compute_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&compute_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+
+        let compute_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[&compute_bind_group_layout],
+                push_constant_ranges: &[],
+            });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: None,
             layout: Some(&compute_pipeline_layout),
@@ -281,19 +309,49 @@ impl RenderContext {
             }],
         });
 
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { 
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Compute Encoder"),
         });
 
+        encoder.write_timestamp(&query_set, 0);
+
         {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { 
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 ..Default::default()
             });
             compute_pass.set_pipeline(&compute_pipeline);
             compute_pass.set_bind_group(0, &compute_bind_group, &[]);
             compute_pass.dispatch_workgroups(input_floats.len() as u32, 1, 1);
         }
+
+        encoder.write_timestamp(&query_set, 1);
+
+        encoder.copy_buffer_to_buffer(&input_buffer, 0, &output_buffer, 0, input.len() as u64);
+
+        encoder.resolve_query_set(&query_set, 0..2, &query_buffer, 0);
+
+        encoder.copy_buffer_to_buffer(&query_buffer, 0, &query_staging_buffer, 0, 16);
+
+        self.queue.submit(Some(encoder.finish()));
+
+        let buffer_slice = output_buffer.slice(..);
+        let query_slice = query_staging_buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::Maintain::Wait);
+        query_slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::Maintain::Wait);
+
+        let data_raw = &*buffer_slice.get_mapped_range();
+        let data: &[f32] = bytemuck::cast_slice(data_raw);
+        println!("Data: {:?}", &*data);
+
+        let ts_period = self.queue.get_timestamp_period();
+        let ts_data_raw = &*query_slice.get_mapped_range();
+        let ts_data: &[u64] = bytemuck::cast_slice(ts_data_raw);
+        println!(
+            "Compute shader elapsed: {:?}ms",
+            (ts_data[1] - ts_data[0]) as f64 * ts_period as f64 * 1e-6
+        );
     }
 
     pub fn update(&mut self) {}
