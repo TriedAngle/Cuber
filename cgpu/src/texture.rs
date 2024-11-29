@@ -1,17 +1,16 @@
-
-pub struct Texture { 
+pub struct Texture {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
 }
 
-impl Texture { 
+impl Texture {
     pub fn from_bytes(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8],
-        label: Option<&str>
-    ) -> Self { 
+        label: Option<&str>,
+    ) -> Self {
         let img = image::load_from_memory(bytes).unwrap();
         Self::from_image(device, queue, &img, label)
     }
@@ -20,20 +19,20 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
-        label: Option<&str>
-    ) -> Self { 
+        label: Option<&str>,
+    ) -> Self {
         use image::GenericImageView;
-        
+
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();
 
-        let texture_size = wgpu::Extent3d { 
+        let texture_size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor { 
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
             size: texture_size,
             mip_level_count: 1,
             sample_count: 1,
@@ -45,14 +44,14 @@ impl Texture {
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTexture { 
+            wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
-            }, 
-            &rgba, 
-            wgpu::ImageDataLayout { 
+            },
+            &rgba,
+            wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -72,8 +71,10 @@ impl Texture {
             ..Default::default()
         });
 
-
-        Self { texture, view, sampler } 
-        
+        Self {
+            texture,
+            view,
+            sampler,
+        }
     }
 }

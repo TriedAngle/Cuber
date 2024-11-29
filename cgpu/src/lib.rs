@@ -1,11 +1,61 @@
-use std::{mem, sync::Arc, time::Instant};
+extern crate nalgebra as na;
+
+use core::f32;
+use std::{mem, sync::Arc};
 
 use texture::Texture;
 use wgpu::util::{DeviceExt, RenderEncoder};
 use winit::{dpi::PhysicalSize, window::Window};
 
-mod texture;
 mod bricks;
+mod texture;
+
+pub struct Camera {
+    eye: na::Point3<f32>,
+    target: na::Point3<f32>,
+    up: na::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: na::Matrix4<f32> = na::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0,
+);
+
+impl Camera {
+    pub fn view_projection_matrix(&self) -> na::Matrix4<f32> {
+        // let view = na::Isometry3::look_at_rh(&self.eye, &self.target, &self.up)
+        // .to_homogeneous();
+        let proj =
+            na::Perspective3::new(self.aspect, self.fovy.to_radians(), self.znear, self.zfar)
+                .to_homogeneous();
+        OPENGL_TO_WGPU_MATRIX * proj
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    pub view_projection: na::Matrix4<f32>,
+}
+
+impl CameraUniform {
+    fn new() -> Self {
+        Self {
+            view_projection: na::Matrix4::identity(),
+        }
+    }
+
+    fn update(&mut self, camera: &Camera) {
+        self.view_projection = camera.view_projection_matrix();
+    }
+}
 
 pub struct RenderContext {
     window: Arc<Window>,
@@ -23,7 +73,10 @@ pub struct RenderContext {
     num_indices: u32,
     diffuse_bind_group: wgpu::BindGroup,
     texture: Texture,
-
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 #[repr(C)]
@@ -88,35 +141,71 @@ impl TexVertex {
     }
 }
 
-
-
 const VERTICES: &[ColorVertex] = &[
-    ColorVertex { position: [-0.0868241, 0.49240386, 0.0], color: [0.5, 0.0, 0.5, 1.0] }, // A
-    ColorVertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.0, 0.5, 1.0] }, // B
-    ColorVertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.0, 0.5, 1.0] }, // C
-    ColorVertex { position: [0.35966998, -0.3473291, 0.0], color: [0.5, 0.0, 0.5, 1.0] }, // D
-    ColorVertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5, 1.0] }, // E
+    ColorVertex {
+        position: [-0.0868241, 0.49240386, 0.0],
+        color: [0.5, 0.0, 0.5, 1.0],
+    }, // A
+    ColorVertex {
+        position: [-0.49513406, 0.06958647, 0.0],
+        color: [0.5, 0.0, 0.5, 1.0],
+    }, // B
+    ColorVertex {
+        position: [-0.21918549, -0.44939706, 0.0],
+        color: [0.5, 0.0, 0.5, 1.0],
+    }, // C
+    ColorVertex {
+        position: [0.35966998, -0.3473291, 0.0],
+        color: [0.5, 0.0, 0.5, 1.0],
+    }, // D
+    ColorVertex {
+        position: [0.44147372, 0.2347359, 0.0],
+        color: [0.5, 0.0, 0.5, 1.0],
+    }, // E
 ];
 
-const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
+const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+
+// const TEX_VERTICES: &[TexVertex] = &[
+//     TexVertex {
+//         position: [-0.0868241, 0.49240386, 0.0],
+//         tex_coords: [0.4131759, 0.99240386],
+//     }, // A
+//     TexVertex {
+//         position: [-0.49513406, 0.06958647, 0.0],
+//         tex_coords: [0.0048659444, 0.56958647],
+//     }, // B
+//     TexVertex {
+//         position: [-0.21918549, -0.44939706, 0.0],
+//         tex_coords: [0.28081453, 0.05060294],
+//     }, // C
+//     TexVertex {
+//         position: [0.35966998, -0.3473291, 0.0],
+//         tex_coords: [0.85967, 0.1526709],
+//     }, // D
+//     TexVertex {
+//         position: [0.44147372, 0.2347359, 0.0],
+//         tex_coords: [0.9414737, 0.7347359],
+//     }, // E
+// ];
 
 const TEX_VERTICES: &[TexVertex] = &[
-    TexVertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.99240386], }, // A
-    TexVertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.56958647], }, // B
-    TexVertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.05060294], }, // C
-    TexVertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.1526709], }, // D
-    TexVertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.7347359], }, // E
+    TexVertex {
+        position: [0.0, 0.5, 0.0],
+        tex_coords: [0.0, 0.0],
+    },
+    TexVertex {
+        position: [-0.5, -0.5, 0.0],
+        tex_coords: [1.0, 1.0],
+    },
+    TexVertex {
+        position: [0.5, -0.5, 0.0],
+        tex_coords: [0.3, 0.8],
+    },
 ];
 
-const TEX_INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
+// const TEX_INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+const TEX_INDICES: &[u16] = &[0, 1, 2];
 
 impl RenderContext {
     pub async fn new(window: Arc<Window>) -> RenderContext {
@@ -195,8 +284,9 @@ impl RenderContext {
         };
 
         let diffuse_bytes = include_bytes!("../../assets/happy-tree.png");
-        let texture = Texture::from_bytes(&device, &queue, diffuse_bytes, Some("Happy Tree Texture"));
-        
+        let texture =
+            Texture::from_bytes(&device, &queue, diffuse_bytes, Some("Happy Tree Texture"));
+
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -222,25 +312,21 @@ impl RenderContext {
                 label: Some("texture_bind_group_layout"),
             });
 
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
 
-        let diffuse_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                    }
-                ],
-                label: Some("diffuse_bind_group"),
-            }
-        );
-
-         
         // let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         //     label: Some("Shader"),
         //     source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -251,10 +337,79 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("tex_shader.wgsl").into()),
         });
 
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            // contents: bytemuck::cast_slice(VERTICES),
+            contents: bytemuck::cast_slice(TEX_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            // contents: bytemuck::cast_slice(INDICES),
+            contents: bytemuck::cast_slice(TEX_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let num_indices = TEX_INDICES.len() as u32;
+
+        let camera = Camera {
+            eye: na::Point3::new(0.0, 0.0, -2.0),
+            target: na::Point3::origin(),
+            up: na::Vector3::y_axis().into_inner(),
+            aspect: size.width as f32 / size.height as f32,
+            fovy: 60.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+
+        let aspect = size.width as f32 / size.height as f32;
+        let mut camera_uniform = CameraUniform::new();
+        // camera_uniform.update(&camera);
+
+        let model_scale = na::Matrix3::identity().scale(0.5).to_homogeneous();
+        let model_rotation =
+            na::Matrix4::from_axis_angle(&na::Vector3::y_axis(), f32::to_radians(30.0));
+        let model_translation = na::Matrix4::new_translation(&na::Vector3::new(0.0, 0.0, -2.0));
+        let model_transform = model_translation * model_rotation * model_scale;
+        let perspective = na::Perspective3::new(aspect, 60.0 * f32::consts::PI / 180.0, 0.1, 100.0)
+            .to_homogeneous();
+        camera_uniform.view_projection = perspective * model_transform;
+
+        println!("camera: {:?}", camera_uniform);
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("CameraUniform"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout],
+                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -282,7 +437,7 @@ impl RenderContext {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -296,22 +451,6 @@ impl RenderContext {
             multiview: None,
             cache: None,
         });
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            // contents: bytemuck::cast_slice(VERTICES),
-            contents: bytemuck::cast_slice(TEX_VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            // contents: bytemuck::cast_slice(INDICES),
-            contents: bytemuck::cast_slice(TEX_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let num_indices = TEX_INDICES.len() as u32;
 
         Self {
             instance,
@@ -327,6 +466,10 @@ impl RenderContext {
             num_indices,
             diffuse_bind_group,
             texture,
+            camera,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
         }
     }
 
@@ -505,6 +648,7 @@ impl RenderContext {
             });
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
