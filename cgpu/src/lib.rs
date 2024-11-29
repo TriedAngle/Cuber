@@ -1,6 +1,5 @@
 extern crate nalgebra as na;
 
-use core::f32;
 use std::{mem, sync::Arc};
 
 use texture::Texture;
@@ -20,40 +19,41 @@ pub struct Camera {
     zfar: f32,
 }
 
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: na::Matrix4<f32> = na::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-);
 
 impl Camera {
+    pub fn view_matrix(&self) -> na::Matrix4<f32> { 
+        na::Matrix4::look_at_rh(&self.eye, &self.target, &self.up)
+    }
+
+    pub fn projection_matrix(&self) -> na::Matrix4<f32> { 
+        na::Matrix4::new_perspective(self.aspect, self.fovy.to_radians(), self.znear, self.zfar)
+    }
+
     pub fn view_projection_matrix(&self) -> na::Matrix4<f32> {
-        // let view = na::Isometry3::look_at_rh(&self.eye, &self.target, &self.up)
-        // .to_homogeneous();
-        let proj =
-            na::Perspective3::new(self.aspect, self.fovy.to_radians(), self.znear, self.zfar)
-                .to_homogeneous();
-        OPENGL_TO_WGPU_MATRIX * proj
+        self.projection_matrix() * self.view_matrix()
     }
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
+    pub position: na::Vector4<f32>,
     pub view_projection: na::Matrix4<f32>,
+    pub model: na::Matrix4<f32>,
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
+            position: na::Vector4::identity(),
             view_projection: na::Matrix4::identity(),
+            model: na::Matrix4::identity(),
         }
     }
 
     fn update(&mut self, camera: &Camera) {
-        self.view_projection = camera.view_projection_matrix();
+        self.position = camera.eye.into();
+        self.view_projection = camera.view_projection_matrix().transpose();
     }
 }
 
@@ -354,29 +354,26 @@ impl RenderContext {
         let num_indices = TEX_INDICES.len() as u32;
 
         let camera = Camera {
-            eye: na::Point3::new(0.0, 0.0, -2.0),
+            eye: na::Point3::new(2.0, 0.5, -3.0),
             target: na::Point3::origin(),
             up: na::Vector3::y_axis().into_inner(),
             aspect: size.width as f32 / size.height as f32,
-            fovy: 60.0,
+            fovy: 45.0,
             znear: 0.1,
             zfar: 100.0,
         };
 
-        let aspect = size.width as f32 / size.height as f32;
         let mut camera_uniform = CameraUniform::new();
-        // camera_uniform.update(&camera);
+        camera_uniform.update(&camera);
 
-        let model_scale = na::Matrix3::identity().scale(0.5).to_homogeneous();
+        let model_scale = na::Matrix4::new_nonuniform_scaling(&na::Vector3::new(1.0, 1.0, 1.0));
         let model_rotation =
-            na::Matrix4::from_axis_angle(&na::Vector3::y_axis(), f32::to_radians(30.0));
-        let model_translation = na::Matrix4::new_translation(&na::Vector3::new(0.0, 0.0, -2.0));
+            na::Matrix4::from_axis_angle(&na::Vector3::y_axis(), f32::to_radians(-25.0));
+        let model_translation = na::Matrix4::new_translation(&na::Vector3::new(0.0, 0.0, 0.0));
         let model_transform = model_translation * model_rotation * model_scale;
-        let perspective = na::Perspective3::new(aspect, 60.0 * f32::consts::PI / 180.0, 0.1, 100.0)
-            .to_homogeneous();
-        camera_uniform.view_projection = perspective * model_transform;
 
-        println!("camera: {:?}", camera_uniform);
+        camera_uniform.model = model_transform.transpose();
+
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("CameraUniform"),
             contents: bytemuck::cast_slice(&[camera_uniform]),
