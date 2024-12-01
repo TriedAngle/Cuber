@@ -67,16 +67,18 @@ impl CameraUniform {
 }
 
 pub struct RenderContext {
-    window: Arc<Window>,
-    instance: wgpu::Instance,
-    surface: wgpu::Surface<'static>,
-    surface_config: wgpu::SurfaceConfiguration,
+    pub window: Arc<Window>,
+    pub instance: wgpu::Instance,
+    pub surface: wgpu::Surface<'static>,
+    pub surface_config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
 
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    render_pipeline: wgpu::RenderPipeline,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub render_pipeline: wgpu::RenderPipeline,
 
+    pub encoder: Option<wgpu::CommandEncoder>,
+    pub output_texture: Option<wgpu::SurfaceTexture>,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
@@ -426,14 +428,14 @@ impl RenderContext {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: "vs_main",
                 // buffers: &[ColorVertex::desc()],
                 buffers: &[TexVertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -487,6 +489,8 @@ impl RenderContext {
             camera_buffer,
             camera_bind_group,
             depth_texture,
+            encoder: None,
+            output_texture: None,
         }
     }
 
@@ -576,7 +580,7 @@ impl RenderContext {
             label: None,
             layout: Some(&compute_pipeline_layout),
             module: &compute_shader,
-            entry_point: Some("main"),
+            entry_point: "main",
             cache: None,
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
@@ -637,18 +641,35 @@ impl RenderContext {
 
     pub fn update(&mut self) {}
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn prepare_render(&mut self) -> Result<(), wgpu::SurfaceError> { 
         let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
+        let encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
 
-        {
+        self.output_texture = Some(output);
+        self.encoder = Some(encoder);
+        Ok(())
+    }
+
+    pub fn finish_render(&mut self) {
+        let output = self.output_texture.take().expect("Render must be prepared");
+        let encoder = self.encoder.take().expect("Render must be prepared");
+
+        self.queue.submit([encoder.finish()]);
+        output.present();
+    }
+
+    pub fn render(&mut self) {
+        let encoder = self.encoder.as_mut().expect("Render must be prepared");
+        let output = self.output_texture.as_ref().expect("Render must be prepared");
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+                {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -676,10 +697,6 @@ impl RenderContext {
 
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
-        self.queue.submit([encoder.finish()]);
-        output.present();
-
-        Ok(())
     }
 
     pub fn update_camera_keyboard(&mut self, delta_time: Duration, input: &Input) {

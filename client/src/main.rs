@@ -1,6 +1,7 @@
-use std::{collections::HashMap, ops::Deref, sync::Arc, time};
+use std::{collections::HashMap, mem, ops::{Deref, DerefMut}, sync::Arc, time};
 
 use cgpu::RenderContext;
+use egui_integration::EguiRenderer;
 use game::input::Input;
 use winit::{
     application::ApplicationHandler,
@@ -11,6 +12,8 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
+mod egui_integration;
+
 pub struct App {
     last_update: time::SystemTime,
     delta_time: time::Duration,
@@ -18,6 +21,10 @@ pub struct App {
     proxy: EventLoopProxy<AppEvent>,
     windows: HashMap<WindowId, Arc<Window>>,
     renderers: HashMap<WindowId, Arc<RenderContext>>,
+    eguis: HashMap<WindowId, Arc<EguiRenderer>>,
+    scale_factor: f32,
+    focus: bool,
+    active_window: Option<Arc<Window>>,
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +41,10 @@ impl App {
             proxy: event_loop.create_proxy(),
             windows: HashMap::new(),
             renderers: HashMap::new(),
+            eguis: HashMap::new(),
+            scale_factor: 1.0,
+            focus: true,
+            active_window: None,
         }
     }
 
@@ -42,18 +53,116 @@ impl App {
             self.proxy.send_event(AppEvent::RequestExit).unwrap();
         }
 
+        if self.pressed(KeyCode::KeyT) { 
+            self.focus = !self.focus;
+            if let Some(window) = &self.active_window { 
+                if self.focus { 
+                    if window
+                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                        .is_ok()
+                    {
+                        window.set_cursor_visible(false);
+                    } else {
+                        log::error!("Failed to grab: {:?}", window.id());
+                    }
+                } else { 
+                    if window
+                        .set_cursor_grab(winit::window::CursorGrabMode::None)
+                        .is_ok()
+                    {
+                        window.set_cursor_visible(true);
+                    } else {
+                        log::error!("Failed to ungrab: {:?}", window.id());
+                    }
+                }
+            }
+        }
+
         for (_, renderer) in self.renderers.iter_mut() {
             let renderer = Arc::get_mut(renderer).unwrap();
-            renderer.update_camera_mouse(self.delta_time, &self.input);
+            if self.focus { 
+                renderer.update_camera_mouse(self.delta_time, &self.input);
+            }
         }
     }
 
     fn render(&mut self, window: &WindowId) {
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
-            renderer.update_camera_keyboard(self.delta_time, &self.input);
+            if self.focus { 
+                renderer.update_camera_keyboard(self.delta_time, &self.input);
+            }
             renderer.update_uniforms();
-            let _ = renderer.render();
+            let _ = renderer.prepare_render();
+            renderer.render();
+        }
+
+        self.draw_egui(window);
+
+        if let Some(renderer) = self.renderers.get_mut(window) { 
+            let renderer = Arc::get_mut(renderer).unwrap();
+            renderer.finish_render();
+        }
+    }
+
+    fn draw_egui(&mut self, window: &WindowId) {
+        let Some(renderer) = self.renderers.get_mut(window) else { 
+            return; 
+        };
+        if let Some(egui_renderer) = self.eguis.get_mut(window) {
+            let renderer = Arc::get_mut(renderer).unwrap();
+            let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [
+                    renderer.surface_config.width,
+                    renderer.surface_config.height,
+                ],
+                pixels_per_point: egui_renderer.window.scale_factor() as f32
+                    * self.scale_factor,
+            };
+
+            let mut encoder = renderer.encoder.as_mut().expect("Render must be prepared");
+            let output = renderer.output_texture.as_ref().expect("Render must be prepared");
+
+            let view = output
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            let egui_renderer = Arc::get_mut(egui_renderer).unwrap();
+            egui_renderer.begin_frame();
+
+            egui::Window::new("Egui")
+                .resizable(true)
+                .vscroll(true)
+                .default_open(false)
+                .show(egui_renderer.context(), |ui| {
+                    ui.label("Label!");
+
+                    if ui.button("Button!").clicked() {
+                        println!("boom!")
+                    }
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "Pixels per point: {}",
+                            egui_renderer.context().pixels_per_point()
+                        ));
+                        if ui.button("-").clicked() {
+                            self.scale_factor = (self.scale_factor - 0.1).max(0.3);
+                        }
+                        if ui.button("+").clicked() {
+                            self.scale_factor = (self.scale_factor + 0.1).min(3.0);
+                        }
+                    });
+                });
+
+            egui_renderer.end_frame_and_draw(
+                &renderer.device,
+                &renderer.queue,
+                &mut encoder,
+                &view,
+                screen_descriptor,
+            );
         }
     }
 
@@ -93,10 +202,30 @@ impl App {
 
     pub fn new_renderer(&mut self, window: Arc<Window>) {
         let mut renderer = pollster::block_on(RenderContext::new(window.clone()));
+
         log::info!("Renderer Created");
+
+        // version missmatch between the two wgpus lol
+        // let device = &renderer.device;
+        // let format = renderer.surface_config.format.clone();
+        // let dev = unsafe { mem::transmute(&device) };
+        // let output_color_format = unsafe { mem::transmute(format) };
+
+        let egui_renderer = EguiRenderer::new(
+            &renderer.device,
+            renderer.surface_config.format,
+            None,
+            1,
+            window.clone(),
+        );
+
+        log::info!("Egui Created");
         renderer.compute_test();
         let renderer = Arc::new(renderer);
         self.renderers.insert(window.id(), renderer);
+
+        let egui_renderer = Arc::new(egui_renderer);
+        self.eguis.insert(window.id(), egui_renderer);
     }
 
     pub fn new_render_window(&mut self, event_loop: &ActiveEventLoop, title: &str) {
@@ -143,8 +272,8 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn device_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
-        device_id: winit::event::DeviceId,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
         event: winit::event::DeviceEvent,
     ) {
         self.input.update(&event);
@@ -153,10 +282,15 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        if let Some(egui) = self.eguis.get_mut(&window_id) { 
+            let egui = Arc::get_mut(egui).unwrap();
+            egui.handle_input(&event);
+        }
+        
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("Close requested");
@@ -176,26 +310,32 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Focused(true) => {
                 log::debug!("Focused: {:?}", window_id);
                 if let Some(window) = self.windows.get(&window_id) {
+                    self.active_window = Some(window.clone());
                     let window = window.deref();
 
-                    if window
-                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                        .is_ok()
-                    {
-                        window.set_cursor_visible(false);
-                    } else {
-                        log::error!("Failed to grab: {:?}", window_id);
+                    if self.focus { 
+                        if window
+                            .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                            .is_ok()
+                        {
+                            window.set_cursor_visible(false);
+                        } else {
+                            log::error!("Failed to grab: {:?}", window_id);
+                        }
                     }
                 }
             }
             WindowEvent::Focused(false) => {
                 log::debug!("Unfocused {:?}", window_id);
                 if let Some(window) = self.windows.get(&window_id) {
+                    self.active_window = None;
                     let window = window.deref();
 
-                    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+                    if self.focus { 
+                        let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
 
-                    window.set_cursor_visible(true);
+                        window.set_cursor_visible(true);
+                    }
                 }
             }
             _ => {}
