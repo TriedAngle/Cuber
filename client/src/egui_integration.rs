@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
-use egui_winit as ewin;
 use egui_wgpu as egpu;
+use egui_winit as ewin;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-pub struct EguiRenderer { 
+pub struct EguiRenderer {
     pub state: ewin::State,
     pub renderer: egpu::Renderer,
     pub frame_started: bool,
     pub window: Arc<Window>,
 }
 
-impl EguiRenderer { 
-    pub fn context(&self) -> &egui::Context { 
+impl EguiRenderer {
+    pub fn context(&self) -> &egui::Context {
         self.state.egui_ctx()
     }
 
@@ -23,7 +23,7 @@ impl EguiRenderer {
         output_depth_format: Option<egpu::wgpu::TextureFormat>,
         msaa_samples: u32,
         window: Arc<Window>,
-    ) -> Self { 
+    ) -> Self {
         let context = egui::Context::default();
         log::debug!("Egui Context created");
         let state = ewin::State::new(
@@ -36,23 +36,22 @@ impl EguiRenderer {
         );
         log::debug!("Egui State created");
 
-        let renderer = egpu::Renderer::new( 
+        let renderer = egpu::Renderer::new(
             device,
             output_color_format,
             output_depth_format,
             msaa_samples,
-            true
+            true,
         );
         log::debug!("Egui Renderer created");
 
-        Self { 
+        Self {
             state,
             renderer,
             frame_started: false,
-            window
+            window,
         }
     }
-
 
     pub fn handle_input(&mut self, event: &WindowEvent) {
         let _ = self.state.on_window_event(&self.window, event);
@@ -67,7 +66,6 @@ impl EguiRenderer {
         self.state.egui_ctx().begin_pass(raw_input);
         self.frame_started = true;
     }
-
 
     pub fn end_frame_and_draw(
         &mut self,
@@ -121,5 +119,4 @@ impl EguiRenderer {
 
         self.frame_started = false;
     }
-
 }

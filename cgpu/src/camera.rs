@@ -143,7 +143,7 @@ impl Camera {
         projection * view
     }
 
-    pub fn force_udpate(&mut self) { 
+    pub fn force_udpate(&mut self) {
         self.updated = true;
     }
 
