@@ -1,8 +1,17 @@
-use std::{collections::HashMap, mem, ops::{Deref, DerefMut}, sync::Arc, time};
+extern crate nalgebra as na;
+
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    sync::Arc,
+    time,
+};
 
 use cgpu::RenderContext;
+use egui::{DragValue, Vec2};
 use egui_integration::EguiRenderer;
 use game::input::Input;
+use log::LevelFilter;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -17,6 +26,7 @@ mod egui_integration;
 pub struct App {
     last_update: time::SystemTime,
     delta_time: time::Duration,
+    frame_time: time::Duration,
     input: game::input::Input,
     proxy: EventLoopProxy<AppEvent>,
     windows: HashMap<WindowId, Arc<Window>>,
@@ -37,6 +47,7 @@ impl App {
         Self {
             last_update: time::SystemTime::now(),
             delta_time: time::Duration::from_nanos(0),
+            frame_time: time::Duration::from_nanos(0),
             input: Input::new(),
             proxy: event_loop.create_proxy(),
             windows: HashMap::new(),
@@ -53,10 +64,10 @@ impl App {
             self.proxy.send_event(AppEvent::RequestExit).unwrap();
         }
 
-        if self.pressed(KeyCode::KeyT) { 
+        if self.pressed(KeyCode::KeyT) {
             self.focus = !self.focus;
-            if let Some(window) = &self.active_window { 
-                if self.focus { 
+            if let Some(window) = &self.active_window {
+                if self.focus {
                     if window
                         .set_cursor_grab(winit::window::CursorGrabMode::Confined)
                         .is_ok()
@@ -65,7 +76,7 @@ impl App {
                     } else {
                         log::error!("Failed to grab: {:?}", window.id());
                     }
-                } else { 
+                } else {
                     if window
                         .set_cursor_grab(winit::window::CursorGrabMode::None)
                         .is_ok()
@@ -80,16 +91,18 @@ impl App {
 
         for (_, renderer) in self.renderers.iter_mut() {
             let renderer = Arc::get_mut(renderer).unwrap();
-            if self.focus { 
+            if self.focus {
                 renderer.update_camera_mouse(self.delta_time, &self.input);
             }
         }
     }
 
     fn render(&mut self, window: &WindowId) {
+        let start = time::SystemTime::now();
+
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
-            if self.focus { 
+            if self.focus {
                 renderer.update_camera_keyboard(self.delta_time, &self.input);
             }
             renderer.update_uniforms();
@@ -99,15 +112,17 @@ impl App {
 
         self.draw_egui(window);
 
-        if let Some(renderer) = self.renderers.get_mut(window) { 
+        if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
             renderer.finish_render();
         }
+
+        self.frame_time = start.elapsed().unwrap();
     }
 
     fn draw_egui(&mut self, window: &WindowId) {
-        let Some(renderer) = self.renderers.get_mut(window) else { 
-            return; 
+        let Some(renderer) = self.renderers.get_mut(window) else {
+            return;
         };
         if let Some(egui_renderer) = self.eguis.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
@@ -116,12 +131,14 @@ impl App {
                     renderer.surface_config.width,
                     renderer.surface_config.height,
                 ],
-                pixels_per_point: egui_renderer.window.scale_factor() as f32
-                    * self.scale_factor,
+                pixels_per_point: egui_renderer.window.scale_factor() as f32 * self.scale_factor,
             };
 
             let mut encoder = renderer.encoder.as_mut().expect("Render must be prepared");
-            let output = renderer.output_texture.as_ref().expect("Render must be prepared");
+            let output = renderer
+                .output_texture
+                .as_ref()
+                .expect("Render must be prepared");
 
             let view = output
                 .texture
@@ -130,18 +147,122 @@ impl App {
             let egui_renderer = Arc::get_mut(egui_renderer).unwrap();
             egui_renderer.begin_frame();
 
-            egui::Window::new("Egui")
+            let mut updated_camera = false;
+            egui::Window::new("Debug")
                 .resizable(true)
-                .vscroll(true)
-                .default_open(false)
+                .default_size(Vec2::new(200.0, 100.0))
+                .default_open(true)
                 .show(egui_renderer.context(), |ui| {
-                    ui.label("Label!");
+                    ui.heading("Game Settings");
+                    ui.label(format!(
+                        "Frame Time: {:.3}ms",
+                        self.frame_time.as_secs_f64() * 1000.0
+                    ));
 
                     if ui.button("Button!").clicked() {
                         println!("boom!")
                     }
 
                     ui.separator();
+                    ui.heading("Debug");
+
+                    ui.horizontal(|ui| {
+                        ui.label("Position: ");
+
+                        if ui
+                            .add(
+                                DragValue::new(&mut renderer.camera.position.x)
+                                    .speed(0.1)
+                                    .prefix("x: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        {
+                            updated_camera = true;
+                        }
+
+                        if ui
+                            .add(
+                                DragValue::new(&mut renderer.camera.position.y)
+                                    .speed(0.1)
+                                    .prefix("y: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        {
+                            updated_camera = true;
+                        }
+
+                        if ui
+                            .add(
+                                DragValue::new(&mut renderer.camera.position.z)
+                                    .speed(0.1)
+                                    .prefix("z: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        {
+                            updated_camera = true;
+                        }
+                    });
+
+
+                    ui.horizontal(|ui| {
+                        ui.label("Rotation: ");
+                        let (mut roll, mut pitch, mut yaw) =
+                            renderer.camera.rotation.euler_angles();
+
+                        roll = roll.to_degrees();
+                        pitch = pitch.to_degrees();
+                        yaw = yaw.to_degrees();
+
+                        // Add DragValue widgets for roll, pitch, and yaw
+                        if ui
+                            .add(
+                                DragValue::new(&mut yaw)
+                                    .speed(1.0)
+                                    .prefix("Roll: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        {
+                            updated_camera = true;
+                        }
+
+                        if ui
+                            .add(
+                                DragValue::new(&mut roll)
+                                    .speed(1.0)
+                                    .prefix("Pitch: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        {
+                            updated_camera = true;
+                        }
+
+                        if ui
+                            .add(
+                                DragValue::new(&mut pitch)
+                                    .speed(1.0)
+                                    .prefix("Yaw: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        {
+                            updated_camera = true;
+                        }
+                        
+                        if updated_camera { 
+                            roll = roll.to_radians();
+                            pitch = pitch.to_radians();
+                            yaw = yaw.to_radians();
+                            renderer.camera.rotation = na::UnitQuaternion::from_euler_angles(roll, pitch, yaw);
+                        }
+                    });
+
+                    ui.separator();
+                    ui.heading("UI Settings");
                     ui.horizontal(|ui| {
                         ui.label(format!(
                             "Pixels per point: {}",
@@ -163,6 +284,11 @@ impl App {
                 &view,
                 screen_descriptor,
             );
+
+            if updated_camera {
+                renderer.camera.force_udpate();
+                renderer.update_uniforms();
+            }
         }
     }
 
@@ -186,7 +312,9 @@ impl App {
     }
 
     pub fn new_window(&mut self, event_loop: &ActiveEventLoop, title: &str) -> Arc<Window> {
-        let attribs = WindowAttributes::default().with_title(title);
+        let attribs = WindowAttributes::default()
+            .with_inner_size(PhysicalSize::new(1920, 1080))
+            .with_title(title);
         let window = match event_loop.create_window(attribs) {
             Ok(window) => window,
             Err(e) => panic!("Error creating window: {:?}", e),
@@ -204,12 +332,6 @@ impl App {
         let mut renderer = pollster::block_on(RenderContext::new(window.clone()));
 
         log::info!("Renderer Created");
-
-        // version missmatch between the two wgpus lol
-        // let device = &renderer.device;
-        // let format = renderer.surface_config.format.clone();
-        // let dev = unsafe { mem::transmute(&device) };
-        // let output_color_format = unsafe { mem::transmute(format) };
 
         let egui_renderer = EguiRenderer::new(
             &renderer.device,
@@ -286,11 +408,13 @@ impl ApplicationHandler<AppEvent> for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        if let Some(egui) = self.eguis.get_mut(&window_id) { 
-            let egui = Arc::get_mut(egui).unwrap();
-            egui.handle_input(&event);
+        if !self.focus {
+            if let Some(egui) = self.eguis.get_mut(&window_id) {
+                let egui = Arc::get_mut(egui).unwrap();
+                egui.handle_input(&event);
+            }
         }
-        
+
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("Close requested");
@@ -313,7 +437,7 @@ impl ApplicationHandler<AppEvent> for App {
                     self.active_window = Some(window.clone());
                     let window = window.deref();
 
-                    if self.focus { 
+                    if self.focus {
                         if window
                             .set_cursor_grab(winit::window::CursorGrabMode::Confined)
                             .is_ok()
@@ -331,7 +455,7 @@ impl ApplicationHandler<AppEvent> for App {
                     self.active_window = None;
                     let window = window.deref();
 
-                    if self.focus { 
+                    if self.focus {
                         let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
 
                         window.set_cursor_visible(true);
@@ -344,7 +468,9 @@ impl ApplicationHandler<AppEvent> for App {
 }
 
 fn main() {
-    env_logger::builder().init();
+    env_logger::builder()
+        .filter_module("wgpu_core", LevelFilter::Warn)
+        .init();
 
     let event_loop = EventLoop::with_user_event().build().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);

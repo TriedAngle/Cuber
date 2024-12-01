@@ -12,39 +12,6 @@ mod bricks;
 mod camera;
 mod texture;
 
-// pub struct Camera {
-//     eye: na::Point3<f32>,
-//     target: na::Point3<f32>,
-//     up: na::Vector3<f32>,
-//     aspect: f32,
-//     fovy: f32,
-//     znear: f32,
-//     zfar: f32,
-// }
-//
-//
-// impl Camera {
-//     #[rustfmt::skip]
-//     pub const OPENGL_TO_WGPU_MATRIX: na::Matrix4<f32> = na::Matrix4::new(
-//         1.0, 0.0, 0.0, 0.0,
-//         0.0, 1.0, 0.0, 0.0,
-//         0.0, 0.0, 0.5, 0.5,
-//         0.0, 0.0, 0.0, 1.0,
-//     );
-//     pub fn view_matrix(&self) -> na::Matrix4<f32> {
-//         na::Matrix4::look_at_rh(&self.eye, &self.target, &self.up)
-//     }
-//
-//     pub fn projection_matrix(&self) -> na::Matrix4<f32> {
-//         let projection = na::Matrix4::new_perspective(self.aspect, self.fovy.to_radians(), self.znear, self.zfar);
-//         Self::OPENGL_TO_WGPU_MATRIX * projection
-//     }
-//
-//     pub fn view_projection_matrix(&self) -> na::Matrix4<f32> {
-//         self.projection_matrix() * self.view_matrix()
-//     }
-// }
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
@@ -84,7 +51,7 @@ pub struct RenderContext {
     num_indices: u32,
     diffuse_bind_group: wgpu::BindGroup,
     texture: Texture,
-    camera: Camera,
+    pub camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -641,7 +608,7 @@ impl RenderContext {
 
     pub fn update(&mut self) {}
 
-    pub fn prepare_render(&mut self) -> Result<(), wgpu::SurfaceError> { 
+    pub fn prepare_render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let encoder = self
             .device
@@ -664,12 +631,15 @@ impl RenderContext {
 
     pub fn render(&mut self) {
         let encoder = self.encoder.as_mut().expect("Render must be prepared");
-        let output = self.output_texture.as_ref().expect("Render must be prepared");
+        let output = self
+            .output_texture
+            .as_ref()
+            .expect("Render must be prepared");
 
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-                {
+        {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

@@ -2,15 +2,15 @@ use game::input::Input;
 use winit::keyboard::KeyCode;
 
 pub struct Camera {
-    position: na::Point3<f32>,
-    rotation: na::UnitQuaternion<f32>,
-    speed: f32,
-    sensitivity: f32,
-    fov: f32,
-    aspect: f32,
-    znear: f32,
-    zfar: f32,
-    updated: bool,
+    pub position: na::Point3<f32>,
+    pub rotation: na::UnitQuaternion<f32>,
+    pub speed: f32,
+    pub sensitivity: f32,
+    pub fov: f32,
+    pub aspect: f32,
+    pub znear: f32,
+    pub zfar: f32,
+    pub updated: bool,
 }
 
 impl Camera {
@@ -141,6 +141,10 @@ impl Camera {
         let projection = self.projection_matrix();
 
         projection * view
+    }
+
+    pub fn force_udpate(&mut self) { 
+        self.updated = true;
     }
 
     pub fn updated(&self) -> bool {
