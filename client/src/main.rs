@@ -1,20 +1,20 @@
-mod input;
-
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::Deref, sync::Arc, time};
 
 use cgpu::RenderContext;
-use input::Input;
+use game::input::Input;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
-    event::WindowEvent,
+    event::{StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::KeyCode,
     window::{Window, WindowAttributes, WindowId},
 };
 
 pub struct App {
-    input: Input,
+    last_update: time::SystemTime,
+    delta_time: time::Duration,
+    input: game::input::Input,
     proxy: EventLoopProxy<AppEvent>,
     windows: HashMap<WindowId, Arc<Window>>,
     renderers: HashMap<WindowId, Arc<RenderContext>>,
@@ -28,6 +28,8 @@ pub enum AppEvent {
 impl App {
     pub fn new(event_loop: &EventLoop<AppEvent>) -> Self {
         Self {
+            last_update: time::SystemTime::now(),
+            delta_time: time::Duration::from_nanos(0),
             input: Input::new(),
             proxy: event_loop.create_proxy(),
             windows: HashMap::new(),
@@ -35,16 +37,23 @@ impl App {
         }
     }
 
-    fn input(&mut self) {
+    fn handle_input(&mut self) {
         if self.released(KeyCode::Escape) {
             self.proxy.send_event(AppEvent::RequestExit).unwrap();
+        }
+
+        for (_, renderer) in self.renderers.iter_mut() {
+            let renderer = Arc::get_mut(renderer).unwrap();
+            renderer.update_camera_mouse(self.delta_time, &self.input);
         }
     }
 
     fn render(&mut self, window: &WindowId) {
-        if let Some(render) = self.renderers.get_mut(window) {
-            let render = Arc::get_mut(render).unwrap();
-            let _ = render.render();
+        if let Some(renderer) = self.renderers.get_mut(window) {
+            let renderer = Arc::get_mut(renderer).unwrap();
+            renderer.update_camera_keyboard(self.delta_time, &self.input);
+            renderer.update_uniforms();
+            let _ = renderer.render();
         }
     }
 
@@ -100,6 +109,25 @@ impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         log::info!("Window Resumed");
         self.new_render_window(event_loop, "Cuber");
+        self.last_update = time::SystemTime::now();
+    }
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        match cause {
+            StartCause::Poll
+            | StartCause::WaitCancelled { .. }
+            | StartCause::ResumeTimeReached { .. } => {
+                let now = time::SystemTime::now();
+                self.delta_time = now
+                    .duration_since(self.last_update)
+                    .unwrap_or(time::Duration::from_secs_f32(1.0 / 60.0));
+                self.last_update = now;
+                for window in self.windows.values() {
+                    window.request_redraw(); // Request redraw for all windows
+                }
+            }
+            _ => {}
+        }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
@@ -113,14 +141,22 @@ impl ApplicationHandler<AppEvent> for App {
         }
     }
 
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        self.input.update(&event);
+        self.handle_input();
+    }
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        self.input.update(&event);
-        self.input();
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("Close requested");
@@ -136,6 +172,31 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::Resized(size) => {
                 self.resize(&window_id, size);
+            }
+            WindowEvent::Focused(true) => {
+                log::debug!("Focused: {:?}", window_id);
+                if let Some(window) = self.windows.get(&window_id) {
+                    let window = window.deref();
+
+                    if window
+                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                        .is_ok()
+                    {
+                        window.set_cursor_visible(false);
+                    } else {
+                        log::error!("Failed to grab: {:?}", window_id);
+                    }
+                }
+            }
+            WindowEvent::Focused(false) => {
+                log::debug!("Unfocused {:?}", window_id);
+                if let Some(window) = self.windows.get(&window_id) {
+                    let window = window.deref();
+
+                    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+
+                    window.set_cursor_visible(true);
+                }
             }
             _ => {}
         }

@@ -1,59 +1,68 @@
 extern crate nalgebra as na;
 
-use std::{mem, sync::Arc};
+use std::{mem, sync::Arc, time::Duration};
 
+use camera::Camera;
+use game::input::Input;
 use texture::Texture;
-use wgpu::util::{DeviceExt, RenderEncoder};
+use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 mod bricks;
+mod camera;
 mod texture;
 
-pub struct Camera {
-    eye: na::Point3<f32>,
-    target: na::Point3<f32>,
-    up: na::Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-
-impl Camera {
-    pub fn view_matrix(&self) -> na::Matrix4<f32> { 
-        na::Matrix4::look_at_rh(&self.eye, &self.target, &self.up)
-    }
-
-    pub fn projection_matrix(&self) -> na::Matrix4<f32> { 
-        na::Matrix4::new_perspective(self.aspect, self.fovy.to_radians(), self.znear, self.zfar)
-    }
-
-    pub fn view_projection_matrix(&self) -> na::Matrix4<f32> {
-        self.projection_matrix() * self.view_matrix()
-    }
-}
+// pub struct Camera {
+//     eye: na::Point3<f32>,
+//     target: na::Point3<f32>,
+//     up: na::Vector3<f32>,
+//     aspect: f32,
+//     fovy: f32,
+//     znear: f32,
+//     zfar: f32,
+// }
+//
+//
+// impl Camera {
+//     #[rustfmt::skip]
+//     pub const OPENGL_TO_WGPU_MATRIX: na::Matrix4<f32> = na::Matrix4::new(
+//         1.0, 0.0, 0.0, 0.0,
+//         0.0, 1.0, 0.0, 0.0,
+//         0.0, 0.0, 0.5, 0.5,
+//         0.0, 0.0, 0.0, 1.0,
+//     );
+//     pub fn view_matrix(&self) -> na::Matrix4<f32> {
+//         na::Matrix4::look_at_rh(&self.eye, &self.target, &self.up)
+//     }
+//
+//     pub fn projection_matrix(&self) -> na::Matrix4<f32> {
+//         let projection = na::Matrix4::new_perspective(self.aspect, self.fovy.to_radians(), self.znear, self.zfar);
+//         Self::OPENGL_TO_WGPU_MATRIX * projection
+//     }
+//
+//     pub fn view_projection_matrix(&self) -> na::Matrix4<f32> {
+//         self.projection_matrix() * self.view_matrix()
+//     }
+// }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
-    pub position: na::Vector4<f32>,
-    pub view_projection: na::Matrix4<f32>,
-    pub model: na::Matrix4<f32>,
+    pub view_projection: [[f32; 4]; 4],
+    pub model: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
-            position: na::Vector4::identity(),
-            view_projection: na::Matrix4::identity(),
-            model: na::Matrix4::identity(),
+            view_projection: *na::Matrix4::identity().as_ref(),
+            model: *na::Matrix4::identity().as_ref(),
         }
     }
 
     fn update(&mut self, camera: &Camera) {
-        self.position = camera.eye.into();
-        self.view_projection = camera.view_projection_matrix().transpose();
+        let view_projection = camera.view_projection_matrix();
+        self.view_projection = *view_projection.as_ref();
     }
 }
 
@@ -77,6 +86,7 @@ pub struct RenderContext {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    depth_texture: Texture,
 }
 
 #[repr(C)]
@@ -327,11 +337,6 @@ impl RenderContext {
             label: Some("diffuse_bind_group"),
         });
 
-        // let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        //     label: Some("Shader"),
-        //     source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
-        // });
-
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("tex_shader.wgsl").into()),
@@ -353,26 +358,29 @@ impl RenderContext {
 
         let num_indices = TEX_INDICES.len() as u32;
 
-        let camera = Camera {
-            eye: na::Point3::new(2.0, 0.5, -3.0),
-            target: na::Point3::origin(),
-            up: na::Vector3::y_axis().into_inner(),
-            aspect: size.width as f32 / size.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
+        let mut camera = Camera::new(
+            na::Point3::new(1., 0., 2.),
+            na::UnitQuaternion::from_euler_angles(0., 0., 0.),
+            5.,
+            0.002,
+            45.,
+            size.width as f32 / size.height as f32,
+            0.1,
+            100.,
+        );
+
+        camera.look_at(na::Point3::origin(), &na::Vector3::y_axis());
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update(&camera);
 
-        let model_scale = na::Matrix4::new_nonuniform_scaling(&na::Vector3::new(1.0, 1.0, 1.0));
+        let model_scale = na::Matrix4::new_nonuniform_scaling(&na::Vector3::new(2.0, 2.0, 1.0));
         let model_rotation =
-            na::Matrix4::from_axis_angle(&na::Vector3::y_axis(), f32::to_radians(-25.0));
-        let model_translation = na::Matrix4::new_translation(&na::Vector3::new(0.0, 0.0, 0.0));
+            na::Matrix4::from_axis_angle(&na::Vector3::y_axis(), f32::to_radians(15.0));
+        let model_translation = na::Matrix4::new_translation(&na::Vector3::new(0.0, 0.0, -1.0));
         let model_transform = model_translation * model_rotation * model_scale;
 
-        camera_uniform.model = model_transform.transpose();
+        camera_uniform.model = *model_transform.as_ref();
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("CameraUniform"),
@@ -402,6 +410,9 @@ impl RenderContext {
             }],
             label: Some("camera_bind_group"),
         });
+
+        let depth_texture =
+            texture::Texture::create_depth_texture(&device, &surface_config, Some("depth_texture"));
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -434,11 +445,19 @@ impl RenderContext {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
+                cull_mode: Some(wgpu::Face::Back),
+                // cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
+            // depth_stencil: Some(wgpu::DepthStencilState {
+            //     format: Texture::DEPTH_FORMAT,
+            //     depth_write_enabled: true,
+            //     depth_compare: wgpu::CompareFunction::Less,
+            //     stencil: wgpu::StencilState::default(),
+            //     bias: wgpu::DepthBiasState::default(),
+            // }),
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
@@ -467,6 +486,7 @@ impl RenderContext {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
+            depth_texture,
         }
     }
 
@@ -480,6 +500,11 @@ impl RenderContext {
         self.surface_config.width = new.width;
         self.surface_config.height = new.height;
         self.surface.configure(&self.device, &self.surface_config);
+        self.depth_texture = texture::Texture::create_depth_texture(
+            &self.device,
+            &self.surface_config,
+            Some("depth_texture"),
+        );
     }
 
     pub fn compute_test(&mut self) {
@@ -656,12 +681,25 @@ impl RenderContext {
 
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    pub fn update_camera_keyboard(&mut self, delta_time: Duration, input: &Input) {
+        let dt = delta_time.as_secs_f32();
+        self.camera.update_keyboard(dt, input);
+    }
+    pub fn update_camera_mouse(&mut self, delta_time: Duration, input: &Input) {
+        let dt = delta_time.as_secs_f32();
+        self.camera.update_mouse(dt, input);
+    }
 
-    #[test]
-    fn it_works() {}
+    pub fn update_uniforms(&mut self) {
+        if self.camera.updated() {
+            self.camera_uniform.update(&self.camera);
+            self.camera.reset_update();
+            self.queue.write_buffer(
+                &self.camera_buffer,
+                0,
+                bytemuck::cast_slice(&[self.camera_uniform]),
+            );
+        }
+    }
 }

@@ -1,5 +1,4 @@
 struct CameraUniform { 
-    position: vec4<f32>,
     view_projection: mat4x4<f32>,
     model: mat4x4<f32>,
 }
@@ -22,7 +21,8 @@ fn vs_main(
     model: VertexInput,
 ) -> VertexOutput { 
     var out: VertexOutput;
-    var world_position = camera.model * vec4<f32>(model.position, 1.0);
+    // var world_position = camera.model * vec4<f32>(model.position, 1.0);
+    var world_position = vec4<f32>(model.position, 1.0);
     out.clip_position = camera.view_projection * world_position;
     out.tex_coords = model.tex_coords;
     return out;
