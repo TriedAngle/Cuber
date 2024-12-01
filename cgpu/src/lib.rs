@@ -4,27 +4,40 @@ use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
 use game::{input::Input, Transform};
+use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use texture::Texture;
-use wgpu::util::DeviceExt;
+use wgpu::util::{DeviceExt, RenderEncoder};
 use winit::{dpi::PhysicalSize, window::Window};
 
 mod bricks;
 mod camera;
-mod texture;
 mod mesh;
+mod texture;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     pub view_projection: [[f32; 4]; 4],
-    pub model: [[f32; 4]; 4],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ModelUniform {
+    pub transform: [[f32; 4]; 4],
+}
+
+impl ModelUniform {
+    pub fn new(matrix: &na::Matrix4<f32>) -> Self {
+        Self {
+            transform: *matrix.as_ref(),
+        }
+    }
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
             view_projection: *na::Matrix4::identity().as_ref(),
-            model: *na::Matrix4::identity().as_ref(),
         }
     }
 
@@ -47,9 +60,8 @@ pub struct RenderContext {
 
     pub encoder: Option<wgpu::CommandEncoder>,
     pub output_texture: Option<wgpu::SurfaceTexture>,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
+    pub meshes: Vec<SimpleTextureMesh>,
+    pub model_bind_group_layout: wgpu::BindGroupLayout,
     diffuse_bind_group: wgpu::BindGroup,
     texture: Texture,
     pub camera: Camera,
@@ -59,117 +71,32 @@ pub struct RenderContext {
     depth_texture: Texture,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct ColorVertex {
-    position: [f32; 3],
-    color: [f32; 4],
-}
-
-unsafe impl bytemuck::Pod for ColorVertex {}
-unsafe impl bytemuck::Zeroable for ColorVertex {}
-
-impl ColorVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct TexVertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-unsafe impl bytemuck::Pod for TexVertex {}
-unsafe impl bytemuck::Zeroable for TexVertex {}
-
-impl TexVertex {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-const VERTICES: &[ColorVertex] = &[
-    ColorVertex {
+const TEX_VERTICES: &[TexVertex] = &[
+    TexVertex {
         position: [-0.0868241, 0.49240386, 0.0],
-        color: [0.5, 0.0, 0.5, 1.0],
+        tex_coords: [0.4131759, 0.99240386],
     }, // A
-    ColorVertex {
+    TexVertex {
         position: [-0.49513406, 0.06958647, 0.0],
-        color: [0.5, 0.0, 0.5, 1.0],
+        tex_coords: [0.0048659444, 0.56958647],
     }, // B
-    ColorVertex {
+    TexVertex {
         position: [-0.21918549, -0.44939706, 0.0],
-        color: [0.5, 0.0, 0.5, 1.0],
+        tex_coords: [0.28081453, 0.05060294],
     }, // C
-    ColorVertex {
+    TexVertex {
         position: [0.35966998, -0.3473291, 0.0],
-        color: [0.5, 0.0, 0.5, 1.0],
+        tex_coords: [0.85967, 0.1526709],
     }, // D
-    ColorVertex {
+    TexVertex {
         position: [0.44147372, 0.2347359, 0.0],
-        color: [0.5, 0.0, 0.5, 1.0],
+        tex_coords: [0.9414737, 0.7347359],
     }, // E
 ];
 
-const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+const TEX_INDICES: &[u32] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
-// const TEX_VERTICES: &[TexVertex] = &[
-//     TexVertex {
-//         position: [-0.0868241, 0.49240386, 0.0],
-//         tex_coords: [0.4131759, 0.99240386],
-//     }, // A
-//     TexVertex {
-//         position: [-0.49513406, 0.06958647, 0.0],
-//         tex_coords: [0.0048659444, 0.56958647],
-//     }, // B
-//     TexVertex {
-//         position: [-0.21918549, -0.44939706, 0.0],
-//         tex_coords: [0.28081453, 0.05060294],
-//     }, // C
-//     TexVertex {
-//         position: [0.35966998, -0.3473291, 0.0],
-//         tex_coords: [0.85967, 0.1526709],
-//     }, // D
-//     TexVertex {
-//         position: [0.44147372, 0.2347359, 0.0],
-//         tex_coords: [0.9414737, 0.7347359],
-//     }, // E
-// ];
-
-const TEX_VERTICES: &[TexVertex] = &[
+const TEX_VERTICES2: &[TexVertex] = &[
     TexVertex {
         position: [0.0, 0.5, 0.0],
         tex_coords: [0.0, 0.0],
@@ -184,8 +111,7 @@ const TEX_VERTICES: &[TexVertex] = &[
     },
 ];
 
-// const TEX_INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
-const TEX_INDICES: &[u16] = &[0, 1, 2];
+const TEX_INDICES2: &[u32] = &[0, 1, 2];
 
 impl RenderContext {
     pub async fn new(window: Arc<Window>) -> RenderContext {
@@ -312,21 +238,54 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("tex_shader.wgsl").into()),
         });
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            // contents: bytemuck::cast_slice(VERTICES),
-            contents: bytemuck::cast_slice(TEX_VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
+        let model_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("Model Bind Group Layout"),
         });
+        
+        let mut model_transform = Transform::identity();
+        model_transform.position(&na::Vector3::new(0., 0., -2.));
+        model_transform.scale_nonuniform(&na::Vector3::new(2.0, 2.0, 1.0));
+        model_transform.rotate_around(&na::Vector3::y_axis(), 15.0);
 
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            // contents: bytemuck::cast_slice(INDICES),
-            contents: bytemuck::cast_slice(TEX_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let mesh = SimpleTextureMesh::new(
+            &device,
+            model_transform,
+            TEX_VERTICES,
+            TEX_INDICES,
+            &model_bind_group_layout,
+            None,
+            None,
+        );
 
-        let num_indices = TEX_INDICES.len() as u32;
+        let mut model_transform = Transform::identity();
+        model_transform.position(&na::Vector3::new(-2., 1., -2.));
+        model_transform.scale_nonuniform(&na::Vector3::new(2.0, 1.0, 1.0));
+        model_transform.rotate_around(&na::Vector3::z_axis(), 30.0);
+
+        let mesh2 = SimpleTextureMesh::new(
+            &device,
+            model_transform,
+            TEX_VERTICES2,
+            TEX_INDICES2,
+            &model_bind_group_layout,
+            None,
+            None,
+        );
+
+        let mut meshes = Vec::new();
+        meshes.push(mesh);
+        meshes.push(mesh2);
+
 
         let mut camera = Camera::new(
             na::Point3::new(1., 0., 2.),
@@ -343,13 +302,6 @@ impl RenderContext {
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update(&camera);
-
-        let mut model_transform = Transform::identity();
-        model_transform.position(&na::Vector3::new(0., 0., -2.));
-        model_transform.scale_nonuniform(&na::Vector3::new(2.0, 2.0, 1.0));
-        model_transform.rotate_around(&na::Vector3::y_axis(), 15.0);
-
-        camera_uniform.model = *model_transform.to_homogeneous().as_ref();
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("CameraUniform"),
@@ -371,6 +323,8 @@ impl RenderContext {
                 }],
                 label: Some("camera_bind_group_layout"),
             });
+
+
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
@@ -386,7 +340,7 @@ impl RenderContext {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
+                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout, &model_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -396,8 +350,7 @@ impl RenderContext {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                // buffers: &[ColorVertex::desc()],
-                buffers: &[TexVertex::desc()],
+                buffers: &[TexVertex::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -446,11 +399,10 @@ impl RenderContext {
             device,
             queue,
             render_pipeline,
-            vertex_buffer,
-            index_buffer,
-            num_indices,
             diffuse_bind_group,
             texture,
+            meshes,
+            model_bind_group_layout,
             camera,
             camera_uniform,
             camera_buffer,
@@ -659,13 +611,19 @@ impl RenderContext {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            for mesh in &self.meshes {
+                render_pass.set_bind_group(2, &mesh.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+
+                render_pass.draw_indexed(0..mesh.indices, 0, 0..1);
+            }
         }
     }
 
