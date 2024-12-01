@@ -1,11 +1,6 @@
 extern crate nalgebra as na;
 
-use std::{
-    collections::HashMap,
-    ops::Deref,
-    sync::Arc,
-    time,
-};
+use std::{collections::HashMap, ops::Deref, sync::Arc, time};
 
 use cgpu::RenderContext;
 use egui::{DragValue, Vec2};
@@ -27,6 +22,9 @@ pub struct App {
     last_update: time::SystemTime,
     delta_time: time::Duration,
     frame_time: time::Duration,
+    vertex_time: time::Duration,
+    compute_time: time::Duration,
+    egui_time: time::Duration,
     input: game::input::Input,
     proxy: EventLoopProxy<AppEvent>,
     windows: HashMap<WindowId, Arc<Window>>,
@@ -48,6 +46,9 @@ impl App {
             last_update: time::SystemTime::now(),
             delta_time: time::Duration::from_nanos(0),
             frame_time: time::Duration::from_nanos(0),
+            vertex_time: time::Duration::from_nanos(0),
+            compute_time: time::Duration::from_nanos(0),
+            egui_time: time::Duration::from_nanos(0),
             input: Input::new(),
             proxy: event_loop.create_proxy(),
             windows: HashMap::new(),
@@ -98,7 +99,7 @@ impl App {
     }
 
     fn render(&mut self, window: &WindowId) {
-        let start = time::SystemTime::now();
+        let render_time = time::SystemTime::now();
 
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
@@ -107,17 +108,22 @@ impl App {
             }
             renderer.update_uniforms();
             let _ = renderer.prepare_render();
+            let vertex_time = time::SystemTime::now();
             renderer.render();
+            self.vertex_time = vertex_time.elapsed().unwrap();
+
         }
 
+        let egui_time = time::SystemTime::now();
         self.draw_egui(window);
+        self.egui_time = egui_time.elapsed().unwrap();
 
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
             renderer.finish_render();
         }
 
-        self.frame_time = start.elapsed().unwrap();
+        self.frame_time = render_time.elapsed().unwrap();
     }
 
     fn draw_egui(&mut self, window: &WindowId) {
@@ -158,7 +164,18 @@ impl App {
                         "Frame Time: {:.3}ms",
                         self.frame_time.as_secs_f64() * 1000.0
                     ));
-
+                    ui.label(format!(
+                        "Vertex Time: {:.3}ms",
+                        self.vertex_time.as_secs_f64() * 1000.0
+                    ));
+                    ui.label(format!(
+                        "Compute Time: {:.3}ms",
+                        self.compute_time.as_secs_f64() * 1000.0
+                    ));
+                    ui.label(format!(
+                        "Egui Time: {:.3}ms",
+                        self.egui_time.as_secs_f64() * 1000.0
+                    ));
                     if ui.button("Button!").clicked() {
                         println!("boom!")
                     }
@@ -206,7 +223,6 @@ impl App {
                         }
                     });
 
-
                     ui.horizontal(|ui| {
                         ui.label("Rotation: ");
                         let (mut roll, mut pitch, mut yaw) =
@@ -252,12 +268,13 @@ impl App {
                         {
                             updated_camera = true;
                         }
-                        
-                        if updated_camera { 
+
+                        if updated_camera {
                             roll = roll.to_radians();
                             pitch = pitch.to_radians();
                             yaw = yaw.to_radians();
-                            renderer.camera.rotation = na::UnitQuaternion::from_euler_angles(roll, pitch, yaw);
+                            renderer.camera.rotation =
+                                na::UnitQuaternion::from_euler_angles(roll, pitch, yaw);
                         }
                     });
 
