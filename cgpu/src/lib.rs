@@ -3,7 +3,7 @@ extern crate nalgebra as na;
 use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
-use game::input::Input;
+use game::{input::Input, Transform};
 use texture::Texture;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
@@ -11,6 +11,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 mod bricks;
 mod camera;
 mod texture;
+mod mesh;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -343,13 +344,12 @@ impl RenderContext {
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update(&camera);
 
-        let model_scale = na::Matrix4::new_nonuniform_scaling(&na::Vector3::new(2.0, 2.0, 1.0));
-        let model_rotation =
-            na::Matrix4::from_axis_angle(&na::Vector3::y_axis(), f32::to_radians(15.0));
-        let model_translation = na::Matrix4::new_translation(&na::Vector3::new(0.0, 0.0, -1.0));
-        let model_transform = model_translation * model_rotation * model_scale;
+        let mut model_transform = Transform::identity();
+        model_transform.position(&na::Vector3::new(0., 0., -2.));
+        model_transform.scale_nonuniform(&na::Vector3::new(2.0, 2.0, 1.0));
+        model_transform.rotate_around(&na::Vector3::y_axis(), 15.0);
 
-        camera_uniform.model = *model_transform.as_ref();
+        camera_uniform.model = *model_transform.to_homogeneous().as_ref();
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("CameraUniform"),

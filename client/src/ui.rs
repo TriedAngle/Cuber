@@ -113,7 +113,6 @@ impl AppState {
                         pitch = pitch.to_degrees();
                         yaw = yaw.to_degrees();
 
-                        // Add DragValue widgets for roll, pitch, and yaw
                         if ui
                             .add(
                                 DragValue::new(&mut yaw)

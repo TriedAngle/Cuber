@@ -203,33 +203,4 @@ impl AppState {
         let window = self.new_window(event_loop, title);
         self.new_renderer(window);
     }
-
-    pub fn focus_window(&mut self, window_id: &WindowId) {
-        if let Some(window) = self.windows.get(window_id) {
-            self.active_window = Some(window.clone());
-
-            if self.focus {
-                if window
-                    .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                    .is_ok()
-                {
-                    window.set_cursor_visible(false);
-                } else {
-                    log::error!("Failed to grab: {:?}", window_id);
-                }
-            }
-        }
-    }
-
-    pub fn unfocus_window(&mut self, window_id: &WindowId) {
-        if let Some(window) = self.windows.get(&window_id) {
-            self.active_window = None;
-
-            if self.focus {
-                let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
-
-                window.set_cursor_visible(true);
-            }
-        }
-    }
 }

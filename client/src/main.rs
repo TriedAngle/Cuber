@@ -1,4 +1,4 @@
-use std::{sync::Arc, time};
+use std::time;
 
 use log::LevelFilter;
 use winit::{
@@ -18,6 +18,34 @@ impl App {
     pub fn empty(event_loop: &EventLoop<AppEvent>) -> Self {
         Self {
             state: AppState::new(event_loop),
+        }
+    }
+    pub fn focus_window(&mut self, window_id: &WindowId) {
+        if let Some(window) = self.state.windows.get(window_id) {
+            self.state.active_window = Some(window.clone());
+
+            if self.state.focus {
+                if window
+                    .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                    .is_ok()
+                {
+                    window.set_cursor_visible(false);
+                } else {
+                    log::error!("Failed to grab: {:?}", window_id);
+                }
+            }
+        }
+    }
+
+    pub fn unfocus_window(&mut self, window_id: &WindowId) {
+        if let Some(window) = self.state.windows.get(&window_id) {
+            self.state.active_window = None;
+
+            if self.state.focus {
+                let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+
+                window.set_cursor_visible(true);
+            }
         }
     }
 }
@@ -94,11 +122,11 @@ impl ApplicationHandler<AppEvent> for App {
             }
             WindowEvent::Focused(true) => {
                 log::debug!("Focused: {:?}", window_id);
-                self.state.focus_window(&window_id);
+                self.focus_window(&window_id);
             }
             WindowEvent::Focused(false) => {
                 log::debug!("Unfocused {:?}", window_id);
-                self.state.unfocus_window(&window_id);
+                self.unfocus_window(&window_id);
             }
             _ => {}
         }
@@ -108,6 +136,8 @@ impl ApplicationHandler<AppEvent> for App {
 fn main() {
     env_logger::builder()
         .filter_module("wgpu_core", LevelFilter::Warn)
+        .filter_module("wgpu_hal", LevelFilter::Warn)
+        .filter_module("naga", LevelFilter::Warn)
         .init();
 
     let event_loop = EventLoop::with_user_event().build().unwrap();
