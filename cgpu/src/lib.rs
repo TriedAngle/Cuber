@@ -1,9 +1,10 @@
 extern crate nalgebra as na;
 
+use core::time;
 use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
-use game::{input::Input, Transform};
+use game::{input::Input, Diagnostics, Transform};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use texture::Texture;
 use wgpu::util::{DeviceExt, RenderEncoder};
@@ -101,10 +102,15 @@ pub struct RenderContext {
 
     pub encoder: Option<wgpu::CommandEncoder>,
     pub output_texture: Option<wgpu::SurfaceTexture>,
+
+    pub query_count: u32,
+    pub query_set: wgpu::QuerySet,
+    pub query_buffer: wgpu::Buffer,
+    pub query_staging_buffer: wgpu::Buffer,
+
     pub meshes: Vec<SimpleTextureMesh>,
     pub model_bind_group_layout: wgpu::BindGroupLayout,
     diffuse_bind_group: wgpu::BindGroup,
-    texture: Texture,
     pub camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -113,8 +119,6 @@ pub struct RenderContext {
 
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
-    compute_render_texture: Texture,
-    compute_depth_texture: Texture,
     compute_bind_group: wgpu::BindGroup,
     compute_pipeline: wgpu::ComputePipeline,
     compute_depth_texture_bind_group: wgpu::BindGroup,
@@ -240,6 +244,28 @@ impl RenderContext {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
+
+        let query_count = 4;
+        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("Timestamp Query Set"),
+            ty: wgpu::QueryType::Timestamp,
+            count: query_count,
+        });
+
+        let query_buffer_size = std::mem::size_of::<u64>() as u64 * query_count as u64;
+        let query_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Query Resolve Buffer"),
+            size: query_buffer_size,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::QUERY_RESOLVE,
+            mapped_at_creation: false,
+        });
+
+        let query_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: query_buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let diffuse_bytes = include_bytes!("../../assets/happy-tree.png");
         let texture =
@@ -673,7 +699,6 @@ impl RenderContext {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
-            // depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -693,7 +718,6 @@ impl RenderContext {
             queue,
             render_pipeline,
             diffuse_bind_group,
-            texture,
             meshes,
             model_bind_group_layout,
             camera,
@@ -703,11 +727,13 @@ impl RenderContext {
             depth_texture,
             encoder: None,
             output_texture: None,
+            query_count,
+            query_set,
+            query_buffer,
+            query_staging_buffer,
             compute_uniforms,
             compute_uniforms_buffer,
             compute_bind_group,
-            compute_render_texture,
-            compute_depth_texture,
             compute_depth_texture_bind_group,
             compute_pipeline,
 
@@ -876,12 +902,49 @@ impl RenderContext {
         Ok(())
     }
 
-    pub fn finish_render(&mut self) {
+    pub fn finish_render(&mut self, diagnostics: &mut Diagnostics) {
         let output = self.output_texture.take().expect("Render must be prepared");
-        let encoder = self.encoder.take().expect("Render must be prepared");
+        let mut encoder = self.encoder.take().expect("Render must be prepared");
+
+        encoder.resolve_query_set(&self.query_set, 0..self.query_count, &self.query_buffer, 0);
+
+        let query_buffer_size = std::mem::size_of::<u64>() as u64 * self.query_count as u64;
+        encoder.copy_buffer_to_buffer(
+            &self.query_buffer,
+            0,
+            &self.query_staging_buffer,
+            0,
+            query_buffer_size,
+        );
 
         self.queue.submit([encoder.finish()]);
+
         output.present();
+
+        {
+            let buffer_slice = self.query_staging_buffer.slice(..);
+
+            buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+            self.queue.submit([]);
+            self.device.poll(wgpu::Maintain::Wait);
+
+            let timestamp_period = self.queue.get_timestamp_period() as f64; // in nanoseconds
+
+            let data = buffer_slice.get_mapped_range();
+            let timestamps: &[u64] = bytemuck::cast_slice(&data);
+
+            let compute_pass_duration_ns =
+                (timestamps[1] - timestamps[0]) as f64 * timestamp_period;
+            let render_pass_duration_ns = (timestamps[3] - timestamps[2]) as f64 * timestamp_period;
+
+            // Convert from nanoseconds to seconds for Duration
+            let compute_duration = Duration::from_secs_f64(compute_pass_duration_ns / 1e9);
+            let render_duration = Duration::from_secs_f64(render_pass_duration_ns / 1e9);
+
+            diagnostics.insert("ComputePass", compute_duration);
+            diagnostics.insert("RasterPass", render_duration);
+        }
+        self.query_staging_buffer.unmap();
     }
 
     pub fn render(&mut self) {
@@ -897,6 +960,7 @@ impl RenderContext {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        encoder.write_timestamp(&self.query_set, 0);
         {
             let workgroup_size = 8;
             let workgroup_x = (width + workgroup_size - 1) / workgroup_size;
@@ -912,6 +976,7 @@ impl RenderContext {
             compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
         }
 
+        encoder.write_timestamp(&self.query_set, 1);
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Compute Present Pass"),
@@ -933,6 +998,7 @@ impl RenderContext {
             render_pass.draw(0..6, 0..1); // Draw the full-screen quad
         }
 
+        encoder.write_timestamp(&self.query_set, 2);
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -944,7 +1010,6 @@ impl RenderContext {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                // depth_stencil_attachment: None,
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
@@ -972,6 +1037,7 @@ impl RenderContext {
                 render_pass.draw_indexed(0..mesh.indices, 0, 0..1);
             }
         }
+        encoder.write_timestamp(&self.query_set, 3);
     }
 
     pub fn update_camera_keyboard(&mut self, delta_time: Duration, input: &Input) {

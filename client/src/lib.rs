@@ -3,8 +3,7 @@ extern crate nalgebra as na;
 use std::{collections::HashMap, sync::Arc, time};
 
 use cgpu::RenderContext;
-use diagnostics::Diagnostics;
-use game::input::Input;
+use game::{input::Input, Diagnostics};
 use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, WindowEvent},
@@ -130,7 +129,7 @@ impl AppState {
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
 
-            renderer.finish_render();
+            renderer.finish_render(&mut self.diagnostics);
         }
 
         self.diagnostics.stop("render");

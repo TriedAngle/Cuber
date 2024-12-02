@@ -48,12 +48,12 @@ impl AppState {
                         self.diagnostics.time_millis("render")
                     ));
                     ui.label(format!(
-                        "Compute Time: {:.3}ms",
-                        self.diagnostics.time_millis("compute")
+                        "Compute Pass Time: {:.3}ms",
+                        self.diagnostics.time_millis("ComputePass")
                     ));
                     ui.label(format!(
-                        "Vertex Time: {:.3}ms",
-                        self.diagnostics.time_millis("vertex")
+                        "Rasterization Pass Time: {:.3}ms",
+                        self.diagnostics.time_millis("RasterPass")
                     ));
                     ui.label(format!(
                         "Egui Time: {:.3}ms",
