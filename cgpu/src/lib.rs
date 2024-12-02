@@ -28,11 +28,41 @@ struct ModelUniform {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct VoxelUniforms {
+struct ComputeUniforms {
     pub resolution: [f32; 2],
     pub dt: f32,
-    pub padding: f32,
+    _padding0: f32,
+    pub inverse_view_projection: [[f32; 4]; 4],
+    pub camera_position: [f32; 3],
+    _padding1: f32,
 }
+
+impl ComputeUniforms {
+    pub fn new(resolution: [f32; 2], dt: f32) -> Self { 
+        Self { 
+            resolution,
+            dt,
+            _padding0: 0.,
+            inverse_view_projection: *na::Matrix4::identity().try_inverse().unwrap().as_ref(),
+            camera_position: [0.; 3],
+            _padding1: 0.,
+        }
+    }
+    pub fn update_camera(&mut self, camera: &Camera) { 
+        let view_projection = camera.view_projection_matrix();
+        let inverse_view_projection = match view_projection.try_inverse() { 
+            Some(inv) => inv,
+            None => na::Matrix4::identity().try_inverse().unwrap(),
+        };
+
+        self.camera_position = camera.position.into();
+        self.inverse_view_projection = *inverse_view_projection.as_ref();
+    }
+    pub fn update(&mut self, resolution: [f32; 2], dt: f32) { 
+        self.resolution = resolution;
+        self.dt = dt;
+    }
+}  
 
 impl ModelUniform {
     pub fn new(matrix: &na::Matrix4<f32>) -> Self {
@@ -78,7 +108,7 @@ pub struct RenderContext {
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
 
-    compute_uniforms: VoxelUniforms,
+    compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
     compute_render_texture: Texture,
     compute_bind_group: wgpu::BindGroup,
@@ -364,11 +394,7 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let compute_uniforms = VoxelUniforms {
-            resolution: [size.width as f32, size.height as f32],
-            dt: 0.,
-            padding: 0.,
-        };
+        let compute_uniforms = ComputeUniforms::new([size.width as f32, size.height as f32], 0.);
 
         let compute_uniforms_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -438,29 +464,30 @@ impl RenderContext {
             cache: None,
         });
 
-        let compute_present_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Compute Present Bind Group Layout"),
-            entries: &[
-                // Input Texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        let compute_present_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Compute Present Bind Group Layout"),
+                entries: &[
+                    // Input Texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         let compute_present_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Compute Present Bind Group"),
@@ -477,37 +504,39 @@ impl RenderContext {
             ],
         });
 
-        let compute_present_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Compute Present Pipeline Layout"),
-            bind_group_layouts: &[&compute_present_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let compute_present_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compute Present Pipeline Layout"),
+                bind_group_layouts: &[&compute_present_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
-        let compute_present_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Compute Present Pipeline"),
-            layout: Some(&compute_present_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &compute_present_shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &compute_present_shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let compute_present_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Compute Present Pipeline"),
+                layout: Some(&compute_present_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &compute_present_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &compute_present_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
 
         // COMPUTE PARTS END
         let render_pipeline_layout =
@@ -862,9 +891,10 @@ impl RenderContext {
         self.camera.update_mouse(dt, input);
     }
 
-    pub fn update_uniforms(&mut self) {
+    pub fn update_uniforms(&mut self, delta_time: Duration) {
         if self.camera.updated() {
             self.camera_uniform.update(&self.camera);
+            self.compute_uniforms.update_camera(&self.camera);
             self.camera.reset_update();
             self.queue.write_buffer(
                 &self.camera_buffer,
@@ -872,5 +902,14 @@ impl RenderContext {
                 bytemuck::cast_slice(&[self.camera_uniform]),
             );
         }
+
+        let dt = delta_time.as_secs_f32();
+        let (width, height) = (self.surface_config.width, self.surface_config.height);
+        self.compute_uniforms.update([width as f32, height as f32], dt);
+        self.queue.write_buffer(
+            &self.compute_uniforms_buffer,
+            0,
+            bytemuck::cast_slice(&[self.compute_uniforms]),
+        );
     }
 }

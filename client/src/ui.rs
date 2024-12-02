@@ -184,7 +184,7 @@ impl AppState {
 
             if updated_camera {
                 renderer.camera.force_udpate();
-                renderer.update_uniforms();
+                renderer.update_uniforms(self.delta_time);
             }
         }
     }

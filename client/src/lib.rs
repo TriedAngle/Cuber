@@ -116,7 +116,7 @@ impl AppState {
                 renderer.update_camera_keyboard(self.delta_time, &self.input);
             }
             self.diagnostics.start("vertex");
-            renderer.update_uniforms();
+            renderer.update_uniforms(self.delta_time);
             let _ = renderer.prepare_render();
             renderer.render();
 

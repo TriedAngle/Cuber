@@ -3,7 +3,10 @@ const MAX_RAY_STEPS: i32 = 64;
 struct ComputeUniforms { 
     resolution: vec2<f32>,
     dt: f32,
-    _padding: f32,
+    _padding0: f32,
+    inverse_view_projection: mat4x4<f32>,
+    camera_position: vec3<f32>,
+    _padding1: f32
 }
 
 @group(0) @binding(0)
@@ -52,21 +55,23 @@ fn main(
     }
 
     let screen_pos = (frag_coord / uniforms.resolution) * 2.0 - vec2<f32>(1.0);
+    
+    // Compute normalized device coordinates (NDC)
+    let ndc = vec3<f32>(
+        (frag_coord.x / uniforms.resolution.x) * 2.0 - 1.0,
+        ((frag_coord.y / uniforms.resolution.y) * 2.0 - 1.0),
+        1.0 // z in NDC space (far plane)
+    );
 
-    var camera_dir = vec3<f32>(0.0, 0.0, 0.8);
-    var camera_plane_u = vec3<f32>(1.0, 0.0, 0.0);
-    var camera_plane_v = vec3<f32>(0.0, 1.0, 0.0) * uniforms.resolution.y / uniforms.resolution.x;
-    var ray_dir = camera_dir + screen_pos.x * camera_plane_u + screen_pos.y * camera_plane_v;
-    var ray_pos = vec3<f32>(0.0, 2.0 * sin(uniforms.dt * 2.7), -12.0);
+    let clip_pos = vec4<f32>(ndc, 1.0);
 
-    let rotation = uniforms.dt;
-    let ray_pos_xz = rotate2d(ray_pos.xz, rotation);
-    ray_pos.x = ray_pos_xz.x;
-    ray_pos.z = ray_pos_xz.y;
+    let world_pos = uniforms.inverse_view_projection * clip_pos;
 
-    let ray_dir_xz = rotate2d(ray_dir.xz, rotation);
-    ray_dir.x = ray_dir_xz.x;
-    ray_dir.z = ray_dir_xz.y;
+    let world_pos_3D = world_pos.xyz / world_pos.w;
+
+    let ray_dir = normalize(world_pos_3D - uniforms.camera_position);
+
+    let ray_pos = uniforms.camera_position;
 
     var map_pos = vec3<i32>(floor(ray_pos));
 
