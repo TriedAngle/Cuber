@@ -28,41 +28,44 @@ struct ModelUniform {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct ComputeUniforms {
+pub struct ComputeUniforms {
     pub resolution: [f32; 2],
     pub dt: f32,
-    _padding0: f32,
+    pub render_mode: u32,
+    pub view_projection: [[f32; 4]; 4],
     pub inverse_view_projection: [[f32; 4]; 4],
     pub camera_position: [f32; 3],
     _padding1: f32,
 }
 
 impl ComputeUniforms {
-    pub fn new(resolution: [f32; 2], dt: f32) -> Self { 
-        Self { 
+    pub fn new(resolution: [f32; 2], dt: f32) -> Self {
+        Self {
             resolution,
             dt,
-            _padding0: 0.,
+            render_mode: 0,
+            view_projection: *na::Matrix4::identity().as_ref(),
             inverse_view_projection: *na::Matrix4::identity().try_inverse().unwrap().as_ref(),
             camera_position: [0.; 3],
             _padding1: 0.,
         }
     }
-    pub fn update_camera(&mut self, camera: &Camera) { 
+    pub fn update_camera(&mut self, camera: &Camera) {
         let view_projection = camera.view_projection_matrix();
-        let inverse_view_projection = match view_projection.try_inverse() { 
+        let inverse_view_projection = match view_projection.try_inverse() {
             Some(inv) => inv,
             None => na::Matrix4::identity().try_inverse().unwrap(),
         };
 
         self.camera_position = camera.position.into();
+        self.view_projection = *view_projection.as_ref();
         self.inverse_view_projection = *inverse_view_projection.as_ref();
     }
-    pub fn update(&mut self, resolution: [f32; 2], dt: f32) { 
+    pub fn update(&mut self, resolution: [f32; 2], dt: f32) {
         self.resolution = resolution;
         self.dt = dt;
     }
-}  
+}
 
 impl ModelUniform {
     pub fn new(matrix: &na::Matrix4<f32>) -> Self {
@@ -108,11 +111,13 @@ pub struct RenderContext {
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
 
-    compute_uniforms: ComputeUniforms,
+    pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
     compute_render_texture: Texture,
+    compute_depth_texture: Texture,
     compute_bind_group: wgpu::BindGroup,
     compute_pipeline: wgpu::ComputePipeline,
+    compute_depth_texture_bind_group: wgpu::BindGroup,
 
     compute_present_bind_group: wgpu::BindGroup,
     compute_present_pipeline: wgpu::RenderPipeline,
@@ -394,7 +399,10 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let compute_uniforms = ComputeUniforms::new([size.width as f32, size.height as f32], 0.);
+        let mut compute_uniforms =
+            ComputeUniforms::new([size.width as f32, size.height as f32], 0.);
+
+        compute_uniforms.update_camera(&camera);
 
         let compute_uniforms_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -403,8 +411,33 @@ impl RenderContext {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-        let compute_render_texture =
-            Texture::create_storage_texture(&device, &surface_config, Some("Compute Texture"));
+        let compute_render_texture = Texture::create_storage_texture(
+            &device,
+            &surface_config,
+            Texture::COLOR_FORMAT,
+            Some("Compute Texture"),
+            true,
+        );
+
+        let mut compute_depth_texture = Texture::create_storage_texture(
+            &device,
+            &surface_config,
+            Texture::FLOAT_FORMAT,
+            Some("Compute Depth Texture"),
+            false,
+        );
+
+        compute_depth_texture.sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Compute Depth Texture"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: None,
+            ..Default::default()
+        }));
 
         let compute_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -425,7 +458,17 @@ impl RenderContext {
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::StorageTexture {
                             access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            format: Texture::COLOR_FORMAT,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: Texture::FLOAT_FORMAT,
                             view_dimension: wgpu::TextureViewDimension::D2,
                         },
                         count: None,
@@ -444,6 +487,10 @@ impl RenderContext {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&compute_render_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&compute_depth_texture.view),
                 },
             ],
         });
@@ -538,12 +585,53 @@ impl RenderContext {
                 cache: None,
             });
 
+        let compute_depth_texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Depth Texture Bind Group Layout"),
+                entries: &[
+                    // Depth Texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        },
+                        count: None,
+                    },
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let compute_depth_texture_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Depth Texture Bind Group"),
+                layout: &compute_depth_texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&compute_depth_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(compute_depth_texture.sampler()),
+                    },
+                ],
+            });
         // COMPUTE PARTS END
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     &texture_bind_group_layout,
+                    &compute_depth_texture_bind_group_layout,
                     &camera_bind_group_layout,
                     &model_bind_group_layout,
                 ],
@@ -574,7 +662,6 @@ impl RenderContext {
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
-                // cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -586,6 +673,7 @@ impl RenderContext {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
+            // depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -619,6 +707,8 @@ impl RenderContext {
             compute_uniforms_buffer,
             compute_bind_group,
             compute_render_texture,
+            compute_depth_texture,
+            compute_depth_texture_bind_group,
             compute_pipeline,
 
             compute_present_bind_group,
@@ -854,6 +944,7 @@ impl RenderContext {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                // depth_stencil_attachment: None,
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_texture.view,
                     depth_ops: Some(wgpu::Operations {
@@ -868,11 +959,12 @@ impl RenderContext {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.compute_depth_texture_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.camera_bind_group, &[]);
 
             // TODO: one uniform buffer for all meshes
             for mesh in &self.meshes {
-                render_pass.set_bind_group(2, &mesh.bind_group, &[]);
+                render_pass.set_bind_group(3, &mesh.bind_group, &[]);
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass
                     .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -905,11 +997,21 @@ impl RenderContext {
 
         let dt = delta_time.as_secs_f32();
         let (width, height) = (self.surface_config.width, self.surface_config.height);
-        self.compute_uniforms.update([width as f32, height as f32], dt);
+        self.compute_uniforms
+            .update([width as f32, height as f32], dt);
         self.queue.write_buffer(
             &self.compute_uniforms_buffer,
             0,
             bytemuck::cast_slice(&[self.compute_uniforms]),
         );
+    }
+
+    pub fn cycle_compute_render_mode(&mut self) {
+        if self.compute_uniforms.render_mode == 1 {
+            self.compute_uniforms.render_mode = 0;
+            return;
+        }
+
+        self.compute_uniforms.render_mode += 1;
     }
 }

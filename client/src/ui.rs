@@ -1,6 +1,6 @@
 use crate::AppState;
 
-use egui::{DragValue, RichText, Vec2};
+use egui::{Button, DragValue, RichText, Vec2};
 use std::sync::Arc;
 use winit::window::WindowId;
 
@@ -31,7 +31,7 @@ impl AppState {
 
             let egui_renderer = Arc::get_mut(egui_renderer).unwrap();
             egui_renderer.begin_frame();
-
+            let mut cycle_renderer = false;
             let mut updated_camera = false;
             egui::Window::new("Debug")
                 .resizable(true)
@@ -62,6 +62,9 @@ impl AppState {
 
                     ui.separator();
                     ui.heading("Tools");
+                    if ui.add(Button::new("Cycle render mode")).clicked() {
+                        cycle_renderer = true;
+                    }
 
                     ui.label(RichText::new("Player:").underline());
                     ui.horizontal(|ui| {
@@ -181,6 +184,10 @@ impl AppState {
                 &view,
                 screen_descriptor,
             );
+
+            if cycle_renderer {
+                renderer.cycle_compute_render_mode();
+            }
 
             if updated_camera {
                 renderer.camera.force_udpate();

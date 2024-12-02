@@ -2,8 +2,9 @@ const MAX_RAY_STEPS: i32 = 64;
 
 struct ComputeUniforms { 
     resolution: vec2<f32>,
-    dt: f32,
-    _padding0: f32,
+    dt: f32, 
+    render_mode: u32, // 0 normal, 1 depth
+    view_projection: mat4x4<f32>,
     inverse_view_projection: mat4x4<f32>,
     camera_position: vec3<f32>,
     _padding1: f32
@@ -14,6 +15,9 @@ var<uniform> uniforms: ComputeUniforms;
 
 @group(0) @binding(1)
 var OutputTexture: texture_storage_2d<rgba8unorm, write>;
+
+@group(0) @binding(2)
+var DepthTexture: texture_storage_2d<r32float, write>;
 
 fn sd_sphere(p: vec3<f32>, d: f32) -> f32 { 
     return length(p) - d;
@@ -79,9 +83,14 @@ fn main(
     var ray_step = vec3<i32>(sign(ray_dir));
     var side_dist = (sign(ray_dir) * (vec3<f32>(map_pos) - ray_pos) + (sign(ray_dir) * 0.5) + 0.5) * delta_dist;
 
+    var depth = 1.0;
+    var hit = false;
+
     var mask = vec3<bool>(false);
-    for (var i = 0; i < MAX_RAY_STEPS; i = i + 1) {
+    var i = 0;
+    for (i = 0; i < MAX_RAY_STEPS; i = i + 1) {
         if (get_voxel(map_pos)) {
+            hit = true;
             break;
         }
         mask = side_dist <= min(side_dist.yzx, side_dist.zxy);
@@ -92,6 +101,8 @@ fn main(
         let int_mask = select(vec3<i32>(0), vec3<i32>(1), mask);
         map_pos = map_pos + ray_step * int_mask;
     }
+
+    let hit_pos = ray_pos + ray_dir * f32(i);
 
     var color = vec3<f32>(0.0);
     if (mask.x) {
@@ -104,6 +115,20 @@ fn main(
         color = vec3<f32>(0.75);
     }
 
-    textureStore(OutputTexture, vec2<i32>(global_id.xy), vec4<f32>(color, 1.0));
+    if hit {
+        let clip_space_hit_pos = uniforms.view_projection * vec4<f32>(hit_pos, 1.0);
+        let ndc_hit_pos = clip_space_hit_pos.xyz / clip_space_hit_pos.w;
+        depth = ndc_hit_pos.z;
+    }
+    
+    if uniforms.render_mode == 0 { 
+        textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(color, 1.0));
+    } else if uniforms.render_mode == 1 { 
+        textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(depth, depth, depth, 1.0));
+    } else { 
+        textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(color, 1.0));
+    }
+
+    textureStore(DepthTexture, vec2<u32>(global_id.xy), vec4<f32>(depth, 0.0, 0.0, 0.0));
 }
 
