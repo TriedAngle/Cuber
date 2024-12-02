@@ -439,7 +439,7 @@ impl RenderContext {
         });
 
         let compute_present_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Render Bind Group Layout"),
+            label: Some("Compute Present Bind Group Layout"),
             entries: &[
                 // Input Texture
                 wgpu::BindGroupLayoutEntry {
@@ -463,7 +463,7 @@ impl RenderContext {
         });
 
         let compute_present_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Render Bind Group"),
+            label: Some("Compute Present Bind Group"),
             layout: &compute_present_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -478,13 +478,13 @@ impl RenderContext {
         });
 
         let compute_present_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
+            label: Some("Compute Present Pipeline Layout"),
             bind_group_layouts: &[&compute_present_bind_group_layout],
             push_constant_ranges: &[],
         });
 
         let compute_present_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Compute Present Pipeline"),
             layout: Some(&compute_present_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &compute_present_shader,
@@ -517,7 +517,6 @@ impl RenderContext {
                     &texture_bind_group_layout,
                     &camera_bind_group_layout,
                     &model_bind_group_layout,
-                    &compute_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -796,7 +795,7 @@ impl RenderContext {
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+                label: Some("Compute Present Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -815,48 +814,43 @@ impl RenderContext {
             render_pass.draw(0..6, 0..1); // Draw the full-screen quad
         }
 
-        // {
-        //     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        //         label: Some("Render Pass"),
-        //         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-        //             view: &view,
-        //             resolve_target: None,
-        //             ops: wgpu::Operations {
-        //                 load: wgpu::LoadOp::Clear(wgpu::Color {
-        //                     r: 0.1,
-        //                     g: 0.2,
-        //                     b: 0.3,
-        //                     a: 1.0,
-        //                 }),
-        //                 store: wgpu::StoreOp::Store,
-        //             },
-        //         })],
-        //         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-        //             view: &self.depth_texture.view,
-        //             depth_ops: Some(wgpu::Operations {
-        //                 load: wgpu::LoadOp::Clear(1.0),
-        //                 store: wgpu::StoreOp::Store,
-        //             }),
-        //             stencil_ops: None,
-        //         }),
-        //         occlusion_query_set: None,
-        //         timestamp_writes: None,
-        //     });
-        //
-        //     render_pass.set_pipeline(&self.render_pipeline);
-        //     render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-        //     render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-        //
-        //     // TODO: one uniform buffer for all meshes
-        //     for mesh in &self.meshes {
-        //         render_pass.set_bind_group(2, &mesh.bind_group, &[]);
-        //         render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-        //         render_pass
-        //             .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        //
-        //         render_pass.draw_indexed(0..mesh.indices, 0, 0..1);
-        //     }
-        // }
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+
+            // TODO: one uniform buffer for all meshes
+            for mesh in &self.meshes {
+                render_pass.set_bind_group(2, &mesh.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+
+                render_pass.draw_indexed(0..mesh.indices, 0, 0..1);
+            }
+        }
     }
 
     pub fn update_camera_keyboard(&mut self, delta_time: Duration, input: &Input) {
