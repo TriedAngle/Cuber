@@ -4,6 +4,10 @@ struct ComputeUniforms {
     resolution: vec2<f32>,
     dt: f32, 
     render_mode: u32, // 0 normal, 1 depth
+    depth_boost: f32,
+    _padding0: f32,
+    _padding2: f32,
+    _padding3: f32,
     view_projection: mat4x4<f32>,
     inverse_view_projection: mat4x4<f32>,
     camera_position: vec3<f32>,
@@ -124,7 +128,8 @@ fn main(
     if uniforms.render_mode == 0 { 
         textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(color, 1.0));
     } else if uniforms.render_mode == 1 { 
-        textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(depth, depth, depth, 1.0));
+        let depth2 = pow(depth, uniforms.depth_boost); 
+        textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(depth2, depth2, depth2, 1.0));
     } else { 
         textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(color, 1.0));
     }
