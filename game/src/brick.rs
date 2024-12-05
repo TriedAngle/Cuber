@@ -1,15 +1,20 @@
+use rand::Rng;
+
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
-struct Brick {
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Brick {
     raw: [u8; 64],
 }
-
-unsafe impl bytemuck::Pod for Brick {}
-unsafe impl bytemuck::Zeroable for Brick {}
 
 impl Brick {
     pub const fn empty() -> Self {
         Self { raw: [0; 64] }
+    }
+
+    pub fn random() -> Self { 
+        let mut new = Self::empty();
+        rand::thread_rng().fill(&mut new.raw);
+        new
     }
 
     pub const fn data(&self) -> &[u8] {

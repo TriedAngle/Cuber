@@ -4,13 +4,12 @@ use core::time;
 use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
-use game::{input::Input, Diagnostics, Transform};
+use game::{brick::Brick, input::Input, Diagnostics, Transform};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use texture::Texture;
 use wgpu::util::{DeviceExt, RenderEncoder};
 use winit::{dpi::PhysicalSize, window::Window};
 
-mod bricks;
 mod camera;
 mod mesh;
 mod texture;
@@ -125,6 +124,8 @@ pub struct RenderContext {
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
 
+    pub bricks: Vec<Brick>,
+    pub brick_buffer: wgpu::Buffer,
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
     compute_bind_group: wgpu::BindGroup,
@@ -433,6 +434,15 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
+        let brick = Brick::random();
+        let mut bricks = vec![brick];
+
+        let brick_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Brick Buffer"),
+            contents: bytemuck::cast_slice(&bricks),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
         let mut compute_uniforms =
             ComputeUniforms::new([size.width as f32, size.height as f32], 0.);
 
@@ -507,6 +517,16 @@ impl RenderContext {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry { 
+                        binding: 3, 
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer { 
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -526,6 +546,10 @@ impl RenderContext {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&compute_depth_texture.view),
                 },
+                wgpu::BindGroupEntry { 
+                    binding: 3,
+                    resource: brick_buffer.as_entire_binding(),
+                }
             ],
         });
 
@@ -739,6 +763,8 @@ impl RenderContext {
             query_set,
             query_buffer,
             query_staging_buffer,
+            bricks,
+            brick_buffer,
             compute_uniforms,
             compute_uniforms_buffer,
             compute_bind_group,

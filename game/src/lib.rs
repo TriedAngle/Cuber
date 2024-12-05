@@ -1,6 +1,8 @@
 extern crate nalgebra as na;
 
 pub mod input;
+pub mod brick;
+
 pub use input::Input;
 use std::{
     collections::HashMap,

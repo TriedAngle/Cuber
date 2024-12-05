@@ -14,6 +14,15 @@ struct ComputeUniforms {
     _padding1: f32
 }
 
+struct Brick { 
+    raw: array<u32, 16>,
+}
+
+struct BrickBuffer { 
+    bricks: array<Brick>,
+}
+
+
 @group(0) @binding(0)
 var<uniform> uniforms: ComputeUniforms;
 
@@ -22,6 +31,9 @@ var OutputTexture: texture_storage_2d<rgba8unorm, write>;
 
 @group(0) @binding(2)
 var DepthTexture: texture_storage_2d<r32float, write>;
+
+@group(0) @binding(3)
+var<storage, read_write> bricks: BrickBuffer; 
 
 fn sd_sphere(p: vec3<f32>, d: f32) -> f32 { 
     return length(p) - d;
@@ -33,6 +45,21 @@ fn sd_box(p: vec3<f32>, b: vec3<f32>) -> f32 {
 }
 
 fn get_voxel(c: vec3<i32>) -> bool { 
+    if (c.x >= 8 && c.x < 16 && c.y >= 0 && c.y < 8 && c.z >= 0 && c.z < 8) {
+        let x_local = c.x - 8;
+        let y_local = c.y;
+        let z_local = c.z;
+
+        let voxel_idx = x_local + y_local * 8 + z_local * 64;
+        let u32_index = voxel_idx / 32;
+        let bit_index = voxel_idx % 32;
+
+        let voxel_data = bricks.bricks[0].raw[u32(u32_index)];
+        let voxel_set = (voxel_data & (1u << u32(bit_index))) != 0u;
+        if (voxel_set) {
+            return true;
+        }
+    }
     let p = vec3<f32>(c) + vec3<f32>(0.5);
     let d = min(
         max(-sd_sphere(p, 7.5), sd_box(p, vec3<f32>(6.0))),
@@ -108,6 +135,12 @@ fn main(
 
     let hit_pos = ray_pos + ray_dir * f32(i);
 
+    if hit {
+        let clip_space_hit_pos = uniforms.view_projection * vec4<f32>(hit_pos, 1.0);
+        let ndc_hit_pos = clip_space_hit_pos.xyz / clip_space_hit_pos.w;
+        depth = ndc_hit_pos.z;
+    }
+
     var color = vec3<f32>(0.0);
     if (mask.x) {
         color = vec3<f32>(0.5);
@@ -119,11 +152,6 @@ fn main(
         color = vec3<f32>(0.75);
     }
 
-    if hit {
-        let clip_space_hit_pos = uniforms.view_projection * vec4<f32>(hit_pos, 1.0);
-        let ndc_hit_pos = clip_space_hit_pos.xyz / clip_space_hit_pos.w;
-        depth = ndc_hit_pos.z;
-    }
     
     if uniforms.render_mode == 0 { 
         textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(color, 1.0));
