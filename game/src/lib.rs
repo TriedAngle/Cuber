@@ -1,7 +1,8 @@
 extern crate nalgebra as na;
 
-pub mod input;
 pub mod brick;
+pub mod input;
+pub mod worldgen;
 
 pub use input::Input;
 use std::{

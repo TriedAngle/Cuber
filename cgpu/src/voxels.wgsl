@@ -1,4 +1,4 @@
-const MAX_RAY_STEPS: i32 = 64;
+const MAX_RAY_STEPS: i32 = 256;
 const CHUNK_SIZE: i32 = 8;
 
 struct ComputeUniforms { 
@@ -50,12 +50,12 @@ var<storage, read_write> bricks: array<Brick>;
 
 fn get_brick_handle(pos: vec3<i32>) -> u32 { 
     if (any(pos < vec3<i32>(0)) || any(pos >= uniforms.brick_grid_dimension)) {
-            return 0u;
+        return 0u;
     }
 
     let grid_index = pos.x 
-                    + pos.y * uniforms.brick_grid_dimension.x
-                    + pos.z * (uniforms.brick_grid_dimension.x * uniforms.brick_grid_dimension.y);
+            + pos.y * uniforms.brick_grid_dimension.x
+            + pos.z * (uniforms.brick_grid_dimension.x * uniforms.brick_grid_dimension.y);
 
     let id = handles[u32(grid_index)];
     return id;
@@ -63,8 +63,8 @@ fn get_brick_handle(pos: vec3<i32>) -> u32 {
 
 fn get_brick_voxel(id: u32, local_pos: vec3<i32>) -> bool {
     let voxel_idx = local_pos.x 
-                  + local_pos.y * CHUNK_SIZE 
-                  + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
+            + local_pos.y * CHUNK_SIZE 
+            + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
     let u32_index = voxel_idx / 32;
     let bit_index = voxel_idx % 32;
     let voxel_data = bricks[id].raw[u32(u32_index)];

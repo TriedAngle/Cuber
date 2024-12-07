@@ -7,6 +7,7 @@ use camera::Camera;
 use game::{
     brick::{Brick, BrickHandle, BrickMap},
     input::Input,
+    worldgen::WorldGenerator,
     Diagnostics, Transform,
 };
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
@@ -125,7 +126,6 @@ pub struct RenderContext {
     depth_texture: Texture,
 
     pub brickmap: BrickMap,
-    pub bricks: Vec<Brick>,
     pub brick_handle_buffer: wgpu::Buffer,
     pub brick_buffer: wgpu::Buffer,
     brickmap_bind_group: wgpu::BindGroup,
@@ -378,8 +378,8 @@ impl RenderContext {
         meshes.push(mesh2);
 
         let mut camera = Camera::new(
-            na::Point3::new(1., 0., 2.),
-            na::UnitQuaternion::from_euler_angles(0., 0., 0.),
+            na::Point3::new(1., 40., 2.),
+            na::UnitQuaternion::from_euler_angles(-175., 175., -50.),
             5.,
             0.002,
             45.,
@@ -437,18 +437,12 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let mut brickmap = BrickMap::new(na::Vector3::new(64, 64, 64));
+        let generator = WorldGenerator::new(Some(420));
 
-        let bricks = vec![
-            Brick::empty(),
-            Brick::random(),
-            Brick::random(),
-            Brick::random(),
-        ];
+        let brickmap = BrickMap::new(na::Vector3::new(128, 128, 128), false);
 
-        brickmap.set_brick(BrickHandle(1), na::Vector3::new(0, 0, 0));
-        brickmap.set_brick(BrickHandle(2), na::Vector3::new(1, 0, 0));
-        brickmap.set_brick(BrickHandle(3), na::Vector3::new(0, 1, 1));
+        let dimensions = brickmap.dimensions();
+        generator.generate_volume(&brickmap, na::Vector3::zeros(), dimensions);
 
         let brick_handle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Brick Handle Buffer"),
@@ -458,12 +452,15 @@ impl RenderContext {
 
         let brick_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Brick Buffer"),
-            contents: bytemuck::cast_slice(&bricks),
+            contents: bytemuck::cast_slice(brickmap.bricks()),
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        let mut compute_uniforms =
-            ComputeUniforms::new([size.width as f32, size.height as f32], 0., [64, 64, 64]);
+        let mut compute_uniforms = ComputeUniforms::new(
+            [size.width as f32, size.height as f32],
+            0.,
+            *brickmap.dimensions().as_ref(),
+        );
 
         compute_uniforms.update_camera(&camera);
 
@@ -811,7 +808,6 @@ impl RenderContext {
             query_buffer,
             query_staging_buffer,
             brickmap,
-            bricks,
             brick_handle_buffer,
             brick_buffer,
             brickmap_bind_group,
