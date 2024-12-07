@@ -1,5 +1,75 @@
 use rand::Rng;
 
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct BrickHandle(pub u32);
+
+impl BrickHandle {
+    pub fn empty() -> Self {
+        Self(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl From<u32> for BrickHandle {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+pub struct BrickMap {
+    size: na::Vector3<u32>,
+    handles: Vec<BrickHandle>,
+}
+
+impl BrickMap {
+    pub fn new(size: na::Vector3<u32>) -> Self {
+        let volume = size.x * size.y * size.z;
+        let handles = vec![BrickHandle::empty(); volume as usize];
+        Self { size, handles }
+    }
+
+    pub fn index(&self, at: na::Vector3<u32>) -> usize {
+        let id = at.x + (at.y * self.size.x) + (at.z * self.size.x * self.size.y);
+        id as usize
+    }
+
+    pub fn get_handle(&self, at: na::Vector3<u32>) -> BrickHandle {
+        let id = self.index(at);
+        self.handles[id]
+    }
+
+    pub fn set_brick(&mut self, handle: BrickHandle, at: na::Vector3<u32>) {
+        let id = self.index(at);
+        self.handles[id] = handle;
+    }
+
+    pub fn set_empty(&mut self, at: na::Vector3<u32>) {
+        let id = self.index(at);
+        self.handles[id] = BrickHandle::empty();
+    }
+
+    pub fn is_empty(&self, at: na::Vector3<u32>) -> bool {
+        let handle = self.get_handle(at);
+        handle.is_empty()
+    }
+
+    pub fn handles(&self) -> &[BrickHandle] {
+        &self.handles
+    }
+
+    pub fn dimensions(&self) -> na::Vector3<u32> {
+        self.size
+    }
+
+    pub fn volume(&self) -> u32 {
+        self.size.x * self.size.y * self.size.z
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Brick {
@@ -11,7 +81,7 @@ impl Brick {
         Self { raw: [0; 64] }
     }
 
-    pub fn random() -> Self { 
+    pub fn random() -> Self {
         let mut new = Self::empty();
         rand::thread_rng().fill(&mut new.raw);
         new

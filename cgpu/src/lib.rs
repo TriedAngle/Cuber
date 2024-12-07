@@ -4,7 +4,11 @@ use core::time;
 use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
-use game::{brick::Brick, input::Input, Diagnostics, Transform};
+use game::{
+    brick::{Brick, BrickHandle, BrickMap},
+    input::Input,
+    Diagnostics, Transform,
+};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use texture::Texture;
 use wgpu::util::{DeviceExt, RenderEncoder};
@@ -32,10 +36,8 @@ pub struct ComputeUniforms {
     pub resolution: [f32; 2],
     pub dt: f32,
     pub render_mode: u32,
+    pub brick_grid_dimension: [u32; 3],
     pub depth_boost: f32,
-    _padding0: f32,
-    _padding2: f32,
-    _padding3: f32,
     pub view_projection: [[f32; 4]; 4],
     pub inverse_view_projection: [[f32; 4]; 4],
     pub camera_position: [f32; 3],
@@ -43,15 +45,13 @@ pub struct ComputeUniforms {
 }
 
 impl ComputeUniforms {
-    pub fn new(resolution: [f32; 2], dt: f32) -> Self {
+    pub fn new(resolution: [f32; 2], dt: f32, brick_grid_dimension: [u32; 3]) -> Self {
         Self {
             resolution,
             dt,
             render_mode: 0,
             depth_boost: 15.0,
-            _padding0: 0.,
-            _padding2: 0.,
-            _padding3: 0.,
+            brick_grid_dimension,
             view_projection: *na::Matrix4::identity().as_ref(),
             inverse_view_projection: *na::Matrix4::identity().try_inverse().unwrap().as_ref(),
             camera_position: [0.; 3],
@@ -124,8 +124,11 @@ pub struct RenderContext {
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
 
+    pub brickmap: BrickMap,
     pub bricks: Vec<Brick>,
+    pub brick_handle_buffer: wgpu::Buffer,
     pub brick_buffer: wgpu::Buffer,
+    brickmap_bind_group: wgpu::BindGroup,
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
     compute_bind_group: wgpu::BindGroup,
@@ -434,8 +437,24 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let brick = Brick::random();
-        let mut bricks = vec![brick];
+        let mut brickmap = BrickMap::new(na::Vector3::new(64, 64, 64));
+
+        let bricks = vec![
+            Brick::empty(),
+            Brick::random(),
+            Brick::random(),
+            Brick::random(),
+        ];
+
+        brickmap.set_brick(BrickHandle(1), na::Vector3::new(0, 0, 0));
+        brickmap.set_brick(BrickHandle(2), na::Vector3::new(1, 0, 0));
+        brickmap.set_brick(BrickHandle(3), na::Vector3::new(0, 1, 1));
+
+        let brick_handle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Brick Handle Buffer"),
+            contents: bytemuck::cast_slice(&brickmap.handles()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
 
         let brick_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Brick Buffer"),
@@ -444,7 +463,7 @@ impl RenderContext {
         });
 
         let mut compute_uniforms =
-            ComputeUniforms::new([size.width as f32, size.height as f32], 0.);
+            ComputeUniforms::new([size.width as f32, size.height as f32], 0., [64, 64, 64]);
 
         compute_uniforms.update_camera(&camera);
 
@@ -483,6 +502,48 @@ impl RenderContext {
             ..Default::default()
         }));
 
+        let brickmap_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Brick Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let brickmap_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compute Bind Group"),
+            layout: &brickmap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: brick_handle_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: brick_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         let compute_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Compute Bind Group Layout"),
@@ -517,16 +578,6 @@ impl RenderContext {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry { 
-                        binding: 3, 
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer { 
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
 
@@ -546,17 +597,13 @@ impl RenderContext {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&compute_depth_texture.view),
                 },
-                wgpu::BindGroupEntry { 
-                    binding: 3,
-                    resource: brick_buffer.as_entire_binding(),
-                }
             ],
         });
 
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Compute Pipeline Layout"),
-                bind_group_layouts: &[&compute_bind_group_layout],
+                bind_group_layouts: &[&compute_bind_group_layout, &brickmap_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -763,8 +810,11 @@ impl RenderContext {
             query_set,
             query_buffer,
             query_staging_buffer,
+            brickmap,
             bricks,
+            brick_handle_buffer,
             brick_buffer,
+            brickmap_bind_group,
             compute_uniforms,
             compute_uniforms_buffer,
             compute_bind_group,
@@ -1007,6 +1057,7 @@ impl RenderContext {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
+            compute_pass.set_bind_group(1, &self.brickmap_bind_group, &[]);
             compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
         }
 
@@ -1099,6 +1150,7 @@ impl RenderContext {
         let (width, height) = (self.surface_config.width, self.surface_config.height);
         self.compute_uniforms
             .update([width as f32, height as f32], dt);
+        self.compute_uniforms.brick_grid_dimension = *self.brickmap.dimensions().as_ref();
         self.queue.write_buffer(
             &self.compute_uniforms_buffer,
             0,
