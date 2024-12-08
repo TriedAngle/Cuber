@@ -23,14 +23,13 @@ struct BrickGrid {
 
 struct Hit { 
     hit: bool,
-    big_steps: u32,
-    smol_steps: u32,
     mask: vec3<f32>,
     pos: vec4<f32>,
+    color: vec4<f32>,
 }
 
 fn new_hit(hit: bool, mask: vec3<f32>) -> Hit { 
-    return Hit(hit, 0, 0, mask, vec4<f32>(0.0));
+    return Hit(hit, mask, vec4<f32>(0.0), vec4<f32>(0.0));
 }
 
 @group(0) @binding(0)
@@ -110,7 +109,7 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
         if vox { 
             var hit = new_hit(true, mask);
             hit.pos = vec4<f32>(floor(map_pos) / 8.0, 1.0);
-            hit.smol_steps = steps;
+            hit.color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
             return hit;
         }
         mask = step_mask(side_dist);
@@ -146,7 +145,8 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             var hit = trace_brick(brick_handle, sub_space * 8.0, ray_dir, mask);
 
             if hit.hit { 
-                hit.big_steps = steps;
+                let hit_local_pos = hit.pos.xyz;
+                hit.pos = vec4<f32>(map_pos + hit_local_pos, 1.0);
                 return hit;
             }
         }
@@ -197,11 +197,10 @@ fn main(
 
     var depth = 1.0;
     let mask = hit.mask;
-    // let hit_pos = ray_pos + ray_dir * f32(i);
-    let hit_pos = vec3<f32>(0.0);
 
     if hit.hit {
-        let clip_space_hit_pos = uniforms.view_projection * vec4<f32>(hit_pos, 1.0);
+        let world_hit_pos = hit.pos.xyz;
+        let clip_space_hit_pos = uniforms.view_projection * vec4<f32>(world_hit_pos, 1.0);
         let ndc_hit_pos = clip_space_hit_pos.xyz / clip_space_hit_pos.w;
         depth = ndc_hit_pos.z;
     }
@@ -218,7 +217,7 @@ fn main(
     }
 
     var color = vec4<f32>(color_prim, 1.0);
-    color = hit.pos;
+    color = hit.color;
 
     if uniforms.render_mode == 0 { 
         textureStore(OutputTexture, vec2<u32>(global_id.xy), color);
