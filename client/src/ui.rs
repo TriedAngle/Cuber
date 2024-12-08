@@ -160,6 +160,29 @@ impl AppState {
                                 na::UnitQuaternion::from_euler_angles(roll, pitch, yaw);
                         }
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Other: ");
+
+                        if ui
+                            .add(
+                                DragValue::new(&mut renderer.camera.speed)
+                                    .speed(1.0)
+                                    .prefix("Speed: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        { }
+                        if ui
+                            .add(
+                                DragValue::new(&mut renderer.camera.fov)
+                                    .speed(1.0)
+                                    .prefix("Fov: ")
+                                    .custom_formatter(|val, _| format!("{:.2}", val)),
+                            )
+                            .changed()
+                        { }
+
+                    });
 
                     ui.separator();
                     ui.heading("UI Settings");

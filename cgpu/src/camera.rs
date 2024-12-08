@@ -61,8 +61,8 @@ impl Camera {
 
     pub fn update_keyboard(&mut self, dt: f32, input: &Input) {
         let roll = self.calculate_roll(input, dt);
-        let local_z_axis = self.rotation * na::Vector3::z_axis();
-        let roll_quat = na::UnitQuaternion::from_axis_angle(&local_z_axis, roll);
+        let forward = self.rotation * na::Vector3::z_axis();
+        let roll_quat = na::UnitQuaternion::from_axis_angle(&forward, roll);
         let new_rotation = roll_quat * self.rotation;
 
         if self.rotation != new_rotation {
@@ -100,6 +100,42 @@ impl Camera {
             self.position -= up * self.speed * dt;
             self.updated = true;
         }
+
+        // Handle speed adjustment
+        if input.pressing(KeyCode::ControlLeft) {
+            let scroll = input.scroll().y;
+            if scroll != 0.0 {
+                let speed_factor = if self.speed < 10.0 {
+                    0.5
+                } else if self.speed < 20.0 {
+                    2.0
+                } else if self.speed < 50.0 { 
+                    10.0
+                } else {
+                    30.0
+                };
+                
+                self.speed = (self.speed + scroll * speed_factor )
+                    .max(0.1) // Minimum speed
+                    .min(1000.0); // Maximum speed
+                
+                log::trace!("New speed: {}", self.speed);
+            }
+        }
+
+        // Handle zoom
+        if input.pressing(KeyCode::KeyC) {
+            let scroll = input.scroll().y;
+            if scroll != 0.0 {
+                let zoom_speed = 2.0;
+                self.fov = (self.fov - scroll * zoom_speed)
+                    .max(10.0)  // Minimum FOV
+                    .min(120.0); // Maximum FOV
+                self.updated = true;
+                log::trace!("New FOV: {}", self.fov);
+            }
+        }
+
     }
 
     fn calculate_rotation(&self, input: &Input) -> (f32, f32) {
@@ -113,10 +149,10 @@ impl Camera {
         let mut roll = 0.0;
 
         if input.pressing(KeyCode::KeyQ) {
-            roll += self.speed * 0.5 * dt;
+            roll += self.sensitivity * 1300.0 * dt;
         }
         if input.pressing(KeyCode::KeyE) {
-            roll -= self.speed * 0.5 * dt;
+            roll -= self.sensitivity * 1300.0 * dt;
         }
         roll
     }

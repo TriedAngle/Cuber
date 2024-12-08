@@ -67,6 +67,7 @@ impl ApplicationHandler<AppEvent> for App {
                     .duration_since(self.state.last_update)
                     .unwrap_or(time::Duration::from_secs_f32(1.0 / 60.0));
                 self.state.last_update = now;
+                self.state.input.flush(self.state.delta_time);
                 for window in self.state.windows.values() {
                     window.request_redraw(); // Request redraw for all windows
                 }

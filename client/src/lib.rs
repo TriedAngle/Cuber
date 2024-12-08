@@ -55,6 +55,7 @@ impl AppState {
     }
 
     pub fn handle_window_event(&mut self, event: &WindowEvent, window_id: WindowId) {
+        self.input.update_window(event);
         if !self.focus {
             if let Some(egui) = self.eguis.get_mut(&window_id) {
                 let egui = Arc::get_mut(egui).unwrap();
@@ -177,7 +178,7 @@ impl AppState {
     }
 
     pub fn new_renderer(&mut self, window: Arc<Window>) {
-        let mut renderer = pollster::block_on(RenderContext::new(window.clone()));
+        let renderer = pollster::block_on(RenderContext::new(window.clone()));
 
         log::info!("Renderer Created");
 
@@ -190,7 +191,6 @@ impl AppState {
         );
 
         log::info!("Egui Created");
-        renderer.compute_test();
         let renderer = Arc::new(renderer);
         self.renderers.insert(window.id(), renderer);
 
