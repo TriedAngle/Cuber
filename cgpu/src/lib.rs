@@ -1033,7 +1033,7 @@ impl RenderContext {
     }
 
     pub fn cycle_compute_render_mode(&mut self) {
-        if self.compute_uniforms.render_mode == 1 {
+        if self.compute_uniforms.render_mode == 3 {
             self.compute_uniforms.render_mode = 0;
             return;
         }

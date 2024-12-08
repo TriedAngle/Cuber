@@ -4,7 +4,7 @@ const CHUNK_SIZE: i32 = 8;
 struct ComputeUniforms { 
     resolution: vec2<f32>,
     dt: f32, 
-    render_mode: u32, // 0 normal, 1 depth
+    render_mode: u32, // 0 game, 1 depth, 2 normals, 3 traversal
     brick_grid_dimension: vec3<i32>,
     depth_boost: f32,
     view_projection: mat4x4<f32>,
@@ -95,6 +95,8 @@ fn step_mask(sideDist : vec3<f32>) -> vec3<f32> {
     return vec3<f32>(f32(mask.x), f32(mask.y), f32(mask.z));
 }
 
+var<private> brightness: f32 = 0.0;
+
 fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, world_mask: vec3<f32>) -> Hit {
     let ray_pos = clamp(in_ray_pos, vec3<f32>(0.0001), vec3<f32>(7.9999));
     var map_pos = floor(ray_pos);
@@ -105,6 +107,7 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
 
     var steps = 0u;
     while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) { 
+        brightness = brightness + 0.01;
         let vox = get_brick_voxel(brick_handle, vec3<i32>(map_pos));
         if vox { 
             var hit = new_hit(true, mask);
@@ -131,6 +134,7 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     var steps = 0u;
     for (var i = 0; i < MAX_RAY_STEPS; i++) { 
         let brick_handle = get_brick_handle(vec3<i32>(floor(map_pos)));
+        brightness = brightness + (1.0 / f32(MAX_RAY_STEPS));
 
         if brick_handle != 0 && all(map_pos >= vec3<f32>(0.0)) {
             let sub = ((map_pos - ray_pos) + 0.5 - (ray_sign * 0.5)) * delta_dist;
@@ -205,28 +209,43 @@ fn main(
         depth = ndc_hit_pos.z;
     }
 
-    var color_prim = vec3<f32>(0.0);
-    if (mask.x > 0.0) {
-        color_prim = vec3<f32>(0.5);
-    }
-    if (mask.y > 0.0) {
-        color_prim = vec3<f32>(1.0);
-    }
-    if (mask.z > 0.0) {
-        color_prim = vec3<f32>(0.75);
-    }
-
-    var color = vec4<f32>(color_prim, 1.0);
-    color = hit.color;
-
+    var color = vec4<f32>(0.0);
+    
     if uniforms.render_mode == 0 { 
-        textureStore(OutputTexture, vec2<u32>(global_id.xy), color);
+        color = hit.color;
     } else if uniforms.render_mode == 1 { 
         let depth2 = pow(depth, uniforms.depth_boost); 
-        textureStore(OutputTexture, vec2<u32>(global_id.xy), vec4<f32>(depth2, depth2, depth2, 1.0));
+        color = vec4<f32>(depth2, depth2, depth2, 1.0);
+    } else if uniforms.render_mode == 2 { 
+        if hit.hit {
+            var normal = vec3<f32>(0.0);
+            if mask.x > 0.0 {
+                normal.x = select(1.0, -1.0, ray_dir.x > 0.0);
+            }
+            if mask.y > 0.0 {
+                normal.y = select(1.0, -1.0, ray_dir.y > 0.0);
+            }
+            if mask.z > 0.0 {
+                normal.z = select(1.0, -1.0, ray_dir.z > 0.0);
+            }
+            
+            // Map normal to color (positive = standard RGB, negative = inverted)
+            var normal_color = abs(normal);
+            if any(normal < vec3<f32>(0.0)) {
+                normal_color = vec3<f32>(1.0) - normal_color;
+            }
+            
+            color = vec4<f32>(normal_color, 1.0);
+        } else {
+            color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+    } else if uniforms.render_mode == 3 { 
+        let brightness = min(brightness, 1.0); // Clamp to avoid over-bright areas
+        color = vec4<f32>(brightness, brightness, brightness, 1.0);
     } else { 
-        textureStore(OutputTexture, vec2<u32>(global_id.xy), color);
+        
     }
 
+    textureStore(OutputTexture, vec2<u32>(global_id.xy), color);
     textureStore(DepthTexture, vec2<u32>(global_id.xy), vec4<f32>(depth, 0.0, 0.0, 0.0));
 }
