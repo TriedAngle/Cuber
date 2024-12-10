@@ -3,17 +3,13 @@ extern crate nalgebra as na;
 use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
-use game::{
-    brick::BrickMap,
-    input::Input,
-    worldgen::WorldGenerator,
-    Diagnostics, Transform,
-};
+use game::{brick::BrickMap, input::Input, worldgen::WorldGenerator, Diagnostics, Transform};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use texture::Texture;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
+mod allocator;
 mod camera;
 mod mesh;
 mod texture;
@@ -220,7 +216,7 @@ impl RenderContext {
             wgpu::Limits::default()
         };
 
-        custom_limits.max_storage_buffer_binding_size =  512 << 20;
+        custom_limits.max_storage_buffer_binding_size = 512 << 20;
         custom_limits.max_buffer_size = 2048 << 20;
 
         if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
@@ -231,7 +227,7 @@ impl RenderContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features: custom_features,
-                    required_limits: custom_limits, 
+                    required_limits: custom_limits,
                     label: None,
                     memory_hints: Default::default(),
                 },
@@ -523,7 +519,7 @@ impl RenderContext {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -875,6 +871,8 @@ impl RenderContext {
             query_buffer_size,
         );
 
+        self.collect_mark_unread(&mut encoder);
+
         self.queue.submit([encoder.finish()]);
 
         output.present();
@@ -903,6 +901,28 @@ impl RenderContext {
             diagnostics.insert("RasterPass", render_duration);
         }
         self.query_staging_buffer.unmap();
+    }
+
+    pub fn collect_mark_unread(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        //     {
+        //         let buffer_slice = self.brick_handle_buffer.slice(..);
+        //         buffer_slice.map_async(wgpu::MapMode::Write, |_| {});
+        //         self.queue.submit([]);
+        //         self.device.poll(wgpu::Maintain::Wait);
+        //
+        //         let mut data = buffer_slice.get_mapped_range_mut();
+        //         let handles: &mut [BrickHandle] = bytemuck::cast_slice_mut(&mut data);
+        //         let mut unread = Vec::new();
+        //         for handle in handles {
+        //             if !handle.is_read() {
+        //                 unread.push(*handle);
+        //             }
+        //             handle.set_unread();
+        //         }
+        //         println!("unread: {:?}", unread.len());
+        //     }
+        //     self.brick_handle_buffer.unmap();
+        // }
     }
 
     pub fn render(&mut self) {
