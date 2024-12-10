@@ -47,6 +47,8 @@ var<storage, read> trace_bricks: array<TraceBrick>;
 @group(1) @binding(2)
 var<storage, read> bricks: array<u32>; 
 
+var<private> brightness: f32 = 0.0;
+
 struct Hit { 
     hit: bool,
     mask: vec3<f32>,
@@ -138,7 +140,18 @@ fn step_mask(sideDist : vec3<f32>) -> vec3<f32> {
     return vec3<f32>(f32(mask.x), f32(mask.y), f32(mask.z));
 }
 
-var<private> brightness: f32 = 0.0;
+fn intersect_box(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> {
+    let t1 = (box_min - ray_origin) / ray_dir;
+    let t2 = (box_max - ray_origin) / ray_dir;
+    
+    let tmin = min(t1, t2);
+    let tmax = max(t1, t2);
+    
+    let t_near = max(max(tmin.x, tmin.y), tmin.z);
+    let t_far = min(min(tmax.x, tmax.y), tmax.z);
+    
+    return vec2<f32>(t_near, t_far);
+}
 
 fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, world_mask: vec3<f32>) -> Hit {
     let ray_pos = clamp(in_ray_pos, vec3<f32>(0.0001), vec3<f32>(7.9999));
@@ -168,7 +181,21 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
 }
 
 fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit { 
-    var map_pos = floor(ray_pos);
+    let world_min = vec3<f32>(0.0);
+    let world_max = vec3<f32>(uniforms.brick_grid_dimension);
+    
+    let bounds = intersect_box(ray_pos, ray_dir, world_min, world_max);
+    
+    if bounds.x > bounds.y || bounds.y < 0.0 {
+        return new_hit(false, vec3<f32>(0.0));
+    }
+    
+    var adjusted_pos = ray_pos;
+    if bounds.x > 0.0 {
+        adjusted_pos = ray_pos + ray_dir * bounds.x;
+    }
+    
+    var map_pos = floor(adjusted_pos);
     let ray_sign = sign(ray_dir);
     let delta_dist = 1.0 / ray_dir;
     var side_dist = ((map_pos - ray_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
@@ -203,9 +230,14 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
         map_pos = map_pos + (mask * ray_sign);
         side_dist = side_dist + (mask * ray_sign * delta_dist);
         steps = steps + 1;
+
+        if any(map_pos >= world_max) || any(map_pos < world_min) {
+            break;
+        }
     }
     return new_hit(false, vec3<f32>(0.0));
 }
+
 
 @compute @workgroup_size(8, 8)
 fn main(
