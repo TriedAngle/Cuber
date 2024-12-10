@@ -13,24 +13,21 @@ struct ComputeUniforms {
     _padding1: f32
 }
 
-struct Brick { 
+struct TraceBrick { 
     raw: array<u32, 16>,
+    brick: u32,
+    material: u32,
 }
 
-struct BrickGrid { 
-    handles: array<u32>,
-}
+// Using upper 3 bits
+const FLAG_MASK = 0xE0000000u;  // 111 in top 3 bits
+const SEEN_BIT = 0x80000000u;   // 1 in top bit
+const STATE_MASK = 0x60000000u;  // 11 in bits 30-29
 
-struct Hit { 
-    hit: bool,
-    mask: vec3<f32>,
-    pos: vec4<f32>,
-    color: vec4<f32>,
-}
-
-fn new_hit(hit: bool, mask: vec3<f32>) -> Hit { 
-    return Hit(hit, mask, vec4<f32>(0.0), vec4<f32>(0.0));
-}
+const STATE_EMPTY = 0x00000000u;
+const STATE_DATA = 0x20000000u;     // 01 in bits 30-29
+const STATE_UNLOADED = 0x40000000u; // 10 in bits 30-29
+const STATE_LOADING = 0x60000000u;  // 11 in bits 30-29
 
 @group(0) @binding(0)
 var<uniform> uniforms: ComputeUniforms;
@@ -45,18 +42,64 @@ var DepthTexture: texture_storage_2d<r32float, write>;
 var<storage, read_write> handles: array<u32>;
 
 @group(1) @binding(1)
-var<storage, read_write> bricks: array<Brick>; 
+var<storage, read> trace_bricks: array<TraceBrick>;
+
+@group(1) @binding(2)
+var<storage, read> bricks: array<u32>; 
+
+struct Hit { 
+    hit: bool,
+    mask: vec3<f32>,
+    pos: vec4<f32>,
+    color: vec4<f32>,
+}
+
+fn new_hit(hit: bool, mask: vec3<f32>) -> Hit { 
+    return Hit(hit, mask, vec4<f32>(0.0), vec4<f32>(0.0));
+}
+
+fn brick_index(pos: vec3<i32>) -> u32 {
+    return u32(
+        pos.x + 
+        pos.y * uniforms.brick_grid_dimension.x + 
+        pos.z * (uniforms.brick_grid_dimension.x * uniforms.brick_grid_dimension.y)
+    );
+}
+
+fn is_brick_seen(id: u32) -> bool {
+    return (id & SEEN_BIT) != 0u;
+}
+
+fn is_brick_data(id: u32) -> bool {
+    return (id & STATE_MASK) == STATE_DATA;
+}
+
+fn is_brick_unloaded(id: u32) -> bool {
+    return (id & STATE_MASK) == STATE_UNLOADED;
+}
+
+fn is_brick_loading(id: u32) -> bool {
+    return (id & STATE_MASK) == STATE_LOADING;
+}
+
+fn get_brick_handle_offset(brick: u32) -> u32 {
+    return brick & ~FLAG_MASK;
+}
+
+fn set_brick_seen(pos: vec3<i32>) {
+    let idx = brick_index(pos);
+    var id = handles[idx];
+    id = id | SEEN_BIT;
+    handles[idx] = id;
+}
 
 fn get_brick_handle(pos: vec3<i32>) -> u32 { 
     if (any(pos < vec3<i32>(0)) || any(pos >= uniforms.brick_grid_dimension)) {
         return 0u;
     }
 
-    let grid_index = pos.x 
-            + pos.y * uniforms.brick_grid_dimension.x
-            + pos.z * (uniforms.brick_grid_dimension.x * uniforms.brick_grid_dimension.y);
-
-    let id = handles[u32(grid_index)];
+    let idx = brick_index(pos);
+    let id = handles[idx];
     return id;
 }
 
@@ -66,7 +109,7 @@ fn get_brick_voxel(id: u32, local_pos: vec3<i32>) -> bool {
             + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
     let u32_index = voxel_idx / 32;
     let bit_index = voxel_idx % 32;
-    let voxel_data = bricks[id].raw[u32(u32_index)];
+    let voxel_data = trace_bricks[id].raw[u32(u32_index)];
     return (voxel_data & (1u << u32(bit_index))) != 0u;
 }
 
@@ -133,10 +176,12 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     
     var steps = 0u;
     for (var i = 0; i < MAX_RAY_STEPS; i++) { 
-        let brick_handle = get_brick_handle(vec3<i32>(floor(map_pos)));
+        let brick_handle_raw = get_brick_handle(vec3<i32>(floor(map_pos)));
+        let brick_handle = get_brick_handle_offset(brick_handle_raw);
+        let is_data = is_brick_data(brick_handle_raw);
         brightness = brightness + (1.0 / f32(MAX_RAY_STEPS));
 
-        if brick_handle != 0 && all(map_pos >= vec3<f32>(0.0)) {
+        if is_data && all(map_pos >= vec3<f32>(0.0)) {
             let sub = ((map_pos - ray_pos) + 0.5 - (ray_sign * 0.5)) * delta_dist;
             let d = max(sub.x, max(sub.y, sub.z));
             let intersect = ray_pos + (ray_dir * d);

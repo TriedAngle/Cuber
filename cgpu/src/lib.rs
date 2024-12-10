@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
+use allocator::GPUBuddyBuffer;
 use camera::Camera;
 use game::{brick::BrickMap, input::Input, worldgen::WorldGenerator, Diagnostics, Transform};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
@@ -122,7 +123,9 @@ pub struct RenderContext {
 
     pub brickmap: BrickMap,
     pub brick_handle_buffer: wgpu::Buffer,
-    pub brick_buffer: wgpu::Buffer,
+    pub brick_trace_buffer: wgpu::Buffer,
+    pub brick_buffer: GPUBuddyBuffer,
+
     brickmap_bind_group: wgpu::BindGroup,
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
@@ -209,6 +212,8 @@ impl RenderContext {
         let custom_features = wgpu::Features::empty()
             | wgpu::Features::TIMESTAMP_QUERY
             | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+            // TODO: implement this
+            // | wgpu::Features::SHADER_INT64;
 
         let mut custom_limits = if cfg!(target_arch = "wasm32") {
             wgpu::Limits::downlevel_webgl2_defaults()
@@ -441,7 +446,7 @@ impl RenderContext {
 
         let generator = WorldGenerator::new(Some(420));
 
-        let brickmap = BrickMap::new(na::Vector3::new(256, 128, 256), false);
+        let brickmap = BrickMap::new(na::Vector3::new(256, 128, 256));
 
         let dimensions = brickmap.dimensions();
         generator.generate_volume(&brickmap, na::Vector3::zeros(), dimensions);
@@ -452,11 +457,21 @@ impl RenderContext {
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        let brick_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let brick_trace_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Brick Buffer"),
             contents: bytemuck::cast_slice(brickmap.bricks()),
             usage: wgpu::BufferUsages::STORAGE,
         });
+
+        let brick_minimum_size = mem::size_of::<[u8; 64]>() as u64;
+        let brick_maximum_size = mem::size_of::<[u8; 512]>() as u64;
+
+        let brick_buffer = GPUBuddyBuffer::new(
+            &device, 
+            (brick_minimum_size, brick_maximum_size), 
+            1024 << 20, // 1 gigabyte
+            256 << 20, // 256 megabytes
+        );
 
         let mut compute_uniforms = ComputeUniforms::new(
             [size.width as f32, size.height as f32],
@@ -538,7 +553,7 @@ impl RenderContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: brick_buffer.as_entire_binding(),
+                    resource: brick_trace_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -811,6 +826,7 @@ impl RenderContext {
             query_staging_buffer,
             brickmap,
             brick_handle_buffer,
+            brick_trace_buffer,
             brick_buffer,
             brickmap_bind_group,
             compute_uniforms,

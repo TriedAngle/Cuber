@@ -2,7 +2,7 @@ use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 
-use crate::brick::{Brick, BrickHandle, BrickMap};
+use crate::brick::{TraceBrick, BrickHandle, BrickMap};
 
 pub struct WorldGenerator {
     terrain_noise: FastNoiseLite,
@@ -52,8 +52,8 @@ impl WorldGenerator {
         }
     }
 
-    pub fn generate_chunk(&self, chunk_x: u32, chunk_y: u32, chunk_z: u32) -> Brick {
-        let mut brick = Brick::empty();
+    pub fn generate_chunk(&self, chunk_x: u32, chunk_y: u32, chunk_z: u32) -> TraceBrick {
+        let mut brick = TraceBrick::empty();
         let world_x = chunk_x as f32 * 8.0;
         let world_z = chunk_z as f32 * 8.0;
 

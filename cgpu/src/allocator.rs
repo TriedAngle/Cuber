@@ -80,7 +80,7 @@ impl GPUBuddyBuffer {
         buf
     }
 
-    pub fn allocate(&mut self, size: u64) -> Option<u64> {
+    pub fn allocate(&mut self, size: u64, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<u64> {
         let size = round_up_pow2(size);
 
         if size < self.min_block_size || size > self.max_block_size {
@@ -96,15 +96,15 @@ impl GPUBuddyBuffer {
 
             Some(self.blocks[block_idx].offset)
         } else {
-            if self.try_grow_buffer() {
-                self.allocate(size)
+            if self.try_grow_buffer(device, queue) {
+                self.allocate(size, device, queue)
             } else {
                 None
             }
         }
     }
 
-    pub fn deallocate(&mut self, offset: u64) {
+    pub fn deallocate(&mut self, offset: u64, device: &wgpu::Device, queue: &wgpu::Queue) {
         if let Some(block_idx) = self.find_block_by_offset(offset) {
             self.blocks[block_idx].is_free = true;
             let size = self.blocks[block_idx].size;
@@ -112,7 +112,7 @@ impl GPUBuddyBuffer {
             self.free_blocks.entry(size).or_default().push(block_idx);
 
             self.merge_adjacent_free_blocks();
-            self.try_shrink_buffer();
+            self.try_shrink_buffer(device, queue);
         }
     }
 
@@ -135,14 +135,95 @@ impl GPUBuddyBuffer {
         )
     }
 
-    fn try_grow_buffer(&mut self) -> bool {
-        // TODO
-        return false;
+    pub fn buffer(&self) -> &wgpu::Buffer { 
+        &self.buffer
     }
 
-    fn try_shrink_buffer(&mut self) -> bool {
+    fn try_grow_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        let new_capacity = self.capacity *  2;
+
+        let new_buf = device.create_buffer(&wgpu::BufferDescriptor { 
+            label: Some("Buddy Buffer"),
+            size: new_capacity,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, 
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Buddy Buffer Encoder"),
+        });
+
+        encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buf, 0, self.capacity);
+
+        queue.submit([encoder.finish()]);
+
+        self.buffer = new_buf;
+
+        self.blocks.push(Block { 
+            offset: self.capacity,
+            size: self.capacity,
+            is_free: true,
+        });
+
+        self.free_blocks
+            .entry(self.capacity)
+            .or_default()
+            .push(self.blocks.len() - 1);
+
+        self.capacity = new_capacity;
+        return true;
+    }
+
+    fn try_shrink_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        let total_free_size: u64 = self.free_blocks
+            .iter()
+            .flat_map(|(size, blocks)| std::iter::repeat(*size).take(blocks.len()))
+            .sum();
+
+        if !(((total_free_size as f32 / self.capacity as f32) < 0.75) && (self.capacity > self.max_block_size * 2)) { 
+            return false;
+        }
+
+
+        let new_capacity = self.capacity /  2;
+
+        let new_buf = device.create_buffer(&wgpu::BufferDescriptor { 
+            label: Some("Buddy Buffer"),
+            size: new_capacity,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, 
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Buddy Buffer Encoder"),
+        });
+
+        encoder.copy_buffer_to_buffer(&self.buffer, 0, &new_buf, 0, self.capacity);
+
+        queue.submit([encoder.finish()]);
+        
+        self.buffer = new_buf;
+        self.capacity = new_capacity;
+
+        self.rebuild_blocks();
         // TODO
-        return false;
+        return true;
+    }
+
+    fn rebuild_blocks(&mut self) {
+        // Keep only blocks that fit within new capacity
+        self.blocks.retain(|block| block.offset + block.size <= self.capacity);
+        
+        // Rebuild free blocks map
+        self.free_blocks.clear();
+        for (idx, block) in self.blocks.iter().enumerate() {
+            if block.is_free {
+                self.free_blocks
+                    .entry(block.size)
+                    .or_default()
+                    .push(idx);
+            }
+        }
     }
 
     fn merge_adjacent_free_blocks(&mut self) {}

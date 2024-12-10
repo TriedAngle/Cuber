@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use parking_lot::RwLock;
 use rand::Rng;
 
@@ -8,6 +6,15 @@ use rand::Rng;
 pub struct BrickHandle(pub u32);
 
 impl BrickHandle {
+    const FLAG_MASK: u32 = 0xE0000000;  // 111 in top 3 bits
+    const SEEN_BIT: u32 = 0x80000000;   // 1 in top bit
+    const STATE_MASK: u32 = 0x60000000;  // 11 in bits 30-29
+    
+    const STATE_EMPTY: u32 = 0x00000000;
+    const STATE_DATA: u32 = 0x20000000;     // 01 in bits 30-29
+    const STATE_UNLOADED: u32 = 0x40000000; // 10 in bits 30-29
+    const STATE_LOADING: u32 = 0x60000000;  // 11 in bits 30-29
+
     pub fn zero() -> Self {
         Self(0)
     }
@@ -15,13 +22,53 @@ impl BrickHandle {
     pub fn empty() -> Self {
         Self::zero()
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.0 == 0
+    
+    pub fn new(offset: u32) -> Self {
+        Self(offset | Self::STATE_DATA)
     }
 
-    pub fn next(&self) -> Self {
-        Self(self.0 + 1)
+    pub fn is_empty(&self) -> bool {
+        (self.0 & !Self::FLAG_MASK) == 0
+    }
+
+    pub fn is_seen(&self) -> bool {
+        (self.0 & Self::SEEN_BIT) != 0
+    }
+
+    pub fn is_data(&self) -> bool {
+        (self.0 & Self::STATE_MASK) == Self::STATE_DATA
+    }
+
+    pub fn is_unloaded(&self) -> bool {
+        (self.0 & Self::STATE_MASK) == Self::STATE_UNLOADED
+    }
+
+    pub fn is_loading(&self) -> bool {
+        (self.0 & Self::STATE_MASK) == Self::STATE_LOADING
+    }
+
+    pub fn set_seen(&mut self) {
+        self.0 |= Self::SEEN_BIT;
+    }
+
+    pub fn set_unseen(&mut self) {
+        self.0 &= !Self::SEEN_BIT;
+    }
+
+    pub fn set_state_empty(&mut self) {
+        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_EMPTY;
+    }
+
+    pub fn set_state_data(&mut self) {
+        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_DATA;
+    }
+
+    pub fn set_state_unloaded(&mut self) {
+        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_UNLOADED;
+    }
+
+    pub fn set_state_loading(&mut self) {
+        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_LOADING;
     }
 }
 
@@ -34,24 +81,19 @@ impl From<u32> for BrickHandle {
 pub struct BrickMap {
     size: na::Vector3<u32>,
     handles: RwLock<Vec<BrickHandle>>,
-    bricks: RwLock<Vec<Brick>>,
-    do_cache: bool,
-    cache: RwLock<HashMap<Brick, BrickHandle>>,
+    bricks: RwLock<Vec<TraceBrick>>,
 }
 
 impl BrickMap {
-    pub fn new(size: na::Vector3<u32>, do_cache: bool) -> Self {
+    pub fn new(size: na::Vector3<u32>) -> Self {
         let volume = size.x * size.y * size.z;
         let handles = RwLock::new(vec![BrickHandle::empty(); volume as usize]);
         let bricks = RwLock::new(vec![]);
-        let cache = RwLock::new(HashMap::new());
 
         Self {
             size,
             handles,
             bricks,
-            do_cache,
-            cache,
         }
     }
 
@@ -83,7 +125,7 @@ impl BrickMap {
         handle.is_empty()
     }
 
-    pub fn bricks(&self) -> &[Brick] {
+    pub fn bricks(&self) -> &[TraceBrick] {
         let ptr = self.bricks.data_ptr();
 
         let bricks = unsafe { ptr.as_ref().unwrap() };
@@ -103,39 +145,20 @@ impl BrickMap {
         self.size
     }
 
-    pub fn cache_get(&self, brick: &Brick) -> Option<BrickHandle> {
-        let cache = self.cache.read();
-        cache.get(brick).copied()
-    }
-
-    pub fn cache_set(&self, brick: Brick, handle: BrickHandle) {
-        let mut cache = self.cache.write();
-        cache.insert(brick, handle);
-    }
-
-    pub fn brick_push(&self, brick: Brick) -> BrickHandle {
+    pub fn brick_push(&self, brick: TraceBrick) -> BrickHandle {
         let offset = self.bricks.read().len();
         let mut bricks = self.bricks.write();
         bricks.push(brick);
         BrickHandle(offset as u32)
     }
 
-    pub fn get_or_push_brick(&self, brick: Brick, at: na::Vector3<u32>) -> BrickHandle {
-        let mut cache = self.cache.write();
-
-        if self.do_cache {
-            if let Some(handle) = cache.get(&brick).copied() {
-                return handle;
-            }
-        }
-
+    pub fn get_or_push_brick(&self, brick: TraceBrick, at: na::Vector3<u32>) -> BrickHandle {
         let id = self.index(at);
         let mut handles = self.handles.write();
         let mut bricks = self.bricks.write();
 
-        let handle = BrickHandle(bricks.len() as u32);
+        let handle = BrickHandle::new(bricks.len() as u32);
         bricks.push(brick);
-        cache.insert(brick, handle);
         handles[id] = handle;
         handle
     }
@@ -146,15 +169,29 @@ impl BrickMap {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Eq, Hash, PartialEq)]
-pub struct Brick {
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TraceBrick {
     raw: [u8; 64],
+    brick: u32, // top 3 bits for size, rest for offset
+    material: u32,
 }
 
-impl Brick {
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialBrick {
+    // Dynamic sized type - actual implementation determined at runtime
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ExpandedBrick {
+    raw: [u8; 512],
+}
+
+impl TraceBrick {
     pub const EMPTY: Self = Self::empty();
     pub const fn empty() -> Self {
-        Self { raw: [0; 64] }
+        Self { raw: [0; 64], brick: 0, material: 0, }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -200,19 +237,88 @@ impl Brick {
         let (byte_index, bit_index) = Self::index(x, y, z);
         self.raw[byte_index] ^= 1 << bit_index
     }
+
+    // Brick handle methods
+    pub fn get_brick_size(&self) -> u32 {
+        (self.brick >> 29) & 0b111
+    }
+
+    pub fn set_brick_size(&mut self, size: u32) {
+        debug_assert!(size <= 0b111);
+        self.brick = (self.brick & !(0b111 << 29)) | (size << 29);
+    }
+
+    pub fn get_brick_offset(&self) -> u32 {
+        self.brick & 0x1FFFFFFF
+    }
+
+    pub fn set_brick_offset(&mut self, offset: u32) {
+        debug_assert!(offset <= 0x1FFFFFFF);
+        self.brick = (self.brick & (0b111 << 29)) | offset;
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl ExpandedBrick {
+    pub const EMPTY: Self = Self::empty();
+    
+    pub const fn empty() -> Self {
+        Self { raw: [0; 512] }
+    }
 
-    #[test]
-    fn brick() {
-        let mut brick = Brick::empty();
-        assert_eq!(brick.get(0, 0, 0), false);
-        brick.set(0, 0, 0, true);
-        brick.set(3, 5, 2, true);
-        assert_eq!(brick.get(0, 0, 0), true);
-        assert_eq!(brick.get(3, 5, 2), true);
+    pub fn is_empty(&self) -> bool {
+        self.raw == Self::EMPTY.raw
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.raw
+    }
+
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.raw
+    }
+
+    pub fn index(x: u32, y: u32, z: u32) -> usize {
+        (x + (y * 8) + (z * 64)) as usize
+    }
+
+    pub fn set(&mut self, x: u32, y: u32, z: u32, val: u8) {
+        let index = Self::index(x, y, z);
+        self.raw[index] = val;
+    }
+
+    pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
+        let index = Self::index(x, y, z);
+        self.raw[index]
+    }
+
+    pub fn to_trace_brick(&self) -> TraceBrick {
+        let mut trace = TraceBrick::empty();
+        
+        for i in 0..512 {
+            if self.raw[i] != 0 {
+                let byte_index = i / 8;
+                let bit_index = i % 8;
+                trace.raw[byte_index] |= 1 << bit_index;
+            }
+        }
+        
+        trace
+    }
+
+    pub fn get_required_bits(&self) -> u32 {
+        let mut state_mask = 0u32;
+        
+        for &value in self.raw.iter() {
+            state_mask |= 1 << value;
+        }
+        
+        let state_count = state_mask.count_ones();
+        
+        match state_count {
+            0..=2 => 1,
+            3..=4 => 2,
+            5..=16 => 4,
+            _ => 8,
+        }
     }
 }
