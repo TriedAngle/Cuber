@@ -15,6 +15,9 @@ impl BrickHandle {
     const STATE_UNLOADED: u32 = 0x40000000; // 10 in bits 30-29
     const STATE_LOADING: u32 = 0x60000000;  // 11 in bits 30-29
 
+    const DATA_MASK: u32 = !Self::FLAG_MASK; // Lower 29 bits
+
+
     pub fn zero() -> Self {
         Self(0)
     }
@@ -23,6 +26,11 @@ impl BrickHandle {
         Self::zero()
     }
     
+    pub fn write_data(&mut self, data: u32) {
+        let masked_data = data & Self::DATA_MASK;
+        self.0 = (self.0 & Self::FLAG_MASK) | masked_data;
+    }
+
     pub fn new(offset: u32) -> Self {
         Self(offset | Self::STATE_DATA)
     }
@@ -139,6 +147,27 @@ impl BrickMap {
         let handles = unsafe { ptr.as_ref().unwrap() };
 
         handles
+    }
+
+    pub fn modify_brick<F>(&self, handle: BrickHandle, modifier: F) -> Option<()>
+    where
+        F: FnOnce(&mut TraceBrick)
+    {
+        if !handle.is_data() {
+            return None;
+        }
+
+        let offset = (handle.0 & BrickHandle::DATA_MASK) as usize;
+        
+        let mut bricks = self.bricks.write();
+        
+        if offset >= bricks.len() {
+            return None;
+        }
+
+        modifier(&mut bricks[offset]);
+        
+        Some(())
     }
 
     pub fn dimensions(&self) -> na::Vector3<u32> {
@@ -265,6 +294,16 @@ impl ExpandedBrick {
         Self { raw: [0; 512] }
     }
 
+    pub fn random(limit: u8) -> Self {
+        let mut new = Self::empty();
+        let mut rng = rand::thread_rng();
+
+        for byte in new.raw.iter_mut() { 
+            *byte = rng.gen_range(0..limit);
+        }
+        new
+    }
+
     pub fn is_empty(&self) -> bool {
         self.raw == Self::EMPTY.raw
     }
@@ -320,5 +359,38 @@ impl ExpandedBrick {
             5..=16 => 4,
             _ => 8,
         }
+    }
+
+    pub fn write_compressed(&self, buffer: &mut [u8]) -> Option<u32> {
+        let bits_per_voxel = self.get_required_bits() as usize;
+        let required_size = 512 * bits_per_voxel as usize / 8;
+
+        let values_per_byte = 8 / bits_per_voxel;
+        let mask = (1 << bits_per_voxel) - 1;
+        
+        for (i, &value) in self.raw.iter().enumerate() {
+            let byte_index = i / values_per_byte;
+            let bit_position = (i % values_per_byte) * bits_per_voxel;
+            
+            buffer[byte_index] |= (value & mask) << bit_position;
+        }
+
+        Some(required_size as u32)
+    }
+
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compress_brick() { 
+        let brick = ExpandedBrick::random(14);
+        let mut buffer: [u8; 512] = [0; 512];
+
+        let trace = brick.to_trace_brick();
+        let size = brick.write_compressed(&mut buffer).unwrap();
     }
 }

@@ -15,9 +15,15 @@ struct ComputeUniforms {
 
 struct TraceBrick { 
     raw: array<u32, 16>,
-    brick: u32,
+    brick: u32, // upper 3 bits store bits per voxel, other 29 store handle to bricks
     material: u32,
 }
+
+const MATERIAL_AIR: u32 = 0;
+const MATERIAL_STONE: u32 = 1;
+const MATERIAL_BEDROCK: u32 = 2;
+
+
 
 // Using upper 3 bits
 const FLAG_MASK = 0xE0000000u;  // 111 in top 3 bits
@@ -58,6 +64,25 @@ struct Hit {
 
 fn new_hit(hit: bool, mask: vec3<f32>) -> Hit { 
     return Hit(hit, mask, vec4<f32>(0.0), vec4<f32>(0.0));
+}
+
+
+// TODO: make this runtime defined
+fn get_material_color(material: u32) -> vec4<f32> {
+    switch material {
+        case MATERIAL_AIR {
+            return vec4<f32>(0.0, 0.0, 0.0, 0.0); // Transparent
+        }
+        case MATERIAL_STONE {
+            return vec4<f32>(0.5, 0.5, 0.5, 1.0); // Gray
+        }
+        case MATERIAL_BEDROCK {
+            return vec4<f32>(0.2, 0.2, 0.2, 1.0); // Dark gray
+        }
+        default {
+            return vec4<f32>(1.0, 0.0, 1.0, 1.0); // Magenta for unknown materials
+        }
+    }
 }
 
 fn brick_index(pos: vec3<i32>) -> u32 {
@@ -105,7 +130,7 @@ fn get_brick_handle(pos: vec3<i32>) -> u32 {
     return id;
 }
 
-fn get_brick_voxel(id: u32, local_pos: vec3<i32>) -> bool {
+fn get_trace_voxel(id: u32, local_pos: vec3<i32>) -> bool {
     let voxel_idx = local_pos.x 
             + local_pos.y * CHUNK_SIZE 
             + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
@@ -115,6 +140,35 @@ fn get_brick_voxel(id: u32, local_pos: vec3<i32>) -> bool {
     return (voxel_data & (1u << u32(bit_index))) != 0u;
 }
 
+fn get_brick_voxel(trace_brick: TraceBrick, local_pos: vec3<i32>) -> u32 {
+    // Extract bits per voxel from upper 3 bits (shift right by 29)
+    let bits_per_voxel = (trace_brick.brick >> 29u) & 0x7u;
+    
+    // Get byte offset from lower 29 bits
+    let byte_offset = trace_brick.brick & 0x1FFFFFFFu;
+    
+    // Calculate voxel index in the brick
+    let voxel_idx = local_pos.x + 
+                    local_pos.y * CHUNK_SIZE + 
+                    local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
+    
+    // Calculate which u32 contains our voxel based on bits per voxel
+    let bits_per_u32 = 32u;
+    let voxels_per_u32 = bits_per_u32 / bits_per_voxel;
+    let u32_index = byte_offset / 4u + u32(voxel_idx) / voxels_per_u32;
+    
+    // Calculate bit offset within the u32
+    let bit_offset = (u32(voxel_idx) % voxels_per_u32) * bits_per_voxel;
+    
+    // Read the u32 containing our voxel
+    let data = bricks[u32_index];
+    
+    // Create mask based on bits per voxel
+    let mask = (1u << bits_per_voxel) - 1u;
+    
+    // Extract and return the voxel value
+    return (data >> bit_offset) & mask;
+}
 fn sd_sphere(p: vec3<f32>, d: f32) -> f32 { 
     return length(p) - d;
 }
@@ -164,11 +218,15 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
     var steps = 0u;
     while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) { 
         brightness = brightness + 0.01;
-        let vox = get_brick_voxel(brick_handle, vec3<i32>(map_pos));
-        if vox { 
+        let vox = get_trace_voxel(brick_handle, vec3<i32>(map_pos));
+        if vox {
+            let trace = trace_bricks[brick_handle];
+            let material_vox = get_brick_voxel(trace, vec3<i32>(map_pos));
+            let color = get_material_color(material_vox);
             var hit = new_hit(true, mask);
             hit.pos = vec4<f32>(floor(map_pos) / 8.0, 1.0);
-            hit.color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
+            // hit.color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
+            hit.color = color;
             return hit;
         }
         mask = step_mask(side_dist);

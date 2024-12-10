@@ -52,7 +52,7 @@ var ComputeDepthSampler: sampler;
 @fragment
 fn fs_main(
     in: VertexOutput,
-) -> @location(0) vec4<f32> {
+) -> @location(0) vec4<f32> {                               
     let ndc = in.clip_space_position.xyz / in.clip_space_position.w;
 
     // Map NDC coordinates to UV coordinates [0, 1]

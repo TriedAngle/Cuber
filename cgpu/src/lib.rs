@@ -6,6 +6,7 @@ use allocator::GPUBuddyBuffer;
 use camera::Camera;
 use game::{brick::BrickMap, input::Input, worldgen::WorldGenerator, Diagnostics, Transform};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
+use parking_lot::Mutex;
 use texture::Texture;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
@@ -221,8 +222,8 @@ impl RenderContext {
             wgpu::Limits::default()
         };
 
-        custom_limits.max_storage_buffer_binding_size = 512 << 20;
-        custom_limits.max_buffer_size = 2048 << 20;
+        custom_limits.max_storage_buffer_binding_size =  1073741820;
+        custom_limits.max_buffer_size = u64::MAX;
 
         if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
             panic!("TIMESTAMP QUERY REQUIRED");
@@ -385,7 +386,7 @@ impl RenderContext {
         meshes.push(mesh2);
 
         let mut camera = Camera::new(
-            na::Point3::new(110., 40., 140.),
+            na::Point3::new(60., 70., 50.),
             na::UnitQuaternion::from_euler_angles(-175., 175., -50.),
             5.,
             0.002,
@@ -444,12 +445,51 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let generator = WorldGenerator::new(Some(420));
+        let generator = WorldGenerator::new();
 
-        let brickmap = BrickMap::new(na::Vector3::new(256, 128, 256));
+        let brick_minimum_size = mem::size_of::<[u8; 64]>() as u64;
+        let brick_maximum_size = mem::size_of::<[u8; 512]>() as u64;
 
+        let brick_buffer = GPUBuddyBuffer::new(
+            &device, 
+            (brick_minimum_size, brick_maximum_size), 
+            512 << 20, // 512mb
+        );
+
+        let brickmap = BrickMap::new(na::Vector3::new(32, 128, 32));
+
+        let total = Mutex::new(0);
+        let counted = Mutex::new(0);
         let dimensions = brickmap.dimensions();
-        generator.generate_volume(&brickmap, na::Vector3::zeros(), dimensions);
+        generator.generate_volume(
+            &brickmap, 
+            na::Vector3::zeros(), 
+            dimensions,
+        |&brick, _at, handle| {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: None,
+            });
+
+            let mut transfer: [u8; 512] = [0; 512];
+            let brick_size = brick.get_required_bits();
+            let size = brick.write_compressed(&mut transfer).expect("Brick must be compressable");
+
+            let (offset, alloc_size) = brick_buffer.allocate(size as u64, &device, &queue).expect("can't fail unless out of memory");
+
+            *total.lock() += alloc_size;
+            *counted.lock() += 1;
+
+            brick_buffer.write_data(&device, &queue, &mut encoder, offset,&transfer, size as u64);
+            
+            let _ = brickmap.modify_brick(handle, |trace| {
+                trace.set_brick_size(2);
+                trace.set_brick_offset(offset as u32);
+            });
+
+            queue.submit([encoder.finish()]);
+        });
+
+        log::debug!("WORLDGEN BRICK SIZE: {}, called: {}", total.lock(), counted.lock());
 
         let brick_handle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Brick Handle Buffer"),
@@ -463,15 +503,6 @@ impl RenderContext {
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        let brick_minimum_size = mem::size_of::<[u8; 64]>() as u64;
-        let brick_maximum_size = mem::size_of::<[u8; 512]>() as u64;
-
-        let brick_buffer = GPUBuddyBuffer::new(
-            &device, 
-            (brick_minimum_size, brick_maximum_size), 
-            1024 << 20, // 1 gigabyte
-            256 << 20, // 256 megabytes
-        );
 
         let mut compute_uniforms = ComputeUniforms::new(
             [size.width as f32, size.height as f32],
@@ -540,6 +571,16 @@ impl RenderContext {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -554,6 +595,10 @@ impl RenderContext {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: brick_trace_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: brick_buffer.buffer().as_entire_binding(),
                 },
             ],
         });

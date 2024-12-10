@@ -1,114 +1,112 @@
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
-use parking_lot::Mutex;
 use rayon::prelude::*;
 
-use crate::brick::{TraceBrick, BrickHandle, BrickMap};
+use crate::brick::{BrickHandle, BrickMap, ExpandedBrick};
+
+pub const MATERIAL_AIR: u8 = 0;
+pub const MATERIAL_STONE: u8 = 1;
+pub const MATERIAL_BEDROCK: u8 = 2;
+// pub const MATERIAL_GRASS: u8 = 1;
+// pub const MATERIAL_DIRT: u8 = 2;
+
+// pub const MATERIAL_LIGHTSTONE: u8 = 4;
+// pub const MATERIAL_SNOW: u8 = 5;
+
 
 pub struct WorldGenerator {
     terrain_noise: FastNoiseLite,
-    mountain_noise: FastNoiseLite,
-    mountain_shape_noise: FastNoiseLite,
     cave_noise: FastNoiseLite,
+    mountain_noise: FastNoiseLite,
 }
 
 impl WorldGenerator {
-    pub fn new(seed: Option<i32>) -> Self {
-        // Base terrain noise
+    pub fn new() -> Self {
         let mut terrain_noise = FastNoiseLite::new();
         terrain_noise.set_noise_type(Some(NoiseType::Perlin));
-        terrain_noise.set_seed(seed);
-        terrain_noise.set_frequency(Some(0.005)); // Lower frequency for gentler terrain
+        terrain_noise.set_seed(Some(2324));
+        terrain_noise.set_frequency(Some(0.005));
         terrain_noise.set_fractal_type(Some(FractalType::FBm));
         terrain_noise.set_fractal_octaves(Some(4));
         terrain_noise.set_fractal_lacunarity(Some(2.0));
         terrain_noise.set_fractal_gain(Some(0.5));
 
-        // Mountain noise (separate to make mountains more sparse)
-        let mut mountain_noise = FastNoiseLite::new();
-        mountain_noise.set_noise_type(Some(NoiseType::OpenSimplex2));
-        mountain_noise.set_seed(seed.map(|s| s + 1));
-        mountain_noise.set_frequency(Some(0.003)); // Much lower frequency for sparse mountains
-        mountain_noise.set_fractal_type(Some(FractalType::FBm));
-        mountain_noise.set_fractal_octaves(Some(3));
-        mountain_noise.set_fractal_lacunarity(Some(2.0));
-        mountain_noise.set_fractal_gain(Some(0.5));
-
-        let mut mountain_shape_noise = FastNoiseLite::new();
-        mountain_shape_noise.set_noise_type(Some(NoiseType::OpenSimplex2));
-        mountain_shape_noise.set_seed(seed.map(|s| s + 2));
-        mountain_shape_noise.set_frequency(Some(0.004));
-
-        // Cave noise
         let mut cave_noise = FastNoiseLite::new();
         cave_noise.set_noise_type(Some(NoiseType::OpenSimplex2));
-        cave_noise.set_seed(seed.map(|s| s + 3));
-        cave_noise.set_frequency(Some(0.05)); // Higher frequency for smaller cave features
+        cave_noise.set_seed(Some(2325));
+        cave_noise.set_frequency(Some(0.02));
+        cave_noise.set_fractal_octaves(Some(1));
+
+        let mut mountain_noise = FastNoiseLite::new();
+        mountain_noise.set_noise_type(Some(NoiseType::Perlin));
+        mountain_noise.set_seed(Some(2326));
+        mountain_noise.set_frequency(Some(0.002)); // Increased scale of mountains
+        mountain_noise.set_fractal_octaves(Some(2));
 
         Self {
             terrain_noise,
-            mountain_noise,
-            mountain_shape_noise,
             cave_noise,
+            mountain_noise,
         }
     }
 
-    pub fn generate_chunk(&self, chunk_x: u32, chunk_y: u32, chunk_z: u32) -> TraceBrick {
-        let mut brick = TraceBrick::empty();
+    pub fn generate_chunk(&self, chunk_x: u32, chunk_y: u32, chunk_z: u32) -> ExpandedBrick {
+        let mut brick = ExpandedBrick::empty();
         let world_x = chunk_x as f32 * 8.0;
+        let world_y = chunk_y as f32 * 8.0;
         let world_z = chunk_z as f32 * 8.0;
-
-        // Calculate base heights once for the chunk
-        let heights = [
-            self.get_height(world_x, world_z),
-            self.get_height(world_x + 8.0, world_z),
-            self.get_height(world_x, world_z + 8.0),
-            self.get_height(world_x + 8.0, world_z + 8.0),
-        ];
 
         for x in 0..8 {
             for z in 0..8 {
-                let fx = x as f32 / 8.0;
-                let fz = z as f32 / 8.0;
+                let wx = world_x + x as f32;
+                let wz = world_z + z as f32;
 
-                // Bilinear interpolation for smooth height
-                let h1 = heights[0] * (1.0 - fx) + heights[1] * fx;
-                let h2 = heights[2] * (1.0 - fx) + heights[3] * fx;
-                let height = (h1 * (1.0 - fz) + h2 * fz) as u32;
+                let base_height = (self.terrain_noise.get_noise_2d(wx, wz) * 30.0 + 500.0) as i32;
 
-                let local_height = if height > chunk_y * 8 {
-                    std::cmp::min(8, height - chunk_y * 8)
+                let mountain_factor = self.mountain_noise.get_noise_2d(wx, wz);
+                let mountain_height = if mountain_factor > 0.0 { // Lowered threshold from 0.3 to 0.0
+                    let factor = (mountain_factor + 0.2) / 1.2; // Adjusted normalization for new range
+                    (factor * 200.0) as i32
                 } else {
                     0
                 };
 
-                // Cave generation with 3D noise and improved cave system
-                for y in 0..local_height {
-                    let world_y = chunk_y * 8 + y;
+                let height = base_height + mountain_height;
 
-                    // Get main cave noise
-                    let cave_value = self.cave_noise.get_noise_3d(
-                        world_x + x as f32,
-                        world_y as f32,
-                        world_z + z as f32,
-                    );
+                for y in 0..8 {
+                    let wy = world_y + y as f32;
+                    let world_height = wy as i32;
 
-                    // Create larger caves by combining multiple noise samples
-                    let cave_thickness = self.cave_noise.get_noise_3d(
-                        (world_x + x as f32) * 1.5,
-                        world_y as f32 * 1.5,
-                        (world_z + z as f32) * 1.5,
-                    );
+                    // Enhanced cave generation
+                    let cave_value = self.cave_noise.get_noise_3d(wx, wy, wz);
+                    
+                    // More varied cave shapes and ground connections
+                    let cave_threshold = if world_height < 300 {
+                        0.8
+                    } else if world_height < height - 10 {
+                        0.4
+                    } else {
+                        0.1
+                    };
+                    
+                    let is_cave = cave_value > cave_threshold || cave_value < -cave_threshold;
+                    
+                    let material = if world_height > height {
+                        MATERIAL_AIR
+                    } else if is_cave { // Removed upper height check to allow surface caves
+                        MATERIAL_AIR
+                    // } else if world_height <= 5 {
+                    //     MATERIAL_BEDROCK
+                    // } else if world_height == height {
+                    //     MATERIAL_GRASS
+                    // } else if world_height >= height - 3 {
+                    //     MATERIAL_DIRT
+                    // } else if world_height <= height - 10 {
+                    //     MATERIAL_STONE
+                    } else {
+                        MATERIAL_STONE
+                    };
 
-                    // Cave size increases with depth
-                    let depth_factor = ((height as f32 - world_y as f32) / 100.0).min(1.0);
-                    let cave_threshold = 0.6 - (depth_factor * 0.2); // Bigger caves deeper down
-
-                    // Combine both noise values for more interesting cave shapes
-                    let is_cave = world_y < height &&
-                                world_y > 50 && // Don't generate caves too close to surface
-                                (cave_value + cave_thickness * 0.5) > cave_threshold;
-
-                    brick.set(x, y, z, !is_cave);
+                    brick.set(x as u32, y as u32, z as u32, material);
                 }
             }
         }
@@ -116,64 +114,40 @@ impl WorldGenerator {
         brick
     }
 
-    fn get_height(&self, x: f32, z: f32) -> f32 {
-        let base_height = 200.0;
-
-        // Get base terrain with some variation
-        let terrain_val = self.terrain_noise.get_noise_2d(x, z);
-        let terrain_height = ((terrain_val + 1.0) * 0.5) * 100.0;
-
-        // Mountain generation with more variety
-        let mountain_val = self.mountain_noise.get_noise_2d(x, z);
-        let shape_val = self.mountain_shape_noise.get_noise_2d(x * 1.5, z * 1.5);
-
-        let mountain_height = if mountain_val > 0.2 {
-            // Create different mountain types based on shape noise
-            let shape_factor = ((shape_val + 1.0) * 0.5).powf(0.7);
-
-            // Different mountain types
-            let peak_height = ((mountain_val - 0.2) * 1.25).powf(1.8) * 400.0; // Sharp peaks
-            let plateau_height = ((mountain_val - 0.2) * 1.25).powf(0.5) * 250.0; // Plateaus
-            let rolling_height = ((mountain_val - 0.2) * 1.25).powf(1.2) * 300.0; // Rolling hills
-
-            // Mix mountain types based on shape noise
-            let mix1 = shape_factor * peak_height + (1.0 - shape_factor) * plateau_height;
-            let mix2 = shape_factor * rolling_height + (1.0 - shape_factor) * mix1;
-
-            // Add some noise to the final height
-            mix2 * (1.0 + shape_val * 0.2)
-        } else {
-            0.0
-        };
-
-        // Smoother mountain bases
-        let mountain_base = if mountain_val > 0.0 {
-            mountain_val.powf(0.6) * 80.0
-        } else {
-            0.0
-        };
-
-        base_height + terrain_height + mountain_height + mountain_base
+    #[allow(dead_code)]
+    pub fn set_seed(&mut self, seed: i32) {
+        self.terrain_noise.set_seed(Some(seed));
+        self.cave_noise.set_seed(Some(seed + 1));
+        self.mountain_noise.set_seed(Some(seed + 2));
     }
 
-    pub fn generate_volume(
+
+
+    pub fn generate_volume<F>(
         &self,
         brickmap: &BrickMap,
         from: na::Vector3<u32>,
         to: na::Vector3<u32>,
-    ) {
+        callback: F,
+    ) where
+        F: Fn(&ExpandedBrick, na::Vector3<u32>, BrickHandle) + Send + Sync,
+
+    {
         let coords: Vec<_> = (from.x..to.x)
             .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
             .collect();
 
         // Process chunks in parallel
         coords.par_iter().for_each(|&(x, y, z)| {
-            let brick = self.generate_chunk(x, y, z);
-
-            if !brick.is_empty() {
-                let at = na::Vector3::new(x, y, z);
-                let _ = brickmap.get_or_push_brick(brick, at);
+            let expanded_brick = self.generate_chunk(x, y, z);
+            let brick = expanded_brick.to_trace_brick();
+            if brick.is_empty() { 
+                return;
             }
+            let at = na::Vector3::new(x, y, z);
+            let handle = brickmap.get_or_push_brick(brick, at);
+            callback(&expanded_brick, at, handle);
         });
     }
 }
+

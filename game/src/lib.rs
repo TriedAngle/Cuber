@@ -10,6 +10,21 @@ use std::{
     time::{self, Duration},
 };
 
+#[derive(Copy, Clone, Debug)]
+pub struct RawPtr(*mut ());
+impl RawPtr { 
+    pub fn new(ptr: *mut ()) -> Self { 
+        Self(ptr)
+    }
+
+
+    pub fn get(&self) -> *mut () { 
+        self.0
+    }
+}
+unsafe impl Send for RawPtr {}
+unsafe impl Sync for RawPtr {}
+
 #[derive(Debug)]
 pub struct Diagnostics {
     pub sys_times: HashMap<String, time::SystemTime>,
