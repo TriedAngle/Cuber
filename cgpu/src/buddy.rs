@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use parking_lot::RwLock;
-use wgpu::util::DeviceExt;
 use std::mem;
+use wgpu::util::DeviceExt;
 
 fn round_up_pow2(mut x: u64) -> u64 {
     if x == 0 {
@@ -77,7 +77,12 @@ impl GPUBuddyBuffer {
         }
     }
 
-    pub fn allocate(&self, size_unround: u64, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<(u64, u64)> {
+    pub fn allocate(
+        &self,
+        size_unround: u64,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Option<(u64, u64)> {
         let size = round_up_pow2(size_unround);
 
         if size < self.min_block_size || self.max_block_size < size {
@@ -113,7 +118,7 @@ impl GPUBuddyBuffer {
     pub fn deallocate(&self, offset: u64, device: &wgpu::Device, queue: &wgpu::Queue) {
         let mut state = self.state.write();
 
-       if let Some(block_idx) = self.find_block_by_offset(&state, offset) {
+        if let Some(block_idx) = self.find_block_by_offset(&state, offset) {
             state.blocks[block_idx].is_free = true;
             let size = state.blocks[block_idx].size;
 
@@ -135,19 +140,13 @@ impl GPUBuddyBuffer {
         let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: data,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         });
 
         queue.write_buffer(&staging, 0, data);
         let buffer = self.buffer.write();
 
-        encoder.copy_buffer_to_buffer(
-            &staging,
-            0,
-            &buffer,
-            offset,
-            data.len() as u64,
-        )
+        encoder.copy_buffer_to_buffer(&staging, 0, &buffer, offset, data.len() as u64)
     }
 
     pub fn allocate_and_write(
@@ -194,36 +193,41 @@ impl GPUBuddyBuffer {
         let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: data,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         });
 
         // Write data to staging buffer
         queue.write_buffer(&staging, 0, data);
 
         // Copy from staging to main buffer
-        encoder.copy_buffer_to_buffer(
-            &staging,
-            0,
-            &buffer,
-            offset,
-            data.len() as u64,
-        );
+        encoder.copy_buffer_to_buffer(&staging, 0, &buffer, offset, data.len() as u64);
 
         Some((offset, size))
     }
 
-    pub fn buffer(&self) -> &wgpu::Buffer { 
+    pub fn buffer(&self) -> &wgpu::Buffer {
         unsafe { &self.buffer.data_ptr().as_ref().unwrap() }
     }
 
-    fn try_grow_buffer(&self, state: &mut InnerState, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+    fn try_grow_buffer(
+        &self,
+        state: &mut InnerState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> bool {
         let new_capacity = state.capacity * 2;
-        log::debug!("Growing Brick Buffer {} -> {}", state.capacity, new_capacity);
+        log::debug!(
+            "Growing Brick Buffer {} -> {}",
+            state.capacity,
+            new_capacity
+        );
 
-        let new_buf = device.create_buffer(&wgpu::BufferDescriptor { 
+        let new_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buddy Buffer"),
             size: new_capacity,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, 
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -239,13 +243,14 @@ impl GPUBuddyBuffer {
 
         *buffer = new_buf;
 
-        state.blocks.push(Block { 
+        state.blocks.push(Block {
             offset: state.capacity,
             size: state.capacity,
             is_free: true,
         });
 
-        state.free_blocks
+        state
+            .free_blocks
             .entry(state.capacity)
             .or_default()
             .push(state.blocks.len() - 1);
@@ -254,22 +259,32 @@ impl GPUBuddyBuffer {
         true
     }
 
-    fn try_shrink_buffer(&self, state: &mut InnerState, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
-        let total_free_size: u64 = state.free_blocks
+    fn try_shrink_buffer(
+        &self,
+        state: &mut InnerState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> bool {
+        let total_free_size: u64 = state
+            .free_blocks
             .iter()
             .flat_map(|(size, blocks)| std::iter::repeat(*size).take(blocks.len()))
             .sum();
 
-        if !(((total_free_size as f32 / state.capacity as f32) < 0.75) && (state.capacity > self.max_block_size * 2)) { 
+        if !(((total_free_size as f32 / state.capacity as f32) < 0.75)
+            && (state.capacity > self.max_block_size * 2))
+        {
             return false;
         }
 
         let new_capacity = state.capacity / 2;
 
-        let new_buf = device.create_buffer(&wgpu::BufferDescriptor { 
+        let new_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buddy Buffer"),
             size: new_capacity,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, 
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -284,7 +299,7 @@ impl GPUBuddyBuffer {
         *buffer = new_buf;
 
         queue.submit([encoder.finish()]);
-        
+
         state.capacity = new_capacity;
 
         self.rebuild_blocks(state);
@@ -292,15 +307,14 @@ impl GPUBuddyBuffer {
     }
 
     fn rebuild_blocks(&self, state: &mut InnerState) {
-        state.blocks.retain(|block| block.offset + block.size <= state.capacity);
-        
+        state
+            .blocks
+            .retain(|block| block.offset + block.size <= state.capacity);
+
         state.free_blocks.clear();
         for (idx, block) in state.blocks.iter().enumerate() {
             if block.is_free {
-                state.free_blocks
-                    .entry(block.size)
-                    .or_default()
-                    .push(idx);
+                state.free_blocks.entry(block.size).or_default().push(idx);
             }
         }
     }
@@ -315,13 +329,14 @@ impl GPUBuddyBuffer {
 
             let buddy_offset = self.find_buddy_offset(state, i);
             if let Some(buddy_idx) = self.find_block_by_offset(state, buddy_offset) {
-                if state.blocks[buddy_idx].is_free 
-                    && state.blocks[buddy_idx].size == state.blocks[i].size {
+                if state.blocks[buddy_idx].is_free
+                    && state.blocks[buddy_idx].size == state.blocks[i].size
+                {
                     // Merge the blocks
                     let new_size = state.blocks[i].size * 2;
                     state.blocks[i].size = new_size;
                     state.blocks.remove(buddy_idx);
-                    
+
                     // Update free blocks tracking
                     self.update_free_blocks_after_merge(state, i, buddy_idx, new_size);
                     continue;
@@ -336,15 +351,22 @@ impl GPUBuddyBuffer {
         block.offset ^ block.size
     }
 
-    fn update_free_blocks_after_merge(&self, state: &mut InnerState, remaining_idx: usize, removed_idx: usize, new_size: u64) {
+    fn update_free_blocks_after_merge(
+        &self,
+        state: &mut InnerState,
+        remaining_idx: usize,
+        removed_idx: usize,
+        new_size: u64,
+    ) {
         // Remove both original blocks from their free list
         let old_size = new_size / 2;
         if let Some(free_list) = state.free_blocks.get_mut(&old_size) {
             free_list.retain(|&x| x != remaining_idx && x != removed_idx);
         }
-        
+
         // Add the merged block to the new size's free list
-        state.free_blocks
+        state
+            .free_blocks
             .entry(new_size)
             .or_default()
             .push(remaining_idx);
@@ -393,7 +415,8 @@ impl GPUBuddyBuffer {
                 is_free: true,
             });
 
-            state.free_blocks
+            state
+                .free_blocks
                 .entry(size)
                 .or_default()
                 .push(state.blocks.len() - 1);

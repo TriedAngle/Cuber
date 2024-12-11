@@ -6,17 +6,16 @@ use rand::Rng;
 pub struct BrickHandle(pub u32);
 
 impl BrickHandle {
-    const FLAG_MASK: u32 = 0xE0000000;  // 111 in top 3 bits
-    const SEEN_BIT: u32 = 0x80000000;   // 1 in top bit
-    const STATE_MASK: u32 = 0x60000000;  // 11 in bits 30-29
-    
+    const FLAG_MASK: u32 = 0xE0000000; // 111 in top 3 bits
+    const SEEN_BIT: u32 = 0x80000000; // 1 in top bit
+    const STATE_MASK: u32 = 0x60000000; // 11 in bits 30-29
+
     const STATE_EMPTY: u32 = 0x00000000;
-    const STATE_DATA: u32 = 0x20000000;     // 01 in bits 30-29
+    const STATE_DATA: u32 = 0x20000000; // 01 in bits 30-29
     const STATE_UNLOADED: u32 = 0x40000000; // 10 in bits 30-29
-    const STATE_LOADING: u32 = 0x60000000;  // 11 in bits 30-29
+    const STATE_LOADING: u32 = 0x60000000; // 11 in bits 30-29
 
     const DATA_MASK: u32 = !Self::FLAG_MASK; // Lower 29 bits
-
 
     pub fn zero() -> Self {
         Self(0)
@@ -25,7 +24,7 @@ impl BrickHandle {
     pub fn empty() -> Self {
         Self::zero()
     }
-    
+
     pub fn write_data(&mut self, data: u32) {
         let masked_data = data & Self::DATA_MASK;
         self.0 = (self.0 & Self::FLAG_MASK) | masked_data;
@@ -151,22 +150,22 @@ impl BrickMap {
 
     pub fn modify_brick<F>(&self, handle: BrickHandle, modifier: F) -> Option<()>
     where
-        F: FnOnce(&mut TraceBrick)
+        F: FnOnce(&mut TraceBrick),
     {
         if !handle.is_data() {
             return None;
         }
 
         let offset = (handle.0 & BrickHandle::DATA_MASK) as usize;
-        
+
         let mut bricks = self.bricks.write();
-        
+
         if offset >= bricks.len() {
             return None;
         }
 
         modifier(&mut bricks[offset]);
-        
+
         Some(())
     }
 
@@ -270,7 +269,7 @@ trait MaterialBrickOps {
             let values_per_u32 = 32 / Self::BITS_PER_VALUE;
             let word_index = i / values_per_u32;
             let shift = (i % values_per_u32) * Self::BITS_PER_VALUE;
-            
+
             raw[word_index] |= (value & Self::MASK) << shift;
         }
     }
@@ -280,7 +279,7 @@ trait MaterialBrickOps {
         let values_per_u32 = 32 / Self::BITS_PER_VALUE;
         let word_index = index / values_per_u32;
         let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
-        
+
         ((raw[word_index] >> shift) & Self::MASK) as u8
     }
 
@@ -289,7 +288,7 @@ trait MaterialBrickOps {
         let values_per_u32 = 32 / Self::BITS_PER_VALUE;
         let word_index = index / values_per_u32;
         let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
-        
+
         let mask = Self::MASK << shift;
         raw[word_index] = (raw[word_index] & !mask) | (((val as u32) & Self::MASK) << shift);
     }
@@ -337,15 +336,15 @@ impl_material_brick_methods!(MaterialBrick4);
 impl_material_brick_methods!(MaterialBrick8);
 
 #[derive(Debug)]
-pub enum MaterialBrick { 
+pub enum MaterialBrick {
     Size1(MaterialBrick1),
     Size2(MaterialBrick2),
     Size4(MaterialBrick4),
     Size8(MaterialBrick8),
 }
 
-impl MaterialBrick { 
-    pub fn data(&self) -> &[u8] { 
+impl MaterialBrick {
+    pub fn data(&self) -> &[u8] {
         match self {
             Self::Size1(b) => bytemuck::cast_slice(&b.raw),
             Self::Size2(b) => bytemuck::cast_slice(&b.raw),
@@ -354,8 +353,8 @@ impl MaterialBrick {
         }
     }
 
-    pub fn element_size(&self) -> u64 { 
-        match self { 
+    pub fn element_size(&self) -> u64 {
+        match self {
             Self::Size1(_) => 1,
             Self::Size2(_) => 2,
             Self::Size4(_) => 4,
@@ -373,7 +372,11 @@ pub struct ExpandedBrick {
 impl TraceBrick {
     pub const EMPTY: Self = Self::empty();
     pub const fn empty() -> Self {
-        Self { raw: [0; 64], brick: 0, material: 0, }
+        Self {
+            raw: [0; 64],
+            brick: 0,
+            material: 0,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -449,10 +452,9 @@ impl TraceBrick {
     }
 }
 
-
 impl ExpandedBrick {
     pub const EMPTY: Self = Self::empty();
-    
+
     pub const fn empty() -> Self {
         Self { raw: [0; 512] }
     }
@@ -461,7 +463,7 @@ impl ExpandedBrick {
         let mut new = Self::empty();
         let mut rng = rand::thread_rng();
 
-        for byte in new.raw.iter_mut() { 
+        for byte in new.raw.iter_mut() {
             *byte = rng.gen_range(0..limit);
         }
         new
@@ -495,7 +497,7 @@ impl ExpandedBrick {
 
     pub fn to_trace_brick(&self) -> TraceBrick {
         let mut trace = TraceBrick::empty();
-        
+
         for i in 0..512 {
             if self.raw[i] != 0 {
                 let byte_index = i / 8;
@@ -503,19 +505,19 @@ impl ExpandedBrick {
                 trace.raw[byte_index] |= 1 << bit_index;
             }
         }
-        
+
         trace
     }
 
     pub fn get_required_bits(&self) -> u32 {
         let mut state_mask = 0u32;
-        
+
         for &value in self.raw.iter() {
             state_mask |= 1 << value;
         }
-        
+
         let state_count = state_mask.count_ones();
-        
+
         match state_count {
             0..=2 => 1,
             3..=4 => 2,
@@ -524,7 +526,7 @@ impl ExpandedBrick {
         }
     }
 
-   pub fn to_material_brick(&self) -> MaterialBrick {
+    pub fn to_material_brick(&self) -> MaterialBrick {
         match self.get_required_bits() {
             1 => MaterialBrick::Size1(MaterialBrick1::from_expanded_brick(self)),
             2 => MaterialBrick::Size2(MaterialBrick2::from_expanded_brick(self)),
@@ -540,7 +542,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compress_brick() { 
+    fn compress_brick() {
         let brick = ExpandedBrick::random(4);
 
         let trace = brick.to_trace_brick();
@@ -549,7 +551,5 @@ mod tests {
         let brick2 = MaterialBrick2::from_expanded_brick(&brick);
 
         println!("{:?}", brick);
-
-
     }
 }

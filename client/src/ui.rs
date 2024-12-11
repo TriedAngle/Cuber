@@ -171,7 +171,7 @@ impl AppState {
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
                             )
                             .changed()
-                        { }
+                        {}
                         if ui
                             .add(
                                 DragValue::new(&mut renderer.camera.fov)
@@ -180,8 +180,7 @@ impl AppState {
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
                             )
                             .changed()
-                        { }
-
+                        {}
                     });
 
                     ui.separator();

@@ -12,13 +12,12 @@ use std::{
 
 #[derive(Copy, Clone, Debug)]
 pub struct RawPtr(*mut ());
-impl RawPtr { 
-    pub fn new(ptr: *mut ()) -> Self { 
+impl RawPtr {
+    pub fn new(ptr: *mut ()) -> Self {
         Self(ptr)
     }
 
-
-    pub fn get(&self) -> *mut () { 
+    pub fn get(&self) -> *mut () {
         self.0
     }
 }

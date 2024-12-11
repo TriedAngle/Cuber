@@ -109,16 +109,16 @@ impl Camera {
                     0.5
                 } else if self.speed < 20.0 {
                     2.0
-                } else if self.speed < 50.0 { 
+                } else if self.speed < 50.0 {
                     10.0
                 } else {
                     30.0
                 };
-                
-                self.speed = (self.speed + scroll * speed_factor )
+
+                self.speed = (self.speed + scroll * speed_factor)
                     .max(0.1) // Minimum speed
                     .min(1000.0); // Maximum speed
-                
+
                 log::trace!("New speed: {}", self.speed);
             }
         }
@@ -129,13 +129,12 @@ impl Camera {
             if scroll != 0.0 {
                 let zoom_speed = 2.0;
                 self.fov = (self.fov - scroll * zoom_speed)
-                    .max(10.0)  // Minimum FOV
+                    .max(10.0) // Minimum FOV
                     .min(120.0); // Maximum FOV
                 self.updated = true;
                 log::trace!("New FOV: {}", self.fov);
             }
         }
-
     }
 
     fn calculate_rotation(&self, input: &Input) -> (f32, f32) {

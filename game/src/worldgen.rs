@@ -69,11 +69,11 @@ impl WorldGenerator {
         // Terrain noise is 2D (x,z). We'll use world_y and cave noise to determine caves.
 
         // We can consider:
-        // height = 100 (base) 
+        // height = 100 (base)
         //         + (continent_noise * 100) for large-scale variation
         //         + (terrain_noise * 50) for local hills and mountains
         //
-        // The final height might be something like: 
+        // The final height might be something like:
         //   final_height = 100 + continent_val * 100.0 + terrain_val * 50.0
         //
         // If world_y + y < final_height, normally fill with stone/dirt/grass/snow.
@@ -91,15 +91,14 @@ impl WorldGenerator {
                 let continent_val = self.continent_noise.get_noise_2d(sample_x, sample_z);
                 let terrain_val = self.terrain_noise.get_noise_2d(sample_x, sample_z);
 
-                let final_height = (100.0 
-                    + (continent_val * 100.0) 
-                    + ((terrain_val * 50.0)).round()) as i32;
+                let final_height =
+                    (100.0 + (continent_val * 100.0) + (terrain_val * 50.0).round()) as i32;
 
                 for y in 0..8 {
                     let world_block_y = world_y as i32 + y as i32;
 
                     let height_diff = final_height - world_block_y;
-                    
+
                     let mut block_material = AIR;
 
                     if world_block_y == 0 {
@@ -107,29 +106,30 @@ impl WorldGenerator {
                     } else if world_block_y <= final_height {
                         block_material = STONE;
 
-                    
                         if height_diff <= 3 {
                             block_material = DIRT;
                         }
-                    //         if final_height > 150 {
-                    //             block_material = SNOW;
-                    //         } else if final_height >= 95 {
-                    //             block_material = GRASS;
-                    //         } else {
-                    //             block_material = GRASS;
-                    //         }
-                    //     } else if height_diff == 1 {
-                    //         block_material = DIRT;
-                    //     } else if height_diff > 1 {
-                    //         block_material = STONE;
-                    //     }
-                    // } else {
-                    //     block_material = AIR;
+                        //         if final_height > 150 {
+                        //             block_material = SNOW;
+                        //         } else if final_height >= 95 {
+                        //             block_material = GRASS;
+                        //         } else {
+                        //             block_material = GRASS;
+                        //         }
+                        //     } else if height_diff == 1 {
+                        //         block_material = DIRT;
+                        //     } else if height_diff > 1 {
+                        //         block_material = STONE;
+                        //     }
+                        // } else {
+                        //     block_material = AIR;
                     }
 
                     if block_material == STONE || block_material == DIRT {
-                        let cave_val = self.cave_noise.get_noise_3d(sample_x, world_block_y as f32, sample_z);
-                        let cave_val = (cave_val + 1.0)  / 2.0;
+                        let cave_val =
+                            self.cave_noise
+                                .get_noise_3d(sample_x, world_block_y as f32, sample_z);
+                        let cave_val = (cave_val + 1.0) / 2.0;
                         // If cave_val is high enough, we carve out a cave
                         if 0.9 > cave_val && cave_val > 0.5 {
                             block_material = AIR;
@@ -144,7 +144,6 @@ impl WorldGenerator {
         brick
     }
 
-
     pub fn generate_volume<F>(
         &self,
         brickmap: &BrickMap,
@@ -153,7 +152,6 @@ impl WorldGenerator {
         callback: F,
     ) where
         F: Fn(&ExpandedBrick, na::Vector3<u32>, BrickHandle) + Send + Sync,
-
     {
         let coords: Vec<_> = (from.x..to.x)
             .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
@@ -166,7 +164,7 @@ impl WorldGenerator {
 
             let at = na::Vector3::new(x, y, z);
 
-            if brick.is_empty() { 
+            if brick.is_empty() {
                 brickmap.set_handle(BrickHandle::empty(), at);
                 return;
             }
@@ -176,4 +174,3 @@ impl WorldGenerator {
         });
     }
 }
-

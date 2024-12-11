@@ -36,14 +36,14 @@ impl ManagedBuffer {
             free_list: RwLock::new(VecDeque::new()),
             element_size,
             size: RwLock::new(0),
-            capacity: RwLock::new(initial_capacity ),
+            capacity: RwLock::new(initial_capacity),
             usage,
         }
     }
 
     pub fn allocate(&self) -> Result<u32, BufferError> {
         let mut free_list = self.free_list.write();
-        
+
         if let Some(index) = free_list.pop_front() {
             return Ok(index);
         }
@@ -51,7 +51,7 @@ impl ManagedBuffer {
         let mut size = self.size.write();
 
         let capacity = *self.capacity.read();
-        
+
         if *size >= capacity {
             return Err(BufferError::AllocationFailed);
         }
@@ -66,10 +66,10 @@ impl ManagedBuffer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         index: u32,
-        data: &[u8]
+        data: &[u8],
     ) -> Result<(), BufferError> {
         // if data.len() != self.element_size as usize {
-            // return Err(BufferError::IndexOutOfBounds);
+        // return Err(BufferError::IndexOutOfBounds);
         // }
         let capacity = *self.capacity.read();
         if index >= capacity {
@@ -104,7 +104,7 @@ impl ManagedBuffer {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        data: &[u8]
+        data: &[u8],
     ) -> Result<u32, BufferError> {
         let index = match self.allocate() {
             Ok(index) => index,
@@ -123,11 +123,7 @@ impl ManagedBuffer {
         }
     }
 
-    pub fn try_grow(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue
-    ) -> Result<(), BufferError> {
+    pub fn try_grow(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(), BufferError> {
         let mut capacity = self.capacity.write();
         let old_capacity = *capacity;
         let new_capacity = old_capacity * 2;
@@ -165,7 +161,7 @@ impl ManagedBuffer {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        index: u32
+        index: u32,
     ) -> Result<(), BufferError> {
         let capacity = *self.capacity.read();
         if index >= capacity {
@@ -185,11 +181,7 @@ impl ManagedBuffer {
         Ok(())
     }
 
-    fn try_shrink(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue
-    ) -> Result<(), BufferError> {
+    fn try_shrink(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<(), BufferError> {
         let old_capacity = *self.capacity.read();
         let new_capacity = old_capacity / 2;
 

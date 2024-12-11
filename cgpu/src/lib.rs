@@ -3,7 +3,14 @@ extern crate nalgebra as na;
 use std::{mem, sync::Arc, time::Duration};
 
 use camera::Camera;
-use game::{brick::{BrickMap, MaterialBrick, MaterialBrick1, MaterialBrick2, MaterialBrick4, MaterialBrick8}, input::Input, worldgen::WorldGenerator, Diagnostics, Transform};
+use game::{
+    brick::{
+        BrickMap, MaterialBrick, MaterialBrick1, MaterialBrick2, MaterialBrick4, MaterialBrick8,
+    },
+    input::Input,
+    worldgen::WorldGenerator,
+    Diagnostics, Transform,
+};
 use managed::ManagedBuffer;
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use parking_lot::Mutex;
@@ -12,8 +19,8 @@ use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 mod buddy;
-mod managed;
 mod camera;
+mod managed;
 mod mesh;
 mod texture;
 
@@ -217,8 +224,8 @@ impl RenderContext {
         let custom_features = wgpu::Features::empty()
             | wgpu::Features::TIMESTAMP_QUERY
             | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-            // TODO: implement this
-            // | wgpu::Features::SHADER_INT64;
+        // TODO: implement this
+        // | wgpu::Features::SHADER_INT64;
 
         let mut custom_limits = if cfg!(target_arch = "wasm32") {
             wgpu::Limits::downlevel_webgl2_defaults()
@@ -226,7 +233,7 @@ impl RenderContext {
             wgpu::Limits::default()
         };
 
-        custom_limits.max_storage_buffer_binding_size =  1073741820;
+        custom_limits.max_storage_buffer_binding_size = 1073741820;
         custom_limits.max_buffer_size = u64::MAX;
         custom_limits.min_storage_buffer_offset_alignment = 32;
 
@@ -308,7 +315,7 @@ impl RenderContext {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
                         count: None,
-                     },
+                    },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -456,64 +463,90 @@ impl RenderContext {
             &device,
             std::mem::size_of::<MaterialBrick1>() as u32,
             16384,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         );
-
 
         let brick2_buffer = ManagedBuffer::new(
             &device,
             std::mem::size_of::<MaterialBrick2>() as u32,
             16384,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         );
-
 
         let brick4_buffer = ManagedBuffer::new(
             &device,
             std::mem::size_of::<MaterialBrick4>() as u32,
             256,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         );
-
 
         let brick8_buffer = ManagedBuffer::new(
             &device,
             std::mem::size_of::<MaterialBrick8>() as u32,
             128,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         );
 
-       let brickmap = BrickMap::new(na::Vector3::new(32, 32, 32));
+        let brickmap = BrickMap::new(na::Vector3::new(32, 32, 32));
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
         let dimensions = brickmap.dimensions();
         generator.generate_volume(
-            &brickmap, 
-            na::Vector3::zeros(), 
+            &brickmap,
+            na::Vector3::zeros(),
             dimensions,
-        |&brick, _at, handle| {
-            let material_brick = brick.to_material_brick();
-            let bit_size = material_brick.element_size();
+            |&brick, _at, handle| {
+                let material_brick = brick.to_material_brick();
+                let bit_size = material_brick.element_size();
 
-            let index = match material_brick { 
-                MaterialBrick::Size1(brick) => brick1_buffer.allocate_and_write(&device, &queue, bytemuck::cast_slice(&[brick])),
-                MaterialBrick::Size2(brick) => brick2_buffer.allocate_and_write(&device, &queue, bytemuck::cast_slice(&[brick])),
-                MaterialBrick::Size4(brick) => brick4_buffer.allocate_and_write(&device, &queue, bytemuck::cast_slice(&[brick])),
-                MaterialBrick::Size8(brick) => brick8_buffer.allocate_and_write(&device, &queue, bytemuck::cast_slice(&[brick])),
-            }.expect("Allocation can't fail");
+                let index = match material_brick {
+                    MaterialBrick::Size1(brick) => brick1_buffer.allocate_and_write(
+                        &device,
+                        &queue,
+                        bytemuck::cast_slice(&[brick]),
+                    ),
+                    MaterialBrick::Size2(brick) => brick2_buffer.allocate_and_write(
+                        &device,
+                        &queue,
+                        bytemuck::cast_slice(&[brick]),
+                    ),
+                    MaterialBrick::Size4(brick) => brick4_buffer.allocate_and_write(
+                        &device,
+                        &queue,
+                        bytemuck::cast_slice(&[brick]),
+                    ),
+                    MaterialBrick::Size8(brick) => brick8_buffer.allocate_and_write(
+                        &device,
+                        &queue,
+                        bytemuck::cast_slice(&[brick]),
+                    ),
+                }
+                .expect("Allocation can't fail");
 
+                // *total.lock() += alloc_size;
+                // *counted.lock() += 1;
 
-            // *total.lock() += alloc_size;
-            // *counted.lock() += 1;
+                let _ = brickmap.modify_brick(handle, |trace| {
+                    trace.set_brick_offset(index as u32);
+                    trace.set_brick_size(bit_size as u32);
+                });
+            },
+        );
 
-            let _ = brickmap.modify_brick(handle, |trace| {
-                trace.set_brick_offset(index as u32);
-                trace.set_brick_size(bit_size as u32);
-            });
-        });
-
-        log::debug!("WORLDGEN BRICK SIZE: {}, called: {}", total.lock(), counted.lock());
+        log::debug!(
+            "WORLDGEN BRICK SIZE: {}, called: {}",
+            total.lock(),
+            counted.lock()
+        );
 
         let brick_handle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Brick Handle Buffer"),
@@ -526,7 +559,6 @@ impl RenderContext {
             contents: bytemuck::cast_slice(brickmap.bricks()),
             usage: wgpu::BufferUsages::STORAGE,
         });
-
 
         let mut compute_uniforms = ComputeUniforms::new(
             [size.width as f32, size.height as f32],
