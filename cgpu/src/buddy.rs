@@ -131,7 +131,6 @@ impl GPUBuddyBuffer {
         encoder: &mut wgpu::CommandEncoder,
         offset: u64,
         data: &[u8],
-        size: u64,
     ) {
         let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -147,8 +146,70 @@ impl GPUBuddyBuffer {
             0,
             &buffer,
             offset,
-            size,
+            data.len() as u64,
         )
+    }
+
+    pub fn allocate_and_write(
+        &self,
+        data: &[u8],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Option<(u64, u64)> {
+        let size = data.len() as u64;
+        if size < self.min_block_size || self.max_block_size < size {
+            return None;
+        }
+
+        // Take the lock once for the entire operation
+        let mut state = self.state.write();
+        let buffer = self.buffer.write();
+
+        // Try to find a free block
+        let block_idx = if let Some(idx) = self.find_free_block(&mut state, size) {
+            idx
+        } else {
+            // Try growing the buffer if no free block found
+            if !self.try_grow_buffer(&mut state, device, queue) {
+                return None;
+            }
+            // Retry finding a block after growing
+            if let Some(idx) = self.find_free_block(&mut state, size) {
+                idx
+            } else {
+                return None;
+            }
+        };
+
+        // Mark block as allocated
+        state.blocks[block_idx].is_free = false;
+        if let Some(free_list) = state.free_blocks.get_mut(&size) {
+            free_list.retain(|&x| x != block_idx);
+        }
+
+        let offset = state.blocks[block_idx].offset;
+
+        // Create and initialize staging buffer
+        let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: data,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST
+        });
+
+        // Write data to staging buffer
+        queue.write_buffer(&staging, 0, data);
+
+        // Copy from staging to main buffer
+        encoder.copy_buffer_to_buffer(
+            &staging,
+            0,
+            &buffer,
+            offset,
+            data.len() as u64,
+        );
+
+        Some((offset, size))
     }
 
     pub fn buffer(&self) -> &wgpu::Buffer { 
@@ -244,7 +305,50 @@ impl GPUBuddyBuffer {
         }
     }
 
-    fn merge_adjacent_free_blocks(&self, state: &mut InnerState) {}
+    fn merge_adjacent_free_blocks(&self, state: &mut InnerState) {
+        let mut i = 0;
+        while i < state.blocks.len() {
+            if !state.blocks[i].is_free {
+                i += 1;
+                continue;
+            }
+
+            let buddy_offset = self.find_buddy_offset(state, i);
+            if let Some(buddy_idx) = self.find_block_by_offset(state, buddy_offset) {
+                if state.blocks[buddy_idx].is_free 
+                    && state.blocks[buddy_idx].size == state.blocks[i].size {
+                    // Merge the blocks
+                    let new_size = state.blocks[i].size * 2;
+                    state.blocks[i].size = new_size;
+                    state.blocks.remove(buddy_idx);
+                    
+                    // Update free blocks tracking
+                    self.update_free_blocks_after_merge(state, i, buddy_idx, new_size);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
+
+    fn find_buddy_offset(&self, state: &InnerState, block_idx: usize) -> u64 {
+        let block = &state.blocks[block_idx];
+        block.offset ^ block.size
+    }
+
+    fn update_free_blocks_after_merge(&self, state: &mut InnerState, remaining_idx: usize, removed_idx: usize, new_size: u64) {
+        // Remove both original blocks from their free list
+        let old_size = new_size / 2;
+        if let Some(free_list) = state.free_blocks.get_mut(&old_size) {
+            free_list.retain(|&x| x != remaining_idx && x != removed_idx);
+        }
+        
+        // Add the merged block to the new size's free list
+        state.free_blocks
+            .entry(new_size)
+            .or_default()
+            .push(remaining_idx);
+    }
 
     fn find_free_block(&self, state: &mut InnerState, size: u64) -> Option<usize> {
         if let Some(free_list) = state.free_blocks.get(&size) {
@@ -253,7 +357,7 @@ impl GPUBuddyBuffer {
             }
         }
 
-        for (&block_size, free_list) in state.free_blocks.range_mut(size..) {
+        for (&_block_size, free_list) in state.free_blocks.range_mut(size..) {
             if !free_list.is_empty() {
                 let block_idx = free_list[0];
                 return Some(self.split_block(state, block_idx, size));

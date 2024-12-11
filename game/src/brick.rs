@@ -182,13 +182,11 @@ impl BrickMap {
     }
 
     pub fn get_or_push_brick(&self, brick: TraceBrick, at: na::Vector3<u32>) -> BrickHandle {
-        let id = self.index(at);
-        let mut handles = self.handles.write();
         let mut bricks = self.bricks.write();
 
         let handle = BrickHandle::new(bricks.len() as u32);
         bricks.push(brick);
-        handles[id] = handle;
+        self.set_handle(handle, at);
         handle
     }
 
@@ -206,9 +204,164 @@ pub struct TraceBrick {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct MaterialBrick {
-    // Dynamic sized type - actual implementation determined at runtime
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialBrick1 {
+    pub raw: [u32; 16], // 64 bytes = 16 u32s (1 bit per value)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialBrick2 {
+    pub raw: [u32; 32], // 128 bytes = 32 u32s (2 bits per value)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialBrick4 {
+    pub raw: [u32; 64], // 256 bytes = 64 u32s (4 bits per value)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialBrick8 {
+    pub raw: [u32; 128], // 512 bytes = 128 u32s (8 bits per value)
+}
+
+impl MaterialBrick1 {
+    pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
+        let mut brick = Self { raw: [0; 16] };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+impl MaterialBrick2 {
+    pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
+        let mut brick = Self { raw: [0; 32] };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+impl MaterialBrick4 {
+    pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
+        let mut brick = Self { raw: [0; 64] };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+impl MaterialBrick8 {
+    pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
+        let mut brick = Self { raw: [0; 128] };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+// Common trait for shared functionality
+trait MaterialBrickOps {
+    const BITS_PER_VALUE: usize;
+    const MASK: u32;
+
+    fn pack_values(expanded: &ExpandedBrick, raw: &mut [u32]) {
+        for i in 0..512 {
+            let value = expanded.raw[i] as u32;
+            let values_per_u32 = 32 / Self::BITS_PER_VALUE;
+            let word_index = i / values_per_u32;
+            let shift = (i % values_per_u32) * Self::BITS_PER_VALUE;
+            
+            raw[word_index] |= (value & Self::MASK) << shift;
+        }
+    }
+
+    fn get_value(raw: &[u32], x: u32, y: u32, z: u32) -> u8 {
+        let index = (x + y * 8 + z * 64) as usize;
+        let values_per_u32 = 32 / Self::BITS_PER_VALUE;
+        let word_index = index / values_per_u32;
+        let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
+        
+        ((raw[word_index] >> shift) & Self::MASK) as u8
+    }
+
+    fn set_value(raw: &mut [u32], x: u32, y: u32, z: u32, val: u8) {
+        let index = (x + y * 8 + z * 64) as usize;
+        let values_per_u32 = 32 / Self::BITS_PER_VALUE;
+        let word_index = index / values_per_u32;
+        let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
+        
+        let mask = Self::MASK << shift;
+        raw[word_index] = (raw[word_index] & !mask) | (((val as u32) & Self::MASK) << shift);
+    }
+}
+
+// Implement for each brick type
+impl MaterialBrickOps for MaterialBrick1 {
+    const BITS_PER_VALUE: usize = 1;
+    const MASK: u32 = 0b1;
+}
+
+impl MaterialBrickOps for MaterialBrick2 {
+    const BITS_PER_VALUE: usize = 2;
+    const MASK: u32 = 0b11;
+}
+
+impl MaterialBrickOps for MaterialBrick4 {
+    const BITS_PER_VALUE: usize = 4;
+    const MASK: u32 = 0b1111;
+}
+
+impl MaterialBrickOps for MaterialBrick8 {
+    const BITS_PER_VALUE: usize = 8;
+    const MASK: u32 = 0b11111111;
+}
+
+// Implement common methods for each brick type
+macro_rules! impl_material_brick_methods {
+    ($type:ty) => {
+        impl $type {
+            pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
+                Self::get_value(&self.raw, x, y, z)
+            }
+
+            pub fn set(&mut self, x: u32, y: u32, z: u32, val: u8) {
+                Self::set_value(&mut self.raw, x, y, z, val)
+            }
+        }
+    };
+}
+
+impl_material_brick_methods!(MaterialBrick1);
+impl_material_brick_methods!(MaterialBrick2);
+impl_material_brick_methods!(MaterialBrick4);
+impl_material_brick_methods!(MaterialBrick8);
+
+#[derive(Debug)]
+pub enum MaterialBrick { 
+    Size1(MaterialBrick1),
+    Size2(MaterialBrick2),
+    Size4(MaterialBrick4),
+    Size8(MaterialBrick8),
+}
+
+impl MaterialBrick { 
+    pub fn data(&self) -> &[u8] { 
+        match self {
+            Self::Size1(b) => bytemuck::cast_slice(&b.raw),
+            Self::Size2(b) => bytemuck::cast_slice(&b.raw),
+            Self::Size4(b) => bytemuck::cast_slice(&b.raw),
+            Self::Size8(b) => bytemuck::cast_slice(&b.raw),
+        }
+    }
+
+    pub fn element_size(&self) -> u64 { 
+        match self { 
+            Self::Size1(_) => 1,
+            Self::Size2(_) => 2,
+            Self::Size4(_) => 4,
+            Self::Size8(_) => 8,
+        }
+    }
 }
 
 #[repr(C)]
@@ -275,6 +428,10 @@ impl TraceBrick {
     pub fn set_brick_size(&mut self, size: u32) {
         debug_assert!(size <= 0b111);
         self.brick = (self.brick & !(0b111 << 29)) | (size << 29);
+        // let masked_value = size & 0b111;
+        // self.brick &= 0x1FFF_FFFF;
+        // // Shift new value into position and set
+        // self.brick |= masked_value << 29;
     }
 
     pub fn get_brick_offset(&self) -> u32 {
@@ -284,8 +441,14 @@ impl TraceBrick {
     pub fn set_brick_offset(&mut self, offset: u32) {
         debug_assert!(offset <= 0x1FFFFFFF);
         self.brick = (self.brick & (0b111 << 29)) | offset;
+        // let masked_value = offset & 0x1FFF_FFFF;
+        // // Clear lower 29 bits of existing value
+        // self.brick &= 0xE000_0000;
+        // // Set new value
+        // self.brick |= masked_value;
     }
 }
+
 
 impl ExpandedBrick {
     pub const EMPTY: Self = Self::empty();
@@ -361,25 +524,16 @@ impl ExpandedBrick {
         }
     }
 
-    pub fn write_compressed(&self, buffer: &mut [u8]) -> Option<u32> {
-        let bits_per_voxel = self.get_required_bits() as usize;
-        let required_size = 512 * bits_per_voxel as usize / 8;
-
-        let values_per_byte = 8 / bits_per_voxel;
-        let mask = (1 << bits_per_voxel) - 1;
-        
-        for (i, &value) in self.raw.iter().enumerate() {
-            let byte_index = i / values_per_byte;
-            let bit_position = (i % values_per_byte) * bits_per_voxel;
-            
-            buffer[byte_index] |= (value & mask) << bit_position;
+   pub fn to_material_brick(&self) -> MaterialBrick {
+        match self.get_required_bits() {
+            1 => MaterialBrick::Size1(MaterialBrick1::from_expanded_brick(self)),
+            2 => MaterialBrick::Size2(MaterialBrick2::from_expanded_brick(self)),
+            4 => MaterialBrick::Size4(MaterialBrick4::from_expanded_brick(self)),
+            8 => MaterialBrick::Size8(MaterialBrick8::from_expanded_brick(self)),
+            _ => unreachable!(),
         }
-
-        Some(required_size as u32)
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -387,10 +541,15 @@ mod tests {
 
     #[test]
     fn compress_brick() { 
-        let brick = ExpandedBrick::random(14);
-        let mut buffer: [u8; 512] = [0; 512];
+        let brick = ExpandedBrick::random(4);
 
         let trace = brick.to_trace_brick();
-        let size = brick.write_compressed(&mut buffer).unwrap();
+
+        let mut buffer: [u8; 512] = [0; 512];
+        let brick2 = MaterialBrick2::from_expanded_brick(&brick);
+
+        println!("{:?}", brick);
+
+
     }
 }
