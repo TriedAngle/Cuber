@@ -1,15 +1,13 @@
+use std::collections::HashMap;
+
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
+use parking_lot::RwLock;
 use rayon::prelude::*;
 
-use crate::brick::{BrickHandle, BrickMap, ExpandedBrick};
-
-// Example material IDs (you can change these as needed)
-const AIR: u8 = 0;
-const STONE: u8 = 1;
-const BEDROCK: u8 = 2;
-const DIRT: u8 = 3;
-const GRASS: u8 = 4;
-const SNOW: u8 = 5;
+use crate::{
+    brick::{BrickHandle, BrickMap, ExpandedBrick},
+    material::{ExpandedMaterialMapping, MaterialId, MaterialRegistry},
+};
 
 pub struct WorldGenerator {
     terrain_noise: FastNoiseLite,
@@ -19,7 +17,7 @@ pub struct WorldGenerator {
 
 impl WorldGenerator {
     pub fn new() -> Self {
-        // Terrain noise: controls overall height variations (like Minecraft terrain)
+        // Terrain noise setup remains the same
         let mut terrain_noise = FastNoiseLite::new();
         terrain_noise.set_noise_type(Some(NoiseType::Perlin));
         terrain_noise.set_seed(Some(2324));
@@ -29,9 +27,7 @@ impl WorldGenerator {
         terrain_noise.set_fractal_lacunarity(Some(2.0));
         terrain_noise.set_fractal_gain(Some(0.5));
 
-        // Continent noise: Large-scale continentalness factor
-        // This can be used to modulate the terrain height on a larger scale,
-        // making some areas have higher "continents" and others be lower (like oceans).
+        // Continent noise setup remains the same
         let mut continent_noise = FastNoiseLite::new();
         continent_noise.set_noise_type(Some(NoiseType::Perlin));
         continent_noise.set_seed(Some(9999));
@@ -41,7 +37,7 @@ impl WorldGenerator {
         continent_noise.set_fractal_lacunarity(Some(2.0));
         continent_noise.set_fractal_gain(Some(0.5));
 
-        // Cave noise: 3D noise that carves out caves inside the terrain
+        // Cave noise setup remains the same
         let mut cave_noise = FastNoiseLite::new();
         cave_noise.set_noise_type(Some(NoiseType::Perlin));
         cave_noise.set_seed(Some(12345));
@@ -51,40 +47,39 @@ impl WorldGenerator {
         cave_noise.set_fractal_lacunarity(Some(2.0));
         cave_noise.set_fractal_gain(Some(0.5));
 
-        Self {
+        // Initialize material mapping
+        let generator = Self {
             terrain_noise,
             continent_noise,
             cave_noise,
-        }
+        };
+
+        generator
     }
 
-    pub fn generate_chunk(&self, chunk_x: u32, chunk_y: u32, chunk_z: u32) -> ExpandedBrick {
+    pub fn generate_chunk(
+        &self,
+        materials: &ExpandedMaterialMapping,
+        chunk_x: u32,
+        chunk_y: u32,
+        chunk_z: u32,
+    ) -> ExpandedBrick {
         let mut brick = ExpandedBrick::empty();
         let world_x = chunk_x as f32 * 8.0;
         let world_y = chunk_y as f32 * 8.0;
         let world_z = chunk_z as f32 * 8.0;
 
-        // We'll generate a heightmap and fill materials accordingly.
-        // Average height is around 100. We'll add continental and terrain variation.
-        // Terrain noise is 2D (x,z). We'll use world_y and cave noise to determine caves.
+        // Get local IDs
+        let air_id = materials.get("air");
+        let stone_id = materials.get("stone");
+        let bedrock_id = materials.get("bedrock");
+        let dirt_id = materials.get("dirt");
+        let grass_id = materials.get("grass");
+        let snow_id = materials.get("snow");
 
-        // We can consider:
-        // height = 100 (base)
-        //         + (continent_noise * 100) for large-scale variation
-        //         + (terrain_noise * 50) for local hills and mountains
-        //
-        // The final height might be something like:
-        //   final_height = 100 + continent_val * 100.0 + terrain_val * 50.0
-        //
-        // If world_y + y < final_height, normally fill with stone/dirt/grass/snow.
-        // Near the surface, put grass or snow if high enough.
-        // y=0 bedrock layer.
-        // For caves: if cave_noise at a voxel > threshold, carve out to air.
-
-        // return ExpandedBrick::random(5);
+        // Generation logic remains the same but uses local IDs
         for z in 0..8 {
             for x in 0..8 {
-                // Sample the 2D noises for height determination
                 let sample_x = world_x + x as f32;
                 let sample_z = world_z + z as f32;
 
@@ -92,47 +87,40 @@ impl WorldGenerator {
                 let terrain_val = self.terrain_noise.get_noise_2d(sample_x, sample_z);
 
                 let final_height =
-                    (100.0 + (continent_val * 100.0) + (terrain_val * 50.0).round()) as i32;
+                    (100.0 + (continent_val * 150.0) + (terrain_val * 180.0).round()) as i32;
 
                 for y in 0..8 {
                     let world_block_y = world_y as i32 + y as i32;
-
                     let height_diff = final_height - world_block_y;
-
-                    let mut block_material = AIR;
+                    let mut block_material = air_id;
 
                     if world_block_y == 0 {
-                        block_material = BEDROCK;
-                    } else if world_block_y <= final_height {
-                        block_material = STONE;
-
-                        if height_diff <= 3 {
-                            block_material = DIRT;
+                        block_material = bedrock_id;
+                    } else if world_block_y == final_height {
+                        block_material = grass_id;
+                        if final_height >= 200 {
+                            block_material = snow_id;
                         }
-                        //         if final_height > 150 {
-                        //             block_material = SNOW;
-                        //         } else if final_height >= 95 {
-                        //             block_material = GRASS;
-                        //         } else {
-                        //             block_material = GRASS;
-                        //         }
-                        //     } else if height_diff == 1 {
-                        //         block_material = DIRT;
-                        //     } else if height_diff > 1 {
-                        //         block_material = STONE;
-                        //     }
-                        // } else {
-                        //     block_material = AIR;
+                    } else if world_block_y <= final_height {
+                        block_material = stone_id;
+                        if height_diff <= 3 {
+                            block_material = dirt_id;
+                        }
                     }
 
-                    if block_material == STONE || block_material == DIRT {
+                    if block_material == stone_id {
                         let cave_val =
                             self.cave_noise
                                 .get_noise_3d(sample_x, world_block_y as f32, sample_z);
                         let cave_val = (cave_val + 1.0) / 2.0;
-                        // If cave_val is high enough, we carve out a cave
-                        if 0.9 > cave_val && cave_val > 0.5 {
-                            block_material = AIR;
+                        if (0.7 > cave_val && cave_val > 0.5) && height_diff > 6 {
+                            block_material = air_id;
+                        }
+                        if ((0.72 >= cave_val && cave_val >= 0.7)
+                            || (0.5 >= cave_val && cave_val >= 0.48))
+                            && height_diff > 6
+                        {
+                            block_material = bedrock_id
                         }
                     }
 
@@ -149,6 +137,7 @@ impl WorldGenerator {
         brickmap: &BrickMap,
         from: na::Vector3<u32>,
         to: na::Vector3<u32>,
+        materials: &ExpandedMaterialMapping,
         callback: F,
     ) where
         F: Fn(&ExpandedBrick, na::Vector3<u32>, BrickHandle) + Send + Sync,
@@ -158,8 +147,8 @@ impl WorldGenerator {
             .collect();
 
         // Process chunks in parallel
-        coords.par_iter().for_each(|&(x, y, z)| {
-            let expanded_brick = self.generate_chunk(x, y, z);
+        coords.iter().for_each(|&(x, y, z)| {
+            let expanded_brick = self.generate_chunk(materials, x, y, z);
             let brick = expanded_brick.to_trace_brick();
 
             let at = na::Vector3::new(x, y, z);

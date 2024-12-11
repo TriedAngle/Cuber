@@ -2,6 +2,8 @@ extern crate nalgebra as na;
 
 pub mod brick;
 pub mod input;
+pub mod material;
+pub mod palette;
 pub mod worldgen;
 
 pub use input::Input;

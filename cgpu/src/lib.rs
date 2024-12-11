@@ -2,25 +2,27 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
+use buddy::GPUBuddyBuffer;
 use camera::Camera;
+use dense::DenseBuffer;
 use game::{
-    brick::{
-        BrickMap, MaterialBrick, MaterialBrick1, MaterialBrick2, MaterialBrick4, MaterialBrick8,
-    },
+    brick::{BrickMap, MaterialBrick1, MaterialBrick8},
     input::Input,
+    material::{self, ExpandedMaterialMapping, MaterialId, MaterialRegistry, PbrMaterial},
+    palette::PaletteRegistry,
     worldgen::WorldGenerator,
     Diagnostics, Transform,
 };
-use managed::ManagedBuffer;
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use texture::Texture;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 mod buddy;
 mod camera;
-mod managed;
+mod dense;
+mod freelist;
 mod mesh;
 mod texture;
 
@@ -133,10 +135,10 @@ pub struct RenderContext {
     pub brickmap: BrickMap,
     pub brick_handle_buffer: wgpu::Buffer,
     pub brick_trace_buffer: wgpu::Buffer,
-    pub brick1_buffer: ManagedBuffer,
-    pub brick2_buffer: ManagedBuffer,
-    pub brick4_buffer: ManagedBuffer,
-    pub brick8_buffer: ManagedBuffer,
+    pub brick_buffer: DenseBuffer,
+    // pub brick_buffer: wgpu::Buffer,
+    pub palette_buffer: wgpu::Buffer,
+    pub material_buffer: wgpu::Buffer,
 
     brickmap_bind_group: wgpu::BindGroup,
     pub compute_uniforms: ComputeUniforms,
@@ -235,7 +237,7 @@ impl RenderContext {
 
         custom_limits.max_storage_buffer_binding_size = 1073741820;
         custom_limits.max_buffer_size = u64::MAX;
-        custom_limits.min_storage_buffer_offset_alignment = 32;
+        // custom_limits.min_storage_buffer_offset_alignment = 32;
 
         if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
             panic!("TIMESTAMP QUERY REQUIRED");
@@ -457,45 +459,29 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
+        let material_registry = MaterialRegistry::new();
+        material_registry.register_default_materials();
+
+        let mut material_mapping = ExpandedMaterialMapping::new();
+        material_mapping.add_from_registry(&material_registry, "air", 0);
+        material_mapping.add_from_registry(&material_registry, "stone", 1);
+        material_mapping.add_from_registry(&material_registry, "bedrock", 2);
+        material_mapping.add_from_registry(&material_registry, "dirt", 3);
+        material_mapping.add_from_registry(&material_registry, "grass", 4);
+        material_mapping.add_from_registry(&material_registry, "snow", 5);
+
+        let palette_registry = PaletteRegistry::new();
+
         let generator = WorldGenerator::new();
 
-        let brick1_buffer = ManagedBuffer::new(
-            &device,
-            std::mem::size_of::<MaterialBrick1>() as u32,
-            16384,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
+        // let min_size = mem::size_of::<MaterialBrick1>() as u64;
+        // let max_size = mem::size_of::<MaterialBrick8>() as u64;
+        // let brick_buffer = GPUBuddyBuffer::new(&device, (min_size, max_size), 512 << 20);
+        let brick_buffer = DenseBuffer::new(&device, 128 << 20);
 
-        let brick2_buffer = ManagedBuffer::new(
-            &device,
-            std::mem::size_of::<MaterialBrick2>() as u32,
-            16384,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
+        // let bricks = RwLock::new(Vec::<u8>::new());
 
-        let brick4_buffer = ManagedBuffer::new(
-            &device,
-            std::mem::size_of::<MaterialBrick4>() as u32,
-            256,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
-
-        let brick8_buffer = ManagedBuffer::new(
-            &device,
-            std::mem::size_of::<MaterialBrick8>() as u32,
-            128,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
-
-        let brickmap = BrickMap::new(na::Vector3::new(32, 32, 32));
+        let brickmap = BrickMap::new(na::Vector3::new(64, 64, 64));
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
@@ -504,40 +490,31 @@ impl RenderContext {
             &brickmap,
             na::Vector3::zeros(),
             dimensions,
-            |&brick, _at, handle| {
-                let material_brick = brick.to_material_brick();
+            &material_mapping,
+            |brick, _at, handle| {
+                let (material_brick, materials) = brick.compress(&material_mapping);
                 let bit_size = material_brick.element_size();
 
-                let index = match material_brick {
-                    MaterialBrick::Size1(brick) => brick1_buffer.allocate_and_write(
-                        &device,
-                        &queue,
-                        bytemuck::cast_slice(&[brick]),
-                    ),
-                    MaterialBrick::Size2(brick) => brick2_buffer.allocate_and_write(
-                        &device,
-                        &queue,
-                        bytemuck::cast_slice(&[brick]),
-                    ),
-                    MaterialBrick::Size4(brick) => brick4_buffer.allocate_and_write(
-                        &device,
-                        &queue,
-                        bytemuck::cast_slice(&[brick]),
-                    ),
-                    MaterialBrick::Size8(brick) => brick8_buffer.allocate_and_write(
-                        &device,
-                        &queue,
-                        bytemuck::cast_slice(&[brick]),
-                    ),
-                }
-                .expect("Allocation can't fail");
+                // we don't need a callback here as we bind later
+                // let (offset, alloc_size) = brick_buffer
+                //     .allocate(data.len() as u64, &device, &queue, |_| {})
+                //     .expect("Allocation must work, out of memory?");
 
-                // *total.lock() += alloc_size;
-                // *counted.lock() += 1;
+                // let mut bricks = bricks.write();
+                // let offset = bricks.len();
+
+                // bricks.extend_from_slice(&material_brick.data());
+                let offset = brick_buffer
+                    .allocate_brick(material_brick, &queue)
+                    .expect("Failed to allocate");
+
+                let palette = palette_registry.register_palette(materials);
+
+                // brick_buffer.write_data(&device, &queue, &mut encoder, offset, data);
 
                 let _ = brickmap.modify_brick(handle, |trace| {
-                    trace.set_brick_offset(index as u32);
-                    trace.set_brick_size(bit_size as u32);
+                    trace.set_brick_info(bit_size as u32 - 1, offset as u32);
+                    trace.set_palette(palette);
                 });
             },
         );
@@ -555,8 +532,20 @@ impl RenderContext {
         });
 
         let brick_trace_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Brick Buffer"),
+            label: Some("Brick Trace Buffer"),
             contents: bytemuck::cast_slice(brickmap.bricks()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Material Buffer"),
+            contents: bytemuck::cast_slice(material_registry.materials()),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let palette_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Palette Buffer"),
+            contents: bytemuck::cast_slice(palette_registry.palette_data()),
             usage: wgpu::BufferUsages::STORAGE,
         });
 
@@ -657,16 +646,6 @@ impl RenderContext {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
 
@@ -684,19 +663,15 @@ impl RenderContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: brick1_buffer.get_buffer().as_entire_binding(),
+                    resource: palette_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: brick2_buffer.get_buffer().as_entire_binding(),
+                    resource: material_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: brick4_buffer.get_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: brick8_buffer.get_buffer().as_entire_binding(),
+                    resource: brick_buffer.buffer().as_entire_binding(),
                 },
             ],
         });
@@ -970,10 +945,13 @@ impl RenderContext {
             brickmap,
             brick_handle_buffer,
             brick_trace_buffer,
-            brick1_buffer,
-            brick2_buffer,
-            brick4_buffer,
-            brick8_buffer,
+            brick_buffer,
+            material_buffer,
+            palette_buffer,
+            // brick1_buffer,
+            // brick2_buffer,
+            // brick4_buffer,
+            // brick8_buffer,
             brickmap_bind_group,
             compute_uniforms,
             compute_uniforms_buffer,

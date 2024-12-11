@@ -2,7 +2,7 @@ use parking_lot::RwLock;
 use std::collections::VecDeque;
 use wgpu::util::DeviceExt;
 
-pub struct ManagedBuffer {
+pub struct FreeListBuffer {
     buffer: RwLock<wgpu::Buffer>,
     free_list: RwLock<VecDeque<u32>>,
     element_size: u32,
@@ -17,7 +17,7 @@ pub enum BufferError {
     IndexOutOfBounds,
 }
 
-impl ManagedBuffer {
+impl FreeListBuffer {
     pub fn new(
         device: &wgpu::Device,
         element_size: u32,

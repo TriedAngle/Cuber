@@ -1,6 +1,11 @@
 use parking_lot::RwLock;
 use rand::Rng;
 
+use crate::{
+    material::{ExpandedMaterialMapping, MaterialId},
+    palette::PaletteId,
+};
+
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BrickHandle(pub u32);
@@ -199,7 +204,7 @@ impl BrickMap {
 pub struct TraceBrick {
     raw: [u8; 64],
     brick: u32, // top 3 bits for size, rest for offset
-    material: u32,
+    palette: u32,
 }
 
 #[repr(C)]
@@ -361,6 +366,15 @@ impl MaterialBrick {
             Self::Size8(_) => 8,
         }
     }
+
+    pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
+        match self {
+            Self::Size1(b) => b.get(x, y, z),
+            Self::Size2(b) => b.get(x, y, z),
+            Self::Size4(b) => b.get(x, y, z),
+            Self::Size8(b) => b.get(x, y, z),
+        }
+    }
 }
 
 #[repr(C)]
@@ -375,7 +389,7 @@ impl TraceBrick {
         Self {
             raw: [0; 64],
             brick: 0,
-            material: 0,
+            palette: 0,
         }
     }
 
@@ -429,7 +443,7 @@ impl TraceBrick {
     }
 
     pub fn set_brick_size(&mut self, size: u32) {
-        debug_assert!(size <= 0b111);
+        assert!(size <= 0b111);
         self.brick = (self.brick & !(0b111 << 29)) | (size << 29);
         // let masked_value = size & 0b111;
         // self.brick &= 0x1FFF_FFFF;
@@ -442,13 +456,22 @@ impl TraceBrick {
     }
 
     pub fn set_brick_offset(&mut self, offset: u32) {
-        debug_assert!(offset <= 0x1FFFFFFF);
+        assert!(offset <= 0x1FFFFFFF);
         self.brick = (self.brick & (0b111 << 29)) | offset;
         // let masked_value = offset & 0x1FFF_FFFF;
         // // Clear lower 29 bits of existing value
         // self.brick &= 0xE000_0000;
         // // Set new value
         // self.brick |= masked_value;
+    }
+
+    pub fn set_brick_info(&mut self, size: u32, offset: u32) {
+        assert!(size <= 0b111);
+        self.brick = (size << 29) | offset;
+    }
+
+    pub fn set_palette(&mut self, palette: PaletteId) {
+        self.palette = palette.0;
     }
 }
 
@@ -525,31 +548,89 @@ impl ExpandedBrick {
             _ => 8,
         }
     }
-
-    pub fn to_material_brick(&self) -> MaterialBrick {
-        match self.get_required_bits() {
-            1 => MaterialBrick::Size1(MaterialBrick1::from_expanded_brick(self)),
-            2 => MaterialBrick::Size2(MaterialBrick2::from_expanded_brick(self)),
-            4 => MaterialBrick::Size4(MaterialBrick4::from_expanded_brick(self)),
-            8 => MaterialBrick::Size8(MaterialBrick8::from_expanded_brick(self)),
-            _ => unreachable!(),
-        }
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl ExpandedBrick {
+    pub fn compress(
+        &self,
+        material_mapping: &ExpandedMaterialMapping,
+    ) -> (MaterialBrick, Vec<MaterialId>) {
+        // Get unique values and sort them
+        let mut unique_values: Vec<u8> = self.raw.iter().copied().collect();
+        unique_values.sort_unstable();
+        unique_values.dedup();
 
-    #[test]
-    fn compress_brick() {
-        let brick = ExpandedBrick::random(4);
+        let mut value_map = [0u8; 256];
+        let mut material_ids = vec![MaterialId(0)]; // Always start with MaterialId(0)
+        let mut next_value = 1u8; // Start from 1 for non-zero values
 
-        let trace = brick.to_trace_brick();
+        for &val in unique_values.iter() {
+            if val != 0 {
+                // Skip 0 as it must map to 0
+                value_map[val as usize] = next_value;
+                material_ids.push(material_mapping.material(val));
+                next_value += 1;
+            }
+        }
 
-        let mut buffer: [u8; 512] = [0; 512];
-        let brick2 = MaterialBrick2::from_expanded_brick(&brick);
+        let unique_count = next_value - 1;
 
-        println!("{:?}", brick);
+        let material_brick = match unique_count {
+            0 => MaterialBrick::Size1(MaterialBrick1 { raw: [0; 16] }),
+            1..=1 => {
+                let mut brick = MaterialBrick1 { raw: [0; 16] };
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size1(brick)
+            }
+            2..=3 => {
+                let mut brick = MaterialBrick2 { raw: [0; 32] };
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size2(brick)
+            }
+            4..=15 => {
+                let mut brick = MaterialBrick4 { raw: [0; 64] };
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size4(brick)
+            }
+            _ => {
+                let mut brick = MaterialBrick8 { raw: [0; 128] };
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size8(brick)
+            }
+        };
+
+        (material_brick, material_ids)
     }
 }

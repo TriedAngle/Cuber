@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use parking_lot::RwLock;
-use std::mem;
 use wgpu::util::DeviceExt;
 
 fn round_up_pow2(mut x: u64) -> u64 {
@@ -77,13 +76,17 @@ impl GPUBuddyBuffer {
         }
     }
 
-    pub fn allocate(
+    pub fn allocate<F>(
         &self,
-        size_unround: u64,
+        size: u64,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Option<(u64, u64)> {
-        let size = round_up_pow2(size_unround);
+        on_buffer_update: F,
+    ) -> Option<(u64, u64)>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
+        let size = round_up_pow2(size);
 
         if size < self.min_block_size || self.max_block_size < size {
             return None;
@@ -100,7 +103,7 @@ impl GPUBuddyBuffer {
 
             Some((state.blocks[block_idx].offset, size))
         } else {
-            if self.try_grow_buffer(&mut state, device, queue) {
+            if self.try_grow_buffer(&mut state, device, queue, on_buffer_update) {
                 // Retry allocation after growing
                 self.find_free_block(&mut state, size).map(|block_idx| {
                     state.blocks[block_idx].is_free = false;
@@ -115,7 +118,15 @@ impl GPUBuddyBuffer {
         }
     }
 
-    pub fn deallocate(&self, offset: u64, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn deallocate<F>(
+        &self,
+        offset: u64,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        on_buffer_update: F,
+    ) where
+        F: Fn(&wgpu::Buffer),
+    {
         let mut state = self.state.write();
 
         if let Some(block_idx) = self.find_block_by_offset(&state, offset) {
@@ -125,7 +136,7 @@ impl GPUBuddyBuffer {
             state.free_blocks.entry(size).or_default().push(block_idx);
 
             self.merge_adjacent_free_blocks(&mut state);
-            self.try_shrink_buffer(&mut state, device, queue);
+            self.try_shrink_buffer(&mut state, device, queue, on_buffer_update);
         }
     }
 
@@ -149,14 +160,19 @@ impl GPUBuddyBuffer {
         encoder.copy_buffer_to_buffer(&staging, 0, &buffer, offset, data.len() as u64)
     }
 
-    pub fn allocate_and_write(
+    pub fn allocate_and_write<F>(
         &self,
         data: &[u8],
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> Option<(u64, u64)> {
+        on_buffer_update: F,
+    ) -> Option<(u64, u64)>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let size = data.len() as u64;
+        let size = round_up_pow2(size);
         if size < self.min_block_size || self.max_block_size < size {
             return None;
         }
@@ -170,7 +186,7 @@ impl GPUBuddyBuffer {
             idx
         } else {
             // Try growing the buffer if no free block found
-            if !self.try_grow_buffer(&mut state, device, queue) {
+            if !self.try_grow_buffer(&mut state, device, queue, on_buffer_update) {
                 return None;
             }
             // Retry finding a block after growing
@@ -209,12 +225,16 @@ impl GPUBuddyBuffer {
         unsafe { &self.buffer.data_ptr().as_ref().unwrap() }
     }
 
-    fn try_grow_buffer(
+    fn try_grow_buffer<F>(
         &self,
         state: &mut InnerState,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> bool {
+        on_buffer_update: F,
+    ) -> bool
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let new_capacity = state.capacity * 2;
         log::debug!(
             "Growing Brick Buffer {} -> {}",
@@ -240,6 +260,9 @@ impl GPUBuddyBuffer {
         encoder.copy_buffer_to_buffer(&buffer, 0, &new_buf, 0, state.capacity);
 
         queue.submit([encoder.finish()]);
+        device.poll(wgpu::Maintain::Wait);
+
+        on_buffer_update(&buffer);
 
         *buffer = new_buf;
 
@@ -259,12 +282,16 @@ impl GPUBuddyBuffer {
         true
     }
 
-    fn try_shrink_buffer(
+    fn try_shrink_buffer<F>(
         &self,
         state: &mut InnerState,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> bool {
+        on_buffer_update: F,
+    ) -> bool
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let total_free_size: u64 = state
             .free_blocks
             .iter()
@@ -299,6 +326,8 @@ impl GPUBuddyBuffer {
         *buffer = new_buf;
 
         queue.submit([encoder.finish()]);
+
+        on_buffer_update(&buffer);
 
         state.capacity = new_capacity;
 

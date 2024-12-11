@@ -16,28 +16,16 @@ struct ComputeUniforms {
 struct TraceBrick { 
     raw: array<u32, 16>,
     brick: u32, // upper 3 bits store bits per voxel, other 29 store handle to bricks
-    material: u32,
+    palette: u32,
 }
 
-struct Brick1 { 
-    raw: array<u32, 16>,
+struct PbrMaterial {
+    color: vec4<f32>,
+    metallic: f32,
+    roughness: f32,
+    _padding1: vec2<f32>,
+    emissive: vec4<f32>,
 }
-struct Brick2 {
-    raw: array<u32, 32>,
-}
-struct Brick4 {
-    raw: array<u32, 64>,
-}
-struct Brick8 {
-    raw: array<u32, 128>,
-}
-
-const MATERIAL_AIR: u32 = 0;
-const MATERIAL_STONE: u32 = 1;
-const MATERIAL_BEDROCK: u32 = 2;
-const MATERIAL_DIRT: u32 = 3;
-const MATERIAL_GRASS: u32 = 4;
-const MATERIAL_SNOW: u32 = 5;
 
 // Using upper 3 bits
 const FLAG_MASK = 0xE0000000u;  // 111 in top 3 bits
@@ -65,13 +53,13 @@ var<storage, read_write> handles: array<u32>;
 var<storage, read> trace_bricks: array<TraceBrick>;
 
 @group(1) @binding(2)
-var<storage, read> bricks1: array<Brick1>; 
+var<storage, read> palettes: array<u32>;
+
 @group(1) @binding(3)
-var<storage, read> bricks2: array<Brick2>; 
+var<storage, read> materials: array<PbrMaterial>;
+
 @group(1) @binding(4)
-var<storage, read> bricks4: array<Brick4>; 
-@group(1) @binding(5)
-var<storage, read> bricks8: array<Brick8>; 
+var<storage, read> bricks: array<u32>;
 
 var<private> brightness: f32 = 0.0;
 
@@ -84,34 +72,6 @@ struct Hit {
 
 fn new_hit(hit: bool, mask: vec3<f32>) -> Hit { 
     return Hit(hit, mask, vec4<f32>(0.0), vec4<f32>(0.0));
-}
-
-
-// TODO: make this runtime defined
-fn get_material_color(material: u32) -> vec4<f32> {
-    switch material {
-        case MATERIAL_AIR: {
-            return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        }
-        case MATERIAL_STONE: {
-            return vec4<f32>(0.5, 0.5, 0.5, 1.0);
-        }
-        case MATERIAL_BEDROCK: {
-            return vec4<f32>(0.3, 0.3, 0.3, 1.0);
-        }
-        case MATERIAL_DIRT: {
-            return vec4<f32>(0.59, 0.29, 0.0, 1.0); // Rich brown color
-        }
-        case MATERIAL_GRASS: {
-            return vec4<f32>(0.33, 0.63, 0.22, 1.0); // Vibrant grass green
-        }
-        case MATERIAL_SNOW: {
-            return vec4<f32>(0.95, 0.95, 0.95, 1.0); // Bright white with slight off-white tint
-        }
-        default: {
-            return vec4<f32>(1.0, 0.0, 1.0, 1.0); // Magenta for undefined materials
-        }
-    }
 }
 
 fn brick_index(pos: vec3<i32>) -> u32 {
@@ -169,62 +129,49 @@ fn get_trace_voxel(id: u32, local_pos: vec3<i32>) -> bool {
     return (voxel_data & (1u << u32(bit_index))) != 0u;
 }
 
-fn get_brick_voxel(trace_brick_handle: u32, local_pos: vec3<i32>) -> u32 {
-    let brick_handle = trace_brick_handle;
+fn get_brick_voxel(brick_handle: u32, local_pos: vec3<i32>) -> u32 {
+    let format = (brick_handle >> 29u) & 0x7u;
+    let byte_offset = brick_handle & 0x1FFFFFFFu;
 
-    // Extract bits per voxel from upper 3 bits
-    let bits_per_voxel = (brick_handle >> 29u) & 0x7u;
-    
-    // Get index from lower 29 bits
-    let brick_index = brick_handle & 0x1FFFFFFFu;
-    
-    // Calculate voxel index in the brick
-    let voxel_idx = local_pos.x + 
-                    local_pos.y * CHUNK_SIZE + 
-                    local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
-    
-    // Common calculations for all brick types
-    let bits_per_u32 = 32u;
-    var u32_index: u32;
+    let voxel_idx = local_pos.x 
+        + local_pos.y * CHUNK_SIZE 
+        + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
+
+    var element_idx: u32;
     var bit_offset: u32;
-    var data: u32;
     var mask: u32;
-    
-    switch bits_per_voxel {
-        case 1u: {
-            let voxels_per_u32 = 32u;
-            u32_index = u32(voxel_idx) / voxels_per_u32;
-            bit_offset = u32(voxel_idx) % voxels_per_u32;
-            data = bricks1[brick_index].raw[u32_index];
+    var bits_per_element: u32;
+
+    switch format {
+        case 0u: {
+            element_idx = byte_offset / 4u + (u32(voxel_idx) / 32u);
+            bit_offset = u32(voxel_idx) % 32u;
             mask = 1u;
+            bits_per_element = 1u;
         }
-        case 2u: {
-            let voxels_per_u32 = 16u;
-            u32_index = u32(voxel_idx) / voxels_per_u32;
-            bit_offset = (u32(voxel_idx) % voxels_per_u32) * 2u;
-            data = bricks2[brick_index].raw[u32_index];
+        case 1u: {
+            element_idx = byte_offset / 4u + (u32(voxel_idx) / 16u);
+            bit_offset = (u32(voxel_idx) % 16u) * 2u;
             mask = 3u;
+            bits_per_element = 2u;
         }
-        case 4u: {
-            let voxels_per_u32 = 8u;
-            u32_index = u32(voxel_idx) / voxels_per_u32;
-            bit_offset = (u32(voxel_idx) % voxels_per_u32) * 4u;
-            data = bricks4[brick_index].raw[u32_index];
+        case 3u: {
+            element_idx = byte_offset / 4u + (u32(voxel_idx) / 8u);
+            bit_offset = (u32(voxel_idx) % 8u) * 4u;
             mask = 15u;
-        }
-        case 8u: {
-            let voxels_per_u32 = 4u;
-            u32_index = u32(voxel_idx) / voxels_per_u32;
-            bit_offset = (u32(voxel_idx) % voxels_per_u32) * 8u;
-            data = bricks8[brick_index].raw[u32_index];
-            mask = 255u;
+            bits_per_element = 4u;
         }
         default: {
-            return 0u;
+            element_idx = byte_offset / 4u + (u32(voxel_idx) / 4u);
+            bit_offset = (u32(voxel_idx) % 4u) * 8u;
+            mask = 255u;
+            bits_per_element = 8u;
         }
     }
+
+    let packed_value = bricks[element_idx];
     
-    return (data >> bit_offset) & mask;
+    return (packed_value >> bit_offset) & mask;
 }
 
 fn sd_sphere(p: vec3<f32>, d: f32) -> f32 { 
@@ -279,13 +226,18 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
         let vox = get_trace_voxel(brick_handle, vec3<i32>(map_pos));
         if vox {
             let trace = trace_bricks[brick_handle];
-            let material_vox = get_brick_voxel(trace.brick, vec3<i32>(map_pos));
-            let color = get_material_color(material_vox);
+
+            let palette_vox_id = get_brick_voxel(trace.brick, vec3<i32>(map_pos));
+
+            let palette_offset = trace.palette;
+            let material_id = palettes[palette_offset + palette_vox_id];
+            let material = materials[material_id];
+
 
             var hit = new_hit(true, mask);
             hit.pos = vec4<f32>(floor(map_pos) / 8.0, 1.0);
             // hit.color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
-            hit.color = color;
+            hit.color = material.color;
             return hit;
         }
         mask = step_mask(side_dist);
