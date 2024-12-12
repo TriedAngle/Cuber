@@ -2,19 +2,19 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
-use buddy::GPUBuddyBuffer;
 use camera::Camera;
 use dense::DenseBuffer;
 use game::{
-    brick::{BrickMap, MaterialBrick1, MaterialBrick8},
+    brick::BrickMap,
     input::Input,
-    material::{self, ExpandedMaterialMapping, MaterialId, MaterialRegistry, PbrMaterial},
+    material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
+    sdf::{distance_field_parallel_pass, distance_field_sequential_pass},
     worldgen::WorldGenerator,
     Diagnostics, Transform,
 };
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use texture::Texture;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
@@ -492,25 +492,18 @@ impl RenderContext {
             dimensions,
             &material_mapping,
             |brick, _at, handle| {
+                if handle.is_empty() {
+                    return;
+                }
+
                 let (material_brick, materials) = brick.compress(&material_mapping);
                 let bit_size = material_brick.element_size();
 
-                // we don't need a callback here as we bind later
-                // let (offset, alloc_size) = brick_buffer
-                //     .allocate(data.len() as u64, &device, &queue, |_| {})
-                //     .expect("Allocation must work, out of memory?");
-
-                // let mut bricks = bricks.write();
-                // let offset = bricks.len();
-
-                // bricks.extend_from_slice(&material_brick.data());
                 let offset = brick_buffer
                     .allocate_brick(material_brick, &queue)
                     .expect("Failed to allocate");
 
                 let palette = palette_registry.register_palette(materials);
-
-                // brick_buffer.write_data(&device, &queue, &mut encoder, offset, data);
 
                 let _ = brickmap.modify_brick(handle, |trace| {
                     trace.set_brick_info(bit_size as u32 - 1, offset as u32);
@@ -518,6 +511,9 @@ impl RenderContext {
                 });
             },
         );
+
+        // SDF pass:
+        distance_field_parallel_pass(&brickmap, na::Vector3::zeros(), dimensions);
 
         log::debug!(
             "WORLDGEN BRICK SIZE: {}, called: {}",

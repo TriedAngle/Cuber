@@ -4,6 +4,7 @@ pub mod brick;
 pub mod input;
 pub mod material;
 pub mod palette;
+pub mod sdf;
 pub mod worldgen;
 
 pub use input::Input;

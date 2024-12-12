@@ -32,7 +32,12 @@ impl BrickHandle {
 
     pub fn write_data(&mut self, data: u32) {
         let masked_data = data & Self::DATA_MASK;
-        self.0 = (self.0 & Self::FLAG_MASK) | masked_data;
+        self.0 = masked_data | Self::STATE_DATA;
+    }
+
+    pub fn write_sdf(&mut self, data: u32) {
+        let masked_data = data & Self::DATA_MASK;
+        self.0 = masked_data | Self::STATE_EMPTY;
     }
 
     pub fn new(offset: u32) -> Self {

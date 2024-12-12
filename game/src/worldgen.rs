@@ -147,18 +147,20 @@ impl WorldGenerator {
             .collect();
 
         // Process chunks in parallel
-        coords.iter().for_each(|&(x, y, z)| {
+        coords.par_iter().for_each(|&(x, y, z)| {
             let expanded_brick = self.generate_chunk(materials, x, y, z);
             let brick = expanded_brick.to_trace_brick();
 
             let at = na::Vector3::new(x, y, z);
 
-            if brick.is_empty() {
-                brickmap.set_handle(BrickHandle::empty(), at);
-                return;
-            }
+            let handle = if brick.is_empty() {
+                let handle = BrickHandle::empty();
+                brickmap.set_handle(handle, at);
+                handle
+            } else {
+                brickmap.get_or_push_brick(brick, at)
+            };
 
-            let handle = brickmap.get_or_push_brick(brick, at);
             callback(&expanded_brick, at, handle);
         });
     }
