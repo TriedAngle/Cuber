@@ -1,7 +1,9 @@
+#![allow(unused)]
 use std::collections::BTreeMap;
 
+use game::brick::MaterialBrick;
 use parking_lot::RwLock;
-use wgpu::util::DeviceExt;
+
 
 fn round_up_pow2(mut x: u64) -> u64 {
     if x == 0 {
@@ -76,17 +78,18 @@ impl GPUBuddyBuffer {
         }
     }
 
-    pub fn allocate<F>(
+    pub fn allocate<T, F>(
         &self,
-        size: u64,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         on_buffer_update: F,
-    ) -> Option<(u64, u64)>
+    ) -> Option<u64>
     where
         F: Fn(&wgpu::Buffer),
     {
-        let size = round_up_pow2(size);
+        let type_size = std::mem::size_of::<T>() as u64;
+        // let size = round_up_pow2(tylpe_size);
+        let size = type_size;
 
         if size < self.min_block_size || self.max_block_size < size {
             return None;
@@ -101,7 +104,7 @@ impl GPUBuddyBuffer {
                 free_list.retain(|&x| x != block_idx);
             }
 
-            Some((state.blocks[block_idx].offset, size))
+            Some(state.blocks[block_idx].offset)
         } else {
             if self.try_grow_buffer(&mut state, device, queue, on_buffer_update) {
                 // Retry allocation after growing
@@ -110,7 +113,7 @@ impl GPUBuddyBuffer {
                     if let Some(free_list) = state.free_blocks.get_mut(&size) {
                         free_list.retain(|&x| x != block_idx);
                     }
-                    (state.blocks[block_idx].offset, size)
+                    state.blocks[block_idx].offset
                 })
             } else {
                 None
@@ -140,85 +143,33 @@ impl GPUBuddyBuffer {
         }
     }
 
-    pub fn write_data(
+    pub fn write<T: bytemuck::Pod>(
         &self,
-        device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
         offset: u64,
-        data: &[u8],
+        data: &T,
     ) {
-        let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: data,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        });
-
-        queue.write_buffer(&staging, 0, data);
-        let buffer = self.buffer.write();
-
-        encoder.copy_buffer_to_buffer(&staging, 0, &buffer, offset, data.len() as u64)
+        queue.write_buffer(
+            &self.buffer.read(),
+            offset,
+            bytemuck::cast_slice(std::slice::from_ref(data)),
+        );
+        queue.submit([]);
     }
 
-    pub fn allocate_and_write<F>(
+    pub fn allocate_and_write<T: bytemuck::Pod, F>(
         &self,
-        data: &[u8],
+        data: &T,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
         on_buffer_update: F,
-    ) -> Option<(u64, u64)>
+    ) -> Option<u64>
     where
         F: Fn(&wgpu::Buffer),
     {
-        let size = data.len() as u64;
-        let size = round_up_pow2(size);
-        if size < self.min_block_size || self.max_block_size < size {
-            return None;
-        }
-
-        // Take the lock once for the entire operation
-        let mut state = self.state.write();
-        let buffer = self.buffer.write();
-
-        // Try to find a free block
-        let block_idx = if let Some(idx) = self.find_free_block(&mut state, size) {
-            idx
-        } else {
-            // Try growing the buffer if no free block found
-            if !self.try_grow_buffer(&mut state, device, queue, on_buffer_update) {
-                return None;
-            }
-            // Retry finding a block after growing
-            if let Some(idx) = self.find_free_block(&mut state, size) {
-                idx
-            } else {
-                return None;
-            }
-        };
-
-        // Mark block as allocated
-        state.blocks[block_idx].is_free = false;
-        if let Some(free_list) = state.free_blocks.get_mut(&size) {
-            free_list.retain(|&x| x != block_idx);
-        }
-
-        let offset = state.blocks[block_idx].offset;
-
-        // Create and initialize staging buffer
-        let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: data,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Write data to staging buffer
-        queue.write_buffer(&staging, 0, data);
-
-        // Copy from staging to main buffer
-        encoder.copy_buffer_to_buffer(&staging, 0, &buffer, offset, data.len() as u64);
-
-        Some((offset, size))
+        let offset = self.allocate::<T, F>(device, queue, on_buffer_update)?;
+        self.write(queue, offset, data);
+        Some(offset)
     }
 
     pub fn buffer(&self) -> &wgpu::Buffer {
@@ -452,5 +403,23 @@ impl GPUBuddyBuffer {
         }
 
         block_idx
+    }
+
+    pub fn allocate_brick<F>(
+        &self, 
+        brick: MaterialBrick, 
+        device: &wgpu::Device, 
+        queue: &wgpu::Queue,
+        on_buffer_update: F,
+    ) -> Option<u64> 
+    where  F: Fn(&wgpu::Buffer),
+    {
+        match brick {
+            MaterialBrick::Size1(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
+            MaterialBrick::Size2(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
+            MaterialBrick::Size4(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
+            MaterialBrick::Size8(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
+        }
+        
     }
 }

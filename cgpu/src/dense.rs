@@ -1,4 +1,4 @@
-use game::brick::{MaterialBrick, MaterialBrick1};
+use game::brick::MaterialBrick;
 use parking_lot::RwLock;
 use std::{
     collections::BTreeMap,
@@ -9,20 +9,19 @@ use wgpu;
 #[derive(Debug, Clone, Copy)]
 struct FreeBlock {
     offset: u64,
-    size: u64,
 }
 
-pub struct DenseBuffer {
+pub struct GPUDenseBuffer {
     buffer: wgpu::Buffer,
     current_offset: AtomicU64,
     capacity: u64,
     free_blocks: RwLock<BTreeMap<u64, Vec<FreeBlock>>>,
 }
 
-impl DenseBuffer {
+impl GPUDenseBuffer {
     pub fn new(device: &wgpu::Device, capacity: u64) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Material Buffer Allocator"),
+            label: Some("Dense Buffer Allocator"),
             size: capacity,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
@@ -30,7 +29,6 @@ impl DenseBuffer {
 
         Self {
             buffer,
-            // Initialize atomic counter to 0
             current_offset: AtomicU64::new(0),
             capacity,
             free_blocks: RwLock::new(BTreeMap::new()),
@@ -93,7 +91,85 @@ impl DenseBuffer {
         free_blocks
             .entry(size)
             .or_insert_with(Vec::new)
-            .push(FreeBlock { offset, size });
+            .push(FreeBlock { offset });
+    }
+
+
+    fn try_grow<F: FnOnce(&wgpu::Buffer)>(&self, required_size: u64, on_resize: F) -> bool {
+        let current_capacity = self.capacity;
+        let new_capacity = current_capacity.checked_mul(2).unwrap_or(current_capacity);
+        
+        if new_capacity < required_size {
+            return false;
+        }
+
+        // Create new buffer
+        let new_buffer = Self::create_buffer(&self.device, new_capacity);
+
+        // Copy existing data
+        let copy_command = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Buffer Growth Copy Encoder"),
+        });
+        
+        // Copy old data to new buffer
+        copy_command.copy_buffer_to_buffer(
+            &self.buffer,
+            0,
+            &new_buffer,
+            0,
+            self.current_offset.load(Ordering::SeqCst),
+        );
+
+        // Replace old buffer with new one
+        self.buffer = new_buffer;
+        self.capacity = new_capacity;
+
+        // Notify caller about the buffer change
+        on_resize(&self.buffer);
+
+        true
+    }
+
+    fn try_shrink<F: FnOnce(&wgpu::Buffer)>(&self, on_resize: F) -> bool {
+        let current_offset = self.current_offset.load(Ordering::SeqCst);
+        let current_capacity = self.capacity;
+        
+        // Only shrink if we're using less than 25% of the buffer
+        if current_offset >= current_capacity / 4 {
+            return false;
+        }
+
+        let new_capacity = current_capacity / 2;
+        // Don't shrink below some minimum size (e.g., 1MB)
+        if new_capacity < 1024 * 1024 {
+            return false;
+        }
+
+        // Create new buffer
+        let new_buffer = Self::create_buffer(&self.device, new_capacity);
+
+        // Copy existing data
+        let copy_command = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Buffer Shrink Copy Encoder"),
+        });
+
+        // Copy old data to new buffer
+        copy_command.copy_buffer_to_buffer(
+            &self.buffer,
+            0,
+            &new_buffer,
+            0,
+            current_offset,
+        );
+
+        // Replace old buffer with new one
+        self.buffer = new_buffer;
+        self.capacity = new_capacity;
+
+        // Notify caller about the buffer change
+        on_resize(&self.buffer);
+
+        true
     }
 
     pub fn buffer(&self) -> &wgpu::Buffer {

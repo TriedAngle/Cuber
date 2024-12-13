@@ -4,13 +4,13 @@ use std::{mem, sync::Arc, time::Duration};
 
 use bytemuck::Zeroable;
 use camera::Camera;
-use dense::DenseBuffer;
+use dense::GPUDenseBuffer;
 use game::{
     brick::BrickMap,
     input::Input,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
-    sdf::{distance_field_parallel_pass, distance_field_sequential_pass},
+    sdf,
     worldgen::{GeneratedBrick, WorldGenerator},
     Diagnostics, Transform,
 };
@@ -23,9 +23,9 @@ use winit::{dpi::PhysicalSize, window::Window};
 mod buddy;
 mod camera;
 mod dense;
-mod freelist;
 mod mesh;
 mod texture;
+mod bricks;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -136,7 +136,9 @@ pub struct RenderContext {
     pub brickmap: BrickMap,
     pub brick_handle_buffer: wgpu::Buffer,
     pub brick_trace_buffer: wgpu::Buffer,
-    pub brick_buffer: DenseBuffer,
+    // pub brick_buffer: GPUBuddyBuffer,
+    pub brick_buffer: GPUDenseBuffer,
+
     // pub brick_buffer: wgpu::Buffer,
     pub palette_buffer: wgpu::Buffer,
     pub material_buffer: wgpu::Buffer,
@@ -475,9 +477,13 @@ impl RenderContext {
 
         let generator = WorldGenerator::new();
 
-        let brick_buffer = DenseBuffer::new(&device, 128 << 20);
+        // let brick_min_size = mem::size_of::<MaterialBrick1>() as u64;
+        // let brick_max_size = mem::size_of::<MaterialBrick4>() as u64;
+        // let brick_buffer = GPUBuddyBuffer::new(&device, 
+            // (brick_min_size, brick_max_size), 128 << 20);
+        let brick_buffer = GPUDenseBuffer::new(&device, 128 << 20);
 
-        let brickmap = BrickMap::new(na::Vector3::new(180, 48, 180));
+        let brickmap = BrickMap::new(na::Vector3::new(64, 48, 64));
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
@@ -486,8 +492,8 @@ impl RenderContext {
             &brickmap,
             na::Point3::zeroed(),
             na::Point3::from(dimensions),
-            na::Point3::new(90, 20, 90),
-            64,
+            na::Point3::new(32, 20, 32),
+            16,
             &material_mapping,
             |brick, _at, handle| {
                 let brick = match brick {
@@ -505,6 +511,10 @@ impl RenderContext {
                     .allocate_brick(material_brick, &queue)
                     .expect("Failed to allocate");
 
+                // let offset = brick_buffer
+                //     .allocate_brick(material_brick, &device, &queue, |_|{ })
+                //     .expect("Should have enough memory");
+
                 let palette = palette_registry.register_palette(materials);
 
                 let _ = brickmap.modify_brick(handle, |trace| {
@@ -514,7 +524,7 @@ impl RenderContext {
             },
         );
 
-        distance_field_parallel_pass(
+        sdf::distance_field_parallel_pass(
             &brickmap,
             na::Point3::zeroed(),
             na::Point3::from(dimensions),
