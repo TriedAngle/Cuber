@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
+use bytemuck::Zeroable;
 use camera::Camera;
 use dense::DenseBuffer;
 use game::{
@@ -10,7 +11,7 @@ use game::{
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
     sdf::{distance_field_parallel_pass, distance_field_sequential_pass},
-    worldgen::WorldGenerator,
+    worldgen::{GeneratedBrick, WorldGenerator},
     Diagnostics, Transform,
 };
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
@@ -476,20 +477,26 @@ impl RenderContext {
 
         let brick_buffer = DenseBuffer::new(&device, 128 << 20);
 
-        let brickmap = BrickMap::new(na::Vector3::new(32, 48, 32));
+        let brickmap = BrickMap::new(na::Vector3::new(180, 48, 180));
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
         let dimensions = brickmap.dimensions();
         generator.generate_volume(
             &brickmap,
-            na::Vector3::zeros(),
-            dimensions,
+            na::Point3::zeroed(),
+            na::Point3::from(dimensions),
+            na::Point3::new(90, 20, 90),
+            64,
             &material_mapping,
             |brick, _at, handle| {
-                if handle.is_empty() {
-                    return;
-                }
+                let brick = match brick {
+                    GeneratedBrick::Brick(material_brick) => material_brick,
+                    GeneratedBrick::Lod(_lod_material) => {
+                        return;
+                    }
+                    GeneratedBrick::None => return,
+                };
 
                 let (material_brick, materials) = brick.compress(&material_mapping);
                 let bit_size = material_brick.element_size();
@@ -507,7 +514,11 @@ impl RenderContext {
             },
         );
 
-        distance_field_parallel_pass(&brickmap, na::Vector3::zeros(), dimensions);
+        distance_field_parallel_pass(
+            &brickmap,
+            na::Point3::zeroed(),
+            na::Point3::from(dimensions),
+        );
 
         log::debug!(
             "WORLDGEN BRICK SIZE: {}, called: {}",

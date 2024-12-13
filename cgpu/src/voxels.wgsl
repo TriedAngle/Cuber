@@ -27,15 +27,14 @@ struct PbrMaterial {
     emissive: vec4<f32>,
 }
 
-// Using upper 3 bits
 const FLAG_MASK = 0xE0000000u;  // 111 in top 3 bits
 const SEEN_BIT = 0x80000000u;   // 1 in top bit
 const STATE_MASK = 0x60000000u;  // 11 in bits 30-29
 
-const STATE_EMPTY = 0x00000000u;
-const STATE_DATA = 0x20000000u;     // 01 in bits 30-29
-const STATE_UNLOADED = 0x40000000u; // 10 in bits 30-29
-const STATE_LOADING = 0x60000000u;  // 11 in bits 30-29
+const STATE_EMPTY = 0x00000000u;    // x00
+const STATE_DATA = 0x20000000u;     // x01
+const STATE_LOADING = 0x40000000u;  // x10
+const STATE_LOD = 0x60000000u;      // x11
 
 @group(0) @binding(0)
 var<uniform> uniforms: ComputeUniforms;
@@ -90,20 +89,23 @@ fn is_brick_data(id: u32) -> bool {
     return (id & STATE_MASK) == STATE_DATA;
 }
 
-fn is_brick_unloaded(id: u32) -> bool {
-    return (id & STATE_MASK) == STATE_UNLOADED;
-}
-
 fn is_brick_loading(id: u32) -> bool {
     return (id & STATE_MASK) == STATE_LOADING;
+}
+
+fn is_brick_lod(id: u32) -> bool {
+    return (id & STATE_MASK) == STATE_LOD;
 }
 
 fn get_brick_handle_offset(brick: u32) -> u32 {
     return brick & ~FLAG_MASK;
 }
 
-fn get_brick_hanlde_sdf(brick: u32) -> u32 {
-    // Extract the lower 29 bits for SDF value
+fn get_brick_handle_sdf(brick: u32) -> u32 {
+    return brick & ~FLAG_MASK;
+}
+
+fn get_material_handle(brick: u32) -> u32 {
     return brick & ~FLAG_MASK;
 }
 
@@ -275,7 +277,10 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     for (var steps = 0; steps < MAX_RAY_STEPS; steps++) {
         let brick_handle_raw = get_brick_handle(vec3<i32>(floor(map_pos)));
         let brick_handle = get_brick_handle_offset(brick_handle_raw);
+
         let is_data = is_brick_data(brick_handle_raw);
+        let is_lod = is_brick_lod(brick_handle_raw);
+
         brightness = brightness + (0.5 / f32(MAX_RAY_STEPS));
 
         if is_data {
@@ -297,8 +302,14 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
                     return hit;
                 }
             }
+        } else if is_lod {
+            let material_handle = get_material_handle(brick_handle_raw);
+            let material = materials[material_handle];
+            var hit = new_hit(true, map_pos);
+            hit.color = material.color;
+            return hit;
         } else {
-            let sdf = get_brick_hanlde_sdf(brick_handle_raw);
+            let sdf = get_brick_handle_sdf(brick_handle_raw);
             
             if sdf > 1 {
                 current_pos = current_pos + (ray_dir * f32(sdf));

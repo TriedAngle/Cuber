@@ -15,10 +15,10 @@ impl BrickHandle {
     const SEEN_BIT: u32 = 0x80000000; // 1 in top bit
     const STATE_MASK: u32 = 0x60000000; // 11 in bits 30-29
 
-    const STATE_EMPTY: u32 = 0x00000000;
-    const STATE_DATA: u32 = 0x20000000; // 01 in bits 30-29
-    const STATE_UNLOADED: u32 = 0x40000000; // 10 in bits 30-29
-    const STATE_LOADING: u32 = 0x60000000; // 11 in bits 30-29
+    const STATE_EMPTY: u32 = 0x00000000; // x00
+    const STATE_DATA: u32 = 0x20000000; // x01
+    const STATE_LOADING: u32 = 0x40000000; // x10
+    const STATE_LOD: u32 = 0x60000000; // x11
 
     const DATA_MASK: u32 = !Self::FLAG_MASK; // Lower 29 bits
 
@@ -31,21 +31,43 @@ impl BrickHandle {
     }
 
     pub fn write_data(&mut self, data: u32) {
+        let seen_bits = self.0 & Self::SEEN_BIT;
         let masked_data = data & Self::DATA_MASK;
-        self.0 = masked_data | Self::STATE_DATA;
+        self.0 = masked_data | Self::STATE_DATA | seen_bits;
     }
 
     pub fn write_sdf(&mut self, data: u32) {
+        let seen_bits = self.0 & Self::SEEN_BIT;
         let masked_data = data & Self::DATA_MASK;
-        self.0 = masked_data | Self::STATE_EMPTY;
+        self.0 = masked_data | Self::STATE_EMPTY | seen_bits;
+    }
+
+    pub fn set_loading(&mut self) {
+        let seen_bits = self.0 & Self::SEEN_BIT;
+        let data_bits = self.0 & Self::DATA_MASK;
+        self.0 = data_bits | Self::STATE_LOADING | seen_bits;
+    }
+
+    pub fn write_lod(&mut self, material: MaterialId) {
+        let seen_bits = self.0 & Self::SEEN_BIT;
+        let masked_data = material.0 & Self::DATA_MASK;
+        self.0 = masked_data | Self::STATE_LOD | seen_bits;
+    }
+
+    pub fn mark_seen(&mut self) {
+        self.0 |= Self::SEEN_BIT;
+    }
+
+    pub fn mark_unseen(&mut self) {
+        self.0 &= !Self::SEEN_BIT;
     }
 
     pub fn new(offset: u32) -> Self {
-        Self(offset | Self::STATE_DATA)
+        Self(offset | Self::STATE_DATA) // Starts as unseen (0xx)
     }
 
     pub fn is_empty(&self) -> bool {
-        (self.0 & !Self::FLAG_MASK) == 0
+        (self.0 & Self::STATE_MASK) == Self::STATE_EMPTY
     }
 
     pub fn is_seen(&self) -> bool {
@@ -56,36 +78,12 @@ impl BrickHandle {
         (self.0 & Self::STATE_MASK) == Self::STATE_DATA
     }
 
-    pub fn is_unloaded(&self) -> bool {
-        (self.0 & Self::STATE_MASK) == Self::STATE_UNLOADED
-    }
-
     pub fn is_loading(&self) -> bool {
         (self.0 & Self::STATE_MASK) == Self::STATE_LOADING
     }
 
-    pub fn set_seen(&mut self) {
-        self.0 |= Self::SEEN_BIT;
-    }
-
-    pub fn set_unseen(&mut self) {
-        self.0 &= !Self::SEEN_BIT;
-    }
-
-    pub fn set_state_empty(&mut self) {
-        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_EMPTY;
-    }
-
-    pub fn set_state_data(&mut self) {
-        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_DATA;
-    }
-
-    pub fn set_state_unloaded(&mut self) {
-        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_UNLOADED;
-    }
-
-    pub fn set_state_loading(&mut self) {
-        self.0 = (self.0 & !Self::STATE_MASK) | Self::STATE_LOADING;
+    pub fn is_lod(&self) -> bool {
+        (self.0 & Self::STATE_MASK) == Self::STATE_LOD
     }
 }
 
@@ -114,30 +112,30 @@ impl BrickMap {
         }
     }
 
-    pub fn index(&self, at: na::Vector3<u32>) -> usize {
+    pub fn index(&self, at: na::Point3<u32>) -> usize {
         let id = at.x + (at.y * self.size.x) + (at.z * self.size.x * self.size.y);
         id as usize
     }
 
-    pub fn get_handle(&self, at: na::Vector3<u32>) -> BrickHandle {
+    pub fn get_handle(&self, at: na::Point3<u32>) -> BrickHandle {
         let id = self.index(at);
         let handles = self.handles.read();
         handles[id]
     }
 
-    pub fn set_handle(&self, handle: BrickHandle, at: na::Vector3<u32>) {
+    pub fn set_handle(&self, handle: BrickHandle, at: na::Point3<u32>) {
         let id = self.index(at);
         let mut handles = self.handles.write();
         handles[id] = handle;
     }
 
-    pub fn set_empty(&self, at: na::Vector3<u32>) {
+    pub fn set_empty(&self, at: na::Point3<u32>) {
         let id = self.index(at);
         let mut handles = self.handles.write();
         handles[id] = BrickHandle::empty();
     }
 
-    pub fn is_empty(&self, at: na::Vector3<u32>) -> bool {
+    pub fn is_empty(&self, at: na::Point3<u32>) -> bool {
         let handle = self.get_handle(at);
         handle.is_empty()
     }
@@ -190,7 +188,7 @@ impl BrickMap {
         BrickHandle(offset as u32)
     }
 
-    pub fn get_or_push_brick(&self, brick: TraceBrick, at: na::Vector3<u32>) -> BrickHandle {
+    pub fn get_or_push_brick(&self, brick: TraceBrick, at: na::Point3<u32>) -> BrickHandle {
         let mut bricks = self.bricks.write();
 
         let handle = BrickHandle::new(bricks.len() as u32);

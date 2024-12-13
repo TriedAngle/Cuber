@@ -4,8 +4,8 @@ use rayon::prelude::*;
 
 pub fn distance_field_parallel_pass(
     brickmap: &BrickMap,
-    from: na::Vector3<u32>,
-    to: na::Vector3<u32>,
+    from: na::Point3<u32>,
+    to: na::Point3<u32>,
 ) {
     let coords: Vec<_> = (from.x..to.x)
         .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
@@ -14,7 +14,7 @@ pub fn distance_field_parallel_pass(
     let boundary_points: Vec<_> = coords
         .par_iter()
         .filter_map(|&(x, y, z)| {
-            let at = na::Vector3::<u32>::new(x, y, z);
+            let at = na::Point3::<u32>::new(x, y, z);
             let brick = brickmap.get_handle(at);
 
             if !brick.is_empty() {
@@ -40,7 +40,7 @@ pub fn distance_field_parallel_pass(
                 {
                     return false;
                 }
-                let nat = na::Vector3::<u32>::new(nx, ny, nz);
+                let nat = na::Point3::<u32>::new(nx, ny, nz);
                 let neighbor = brickmap.get_handle(nat);
                 !neighbor.is_empty()
             });
@@ -61,12 +61,12 @@ pub fn distance_field_parallel_pass(
     coords
         .par_iter()
         .filter(|&&coord| {
-            let at = na::Vector3::<u32>::new(coord.0, coord.1, coord.2);
+            let at = na::Point3::<u32>::new(coord.0, coord.1, coord.2);
             let brick = brickmap.get_handle(at);
             brick.is_empty() && !boundary_points.contains(&coord)
         })
         .for_each(|&(x, y, z)| {
-            let at = na::Vector3::<u32>::new(x, y, z);
+            let at = na::Point3::<u32>::new(x, y, z);
             let brick = brickmap.get_handle(at);
 
             // Chebyshev distance
@@ -93,8 +93,8 @@ pub fn distance_field_parallel_pass(
 
 pub fn distance_field_sequential_pass(
     brickmap: &BrickMap,
-    from: na::Vector3<u32>,
-    to: na::Vector3<u32>,
+    from: na::Point3<u32>,
+    to: na::Point3<u32>,
 ) {
     let coords: Vec<_> = (from.x..to.x)
         .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
@@ -102,7 +102,7 @@ pub fn distance_field_sequential_pass(
 
     let mut boundary_points = Vec::new();
     for &(x, y, z) in &coords {
-        let at = na::Vector3::<u32>::new(x, y, z);
+        let at = na::Point3::<u32>::new(x, y, z);
         let brick = brickmap.get_handle(at);
 
         if !brick.is_empty() {
@@ -122,7 +122,7 @@ pub fn distance_field_sequential_pass(
             if nx < from.x || nx >= to.x || ny < from.y || ny >= to.y || nz < from.z || nz >= to.z {
                 return false;
             }
-            let nat = na::Vector3::<u32>::new(nx, ny, nz);
+            let nat = na::Point3::<u32>::new(nx, ny, nz);
             let neighbor = brickmap.get_handle(nat);
             !neighbor.is_empty()
         });
@@ -136,7 +136,7 @@ pub fn distance_field_sequential_pass(
     }
 
     for &(x, y, z) in &coords {
-        let at = na::Vector3::<u32>::new(x, y, z);
+        let at = na::Point3::<u32>::new(x, y, z);
         let brick = brickmap.get_handle(at);
 
         if !brick.is_empty() || boundary_points.contains(&(x, y, z)) {
