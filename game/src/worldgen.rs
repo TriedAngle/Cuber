@@ -57,6 +57,56 @@ impl WorldGenerator {
         generator
     }
 
+    fn get_block_material(
+        &self,
+        materials: &ExpandedMaterialMapping,
+        x: f32,
+        y: i32,
+        z: f32,
+    ) -> u8 {
+        let air = materials.get("air");
+        let stone = materials.get("stone");
+        let bedrock = materials.get("bedrock");
+        let dirt = materials.get("dirt");
+        let grass = materials.get("grass");
+        let snow = materials.get("snow");
+
+        let continent_val = self.continent_noise.get_noise_2d(x, z);
+        let terrain_val = self.terrain_noise.get_noise_2d(x, z);
+        let final_height = (100.0 + (continent_val * 150.0) + (terrain_val * 180.0).round()) as i32;
+        let height_diff = final_height - y;
+
+        if y == 0 {
+            bedrock
+        } else if y == final_height {
+            if final_height >= 200 {
+                snow
+            } else {
+                grass
+            }
+        } else if y <= final_height {
+            if height_diff <= 3 {
+                dirt
+            } else {
+                let cave_val = self.cave_noise.get_noise_3d(x, y as f32, z);
+                let cave_val = (cave_val + 1.0) / 2.0;
+
+                if (0.7 > cave_val && cave_val > 0.5) && height_diff > 6 {
+                    air
+                } else if ((0.72 >= cave_val && cave_val >= 0.7)
+                    || (0.5 >= cave_val && cave_val >= 0.48))
+                    && height_diff > 6
+                {
+                    bedrock
+                } else {
+                    stone
+                }
+            }
+        } else {
+            air
+        }
+    }
+
     pub fn generate_chunk(
         &self,
         materials: &ExpandedMaterialMapping,
@@ -69,61 +119,15 @@ impl WorldGenerator {
         let world_y = chunk_y as f32 * 8.0;
         let world_z = chunk_z as f32 * 8.0;
 
-        // Get local IDs
-        let air_id = materials.get("air");
-        let stone_id = materials.get("stone");
-        let bedrock_id = materials.get("bedrock");
-        let dirt_id = materials.get("dirt");
-        let grass_id = materials.get("grass");
-        let snow_id = materials.get("snow");
-
-        // Generation logic remains the same but uses local IDs
         for z in 0..8 {
             for x in 0..8 {
-                let sample_x = world_x + x as f32;
-                let sample_z = world_z + z as f32;
-
-                let continent_val = self.continent_noise.get_noise_2d(sample_x, sample_z);
-                let terrain_val = self.terrain_noise.get_noise_2d(sample_x, sample_z);
-
-                let final_height =
-                    (100.0 + (continent_val * 150.0) + (terrain_val * 180.0).round()) as i32;
-
                 for y in 0..8 {
-                    let world_block_y = world_y as i32 + y as i32;
-                    let height_diff = final_height - world_block_y;
-                    let mut block_material = air_id;
+                    let sample_x = world_x + x as f32;
+                    let sample_y = world_y as i32 + y as i32;
+                    let sample_z = world_z + z as f32;
 
-                    if world_block_y == 0 {
-                        block_material = bedrock_id;
-                    } else if world_block_y == final_height {
-                        block_material = grass_id;
-                        if final_height >= 200 {
-                            block_material = snow_id;
-                        }
-                    } else if world_block_y <= final_height {
-                        block_material = stone_id;
-                        if height_diff <= 3 {
-                            block_material = dirt_id;
-                        }
-                    }
-
-                    if block_material == stone_id {
-                        let cave_val =
-                            self.cave_noise
-                                .get_noise_3d(sample_x, world_block_y as f32, sample_z);
-                        let cave_val = (cave_val + 1.0) / 2.0;
-                        if (0.7 > cave_val && cave_val > 0.5) && height_diff > 6 {
-                            block_material = air_id;
-                        }
-                        if ((0.72 >= cave_val && cave_val >= 0.7)
-                            || (0.5 >= cave_val && cave_val >= 0.48))
-                            && height_diff > 6
-                        {
-                            block_material = bedrock_id
-                        }
-                    }
-
+                    let block_material =
+                        self.get_block_material(materials, sample_x, sample_y, sample_z);
                     brick.set(x, y, z, block_material);
                 }
             }
@@ -146,7 +150,6 @@ impl WorldGenerator {
             .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
             .collect();
 
-        // Process chunks in parallel
         coords.par_iter().for_each(|&(x, y, z)| {
             let expanded_brick = self.generate_chunk(materials, x, y, z);
             let brick = expanded_brick.to_trace_brick();

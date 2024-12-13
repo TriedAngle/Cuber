@@ -476,7 +476,7 @@ impl RenderContext {
 
         let brick_buffer = DenseBuffer::new(&device, 128 << 20);
 
-        let brickmap = BrickMap::new(na::Vector3::new(128, 64, 128));
+        let brickmap = BrickMap::new(na::Vector3::new(32, 48, 32));
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
