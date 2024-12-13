@@ -474,14 +474,9 @@ impl RenderContext {
 
         let generator = WorldGenerator::new();
 
-        // let min_size = mem::size_of::<MaterialBrick1>() as u64;
-        // let max_size = mem::size_of::<MaterialBrick8>() as u64;
-        // let brick_buffer = GPUBuddyBuffer::new(&device, (min_size, max_size), 512 << 20);
         let brick_buffer = DenseBuffer::new(&device, 128 << 20);
 
-        // let bricks = RwLock::new(Vec::<u8>::new());
-
-        let brickmap = BrickMap::new(na::Vector3::new(64, 64, 64));
+        let brickmap = BrickMap::new(na::Vector3::new(128, 64, 128));
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
@@ -512,7 +507,6 @@ impl RenderContext {
             },
         );
 
-        // SDF pass:
         distance_field_parallel_pass(&brickmap, na::Vector3::zeros(), dimensions);
 
         log::debug!(

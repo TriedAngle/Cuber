@@ -225,7 +225,6 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
     var side_dist = ((map_pos - ray_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
     var mask = world_mask;
 
-    var steps = 0u;
     while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) { 
         brightness = brightness + 0.001;
         let vox = get_trace_voxel(brick_handle, vec3<i32>(map_pos));
@@ -241,14 +240,12 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
 
             var hit = new_hit(true, mask);
             hit.pos = vec4<f32>(floor(map_pos) / 8.0, 1.0);
-            // hit.color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
             hit.color = material.color;
             return hit;
         }
         mask = step_mask(side_dist);
         map_pos += mask * ray_sign;
         side_dist += mask * ray_sign * delta_dist;
-        steps = steps + 1;
     }
 
     return new_hit(false, vec3<f32>(0.0));
@@ -275,23 +272,21 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     var side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
     var mask = step_mask(side_dist);
     
-    var steps = 0;
-    for (var i = 0; i < MAX_RAY_STEPS; i++) {
+    for (var steps = 0; steps < MAX_RAY_STEPS; steps++) {
         let brick_handle_raw = get_brick_handle(vec3<i32>(floor(map_pos)));
         let brick_handle = get_brick_handle_offset(brick_handle_raw);
         let is_data = is_brick_data(brick_handle_raw);
         brightness = brightness + (0.5 / f32(MAX_RAY_STEPS));
 
         if is_data {
-            // Process solid brick as before
             if all(map_pos >= vec3<f32>(0.0)) {
-                let sub = ((map_pos - current_pos) + 0.5 - (ray_sign * 0.5)) * delta_dist;
+                let sub = ((map_pos - ray_pos) + 0.5 - (ray_sign * 0.5)) * delta_dist;
                 let d = max(sub.x, max(sub.y, sub.z));
-                let intersect = current_pos + (ray_dir * d);
+                let intersect = ray_pos + (ray_dir * d);
                 var sub_space = intersect - map_pos;
 
-                if all(map_pos == floor(current_pos)) {
-                    sub_space = current_pos - map_pos;
+                if all(map_pos == floor(ray_pos)) {
+                    sub_space = ray_pos - map_pos;
                 }
 
                 var hit = trace_brick(brick_handle, sub_space * 8.0, ray_dir, mask);
@@ -310,16 +305,18 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
                 
                 map_pos = floor(current_pos);
                 side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
-                mask = step_mask(side_dist);
-                
+                mask = step_mask(side_dist);                
                 continue;
             }
         }
 
         mask = step_mask(side_dist);
+        
+        let t = min(side_dist.x, min(side_dist.y, side_dist.z));
+        current_pos = current_pos + (ray_dir * t);
+        
         map_pos = map_pos + (mask * ray_sign);
-        side_dist = side_dist + (mask * ray_sign * delta_dist);
-        steps = steps + 1;
+        side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
 
         if any(map_pos >= world_max) || any(map_pos < world_min) {
             break;
