@@ -1,5 +1,5 @@
 #![allow(unused)]
-use game::brick::MaterialBrick;
+use game::{brick::MaterialBrick, material::MaterialId};
 use parking_lot::RwLock;
 use std::{
     collections::BTreeMap,
@@ -55,17 +55,14 @@ impl GPUDenseBuffer {
             return false;
         }
 
-        // Create new buffer
         let new_buffer = Self::create_buffer(&self.device, new_capacity);
 
-        // Copy existing data
         let mut copy_command =
             self.device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Buffer Growth Copy Encoder"),
                 });
 
-        // Copy old data to new buffer
         copy_command.copy_buffer_to_buffer(
             &self.buffer.read(),
             0,
@@ -74,14 +71,11 @@ impl GPUDenseBuffer {
             self.current_offset.load(Ordering::SeqCst),
         );
 
-        // Submit copy command
         self.queue.submit(Some(copy_command.finish()));
 
-        // Update buffer and capacity
         *self.buffer.write() = new_buffer;
         self.capacity.store(new_capacity, Ordering::Release);
 
-        // Notify caller about the buffer change
         on_resize(&self.buffer.read());
 
         true
@@ -91,38 +85,30 @@ impl GPUDenseBuffer {
         let current_offset = self.current_offset.load(Ordering::SeqCst);
         let current_capacity = self.capacity.load(Ordering::Relaxed);
 
-        // Only shrink if we're using less than 25% of the buffer
         if current_offset >= current_capacity / 4 {
             return false;
         }
 
         let new_capacity = current_capacity / 2;
-        // Don't shrink below some minimum size (e.g., 1MB)
         if new_capacity < 1024 * 1024 {
             return false;
         }
 
-        // Create new buffer
         let new_buffer = Self::create_buffer(&self.device, new_capacity);
 
-        // Copy existing data
         let mut copy_command =
             self.device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Buffer Shrink Copy Encoder"),
                 });
 
-        // Copy old data to new buffer
         copy_command.copy_buffer_to_buffer(&self.buffer.read(), 0, &new_buffer, 0, current_offset);
 
-        // Submit copy command
         self.queue.submit(Some(copy_command.finish()));
 
-        // Update buffer and capacity
         *self.buffer.write() = new_buffer;
         self.capacity.store(new_capacity, Ordering::Release);
 
-        // Notify caller about the buffer change
         on_resize(&self.buffer.read());
 
         true
@@ -135,19 +121,15 @@ impl GPUDenseBuffer {
             return Some(block.offset);
         }
 
-        // Atomically increment the offset and get the previous value
         let current = self.current_offset.fetch_add(size, Ordering::SeqCst);
         let capacity = self.capacity.load(Ordering::Acquire);
 
         if current + size <= capacity {
             Some(current)
         } else {
-            // Rollback the allocation
             self.current_offset.fetch_sub(size, Ordering::SeqCst);
 
-            // Try to grow the buffer
             if self.try_grow(current + size, on_resize) {
-                // Retry allocation after growth
                 let new_current = self.current_offset.fetch_add(size, Ordering::SeqCst);
                 Some(new_current)
             } else {
@@ -176,7 +158,6 @@ impl GPUDenseBuffer {
             .or_insert_with(Vec::new)
             .push(FreeBlock { offset });
 
-        // Try to shrink after deallocation
         self.try_shrink(on_resize);
     }
 
@@ -199,6 +180,155 @@ impl GPUDenseBuffer {
         Some(offset)
     }
 
+    pub fn allocate_many<T, F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        count: usize,
+        on_resize: F,
+    ) -> Option<Vec<u64>> {
+        let size = std::mem::size_of::<T>() as u64;
+        let total_size = size.checked_mul(count as u64)?;
+
+        let mut offsets = Vec::with_capacity(count);
+        {
+            let mut free_blocks = self.free_blocks.write();
+            if let Some((&_block_size, blocks)) = free_blocks.range_mut(size..).next() {
+                while offsets.len() < count && !blocks.is_empty() {
+                    offsets.push(blocks.remove(blocks.len() - 1).offset);
+                }
+            }
+        }
+
+        let remaining = count - offsets.len();
+        if remaining > 0 {
+            let remaining_size = size * remaining as u64;
+            let current = self
+                .current_offset
+                .fetch_add(remaining_size, Ordering::SeqCst);
+            let capacity = self.capacity.load(Ordering::Acquire);
+
+            if current + remaining_size > capacity {
+                self.current_offset
+                    .fetch_sub(remaining_size, Ordering::SeqCst);
+
+                if !self.try_grow(current + remaining_size, on_resize) {
+                    return None;
+                }
+
+                let new_current = self
+                    .current_offset
+                    .fetch_add(remaining_size, Ordering::SeqCst);
+                for i in 0..remaining {
+                    offsets.push(new_current + (i as u64 * size));
+                }
+            } else {
+                for i in 0..remaining {
+                    offsets.push(current + (i as u64 * size));
+                }
+            }
+        }
+
+        Some(offsets)
+    }
+
+    pub fn write_many<T: bytemuck::Pod>(&self, offsets: &[u64], data: &[T]) {
+        assert_eq!(offsets.len(), data.len(), "Offset and data length mismatch");
+
+        for (offset, item) in offsets.iter().zip(data.iter()) {
+            self.queue.write_buffer(
+                &self.buffer.read(),
+                *offset,
+                bytemuck::cast_slice(std::slice::from_ref(item)),
+            );
+        }
+        self.queue.submit([]);
+    }
+
+    pub fn allocate_and_write_many<T: bytemuck::Pod, F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        data: &[T],
+        on_resize: F,
+    ) -> Option<Vec<u64>> {
+        let offsets = self.allocate_many::<T, F>(data.len(), on_resize)?;
+        self.write_many(&offsets, data);
+        Some(offsets)
+    }
+
+    pub fn allocate_dense<T, F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        count: usize,
+        on_resize: F,
+    ) -> Option<u64> {
+        let size = std::mem::size_of::<T>() as u64;
+        let total_size = size.checked_mul(count as u64)?;
+
+        {
+            let mut free_blocks = self.free_blocks.write();
+            if let Some((&_block_size, blocks)) = free_blocks.range_mut(total_size..).next() {
+                if !blocks.is_empty() {
+                    return Some(blocks.remove(blocks.len() - 1).offset);
+                }
+            }
+        }
+
+        let current = self.current_offset.fetch_add(total_size, Ordering::SeqCst);
+        let capacity = self.capacity.load(Ordering::Acquire);
+
+        if current + total_size <= capacity {
+            Some(current)
+        } else {
+            // Revert the offset change
+            self.current_offset.fetch_sub(total_size, Ordering::SeqCst);
+
+            // Try to grow the buffer
+            if self.try_grow(current + total_size, on_resize) {
+                let new_current = self.current_offset.fetch_add(total_size, Ordering::SeqCst);
+                Some(new_current)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn write_dense<T: bytemuck::Pod>(&self, offset: u64, data: &[T]) {
+        self.queue
+            .write_buffer(&self.buffer.read(), offset, bytemuck::cast_slice(data));
+        self.queue.submit([]);
+    }
+
+    pub fn allocate_and_write_dense<T: bytemuck::Pod, F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        data: &[T],
+        on_resize: F,
+    ) -> Option<u64> {
+        let offset = self.allocate_dense::<T, F>(data.len(), on_resize)?;
+        self.write_dense(offset, data);
+        Some(offset)
+    }
+
+    pub fn deallocate_dense<T, F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        offset: u64,
+        count: usize,
+        on_resize: F,
+    ) {
+        let size = std::mem::size_of::<T>() as u64;
+        let total_size = size.checked_mul(count as u64).unwrap();
+
+        let mut free_blocks = self.free_blocks.write();
+        free_blocks
+            .entry(total_size)
+            .or_insert_with(Vec::new)
+            .push(FreeBlock { offset });
+
+        self.try_shrink(on_resize);
+    }
+
+    pub fn clear(&self) {
+        self.current_offset.store(0, Ordering::SeqCst);
+
+        self.free_blocks.write().clear();
+    }
+
     pub fn buffer(&self) -> &wgpu::Buffer {
         unsafe { self.buffer.data_ptr().as_ref().unwrap() }
     }
@@ -214,5 +344,13 @@ impl GPUDenseBuffer {
             MaterialBrick::Size4(b) => self.allocate_and_write(&b, on_resize),
             MaterialBrick::Size8(b) => self.allocate_and_write(&b, on_resize),
         }
+    }
+
+    pub fn allocate_palette<F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        palette: &[MaterialId],
+        on_resize: F,
+    ) -> Option<u64> {
+        self.allocate_and_write_dense(palette, on_resize)
     }
 }

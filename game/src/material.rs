@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use parking_lot::RwLock;
 
-// #[repr(C)]
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialId(pub u32);
 

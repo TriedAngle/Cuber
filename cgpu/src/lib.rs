@@ -14,6 +14,7 @@ use game::{
     worldgen::{GeneratedBrick, WorldGenerator},
     Diagnostics, Transform,
 };
+use materials::MaterialState;
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use parking_lot::Mutex;
 use texture::Texture;
@@ -25,6 +26,7 @@ mod buddy;
 mod camera;
 mod dense;
 mod freelist;
+mod materials;
 mod mesh;
 mod texture;
 
@@ -136,12 +138,7 @@ pub struct RenderContext {
 
     pub brickmap: Arc<BrickMap>,
     pub brick_state: BrickState,
-
-    pub material_bind_group: wgpu::BindGroup,
-
-    // pub brick_buffer: wgpu::Buffer,
-    pub palette_buffer: wgpu::Buffer,
-    pub material_buffer: wgpu::Buffer,
+    pub material_state: MaterialState,
 
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
@@ -464,18 +461,18 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let material_registry = MaterialRegistry::new();
-        material_registry.register_default_materials();
+        let palettes = Arc::new(PaletteRegistry::new());
+
+        let materials = Arc::new(MaterialRegistry::new());
+        materials.register_default_materials();
 
         let mut material_mapping = ExpandedMaterialMapping::new();
-        material_mapping.add_from_registry(&material_registry, "air", 0);
-        material_mapping.add_from_registry(&material_registry, "stone", 1);
-        material_mapping.add_from_registry(&material_registry, "bedrock", 2);
-        material_mapping.add_from_registry(&material_registry, "dirt", 3);
-        material_mapping.add_from_registry(&material_registry, "grass", 4);
-        material_mapping.add_from_registry(&material_registry, "snow", 5);
-
-        let palette_registry = PaletteRegistry::new();
+        material_mapping.add_from_registry(&materials, "air", 0);
+        material_mapping.add_from_registry(&materials, "stone", 1);
+        material_mapping.add_from_registry(&materials, "bedrock", 2);
+        material_mapping.add_from_registry(&materials, "dirt", 3);
+        material_mapping.add_from_registry(&materials, "grass", 4);
+        material_mapping.add_from_registry(&materials, "snow", 5);
 
         let generator = WorldGenerator::new();
 
@@ -483,6 +480,14 @@ impl RenderContext {
 
         let brick_state =
             BrickState::new(brickmap.clone(), device.clone(), queue.clone(), 128 << 20);
+
+        let material_state = MaterialState::new(
+            palettes.clone(),
+            materials.clone(),
+            device.clone(),
+            queue.clone(),
+            128 << 20,
+        );
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
@@ -505,7 +510,7 @@ impl RenderContext {
 
                 let (material_brick, materials) = brick.compress(&material_mapping);
 
-                let palette = palette_registry.register_palette(materials);
+                let palette = palettes.register_palette(materials);
 
                 let _ = brick_state.allocate_brick(material_brick, handle, palette);
             },
@@ -526,17 +531,8 @@ impl RenderContext {
             counted.lock()
         );
 
-        let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Material Buffer"),
-            contents: bytemuck::cast_slice(material_registry.materials()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
-        let palette_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Palette Buffer"),
-            contents: bytemuck::cast_slice(palette_registry.palette_data()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        material_state.update_all_materials();
+        material_state.update_all_palettes();
 
         let mut compute_uniforms = ComputeUniforms::new(
             [size.width as f32, size.height as f32],
@@ -580,48 +576,6 @@ impl RenderContext {
             compare: None,
             ..Default::default()
         }));
-
-        let material_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Brick Bind Group Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let material_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Compute Bind Group"),
-            layout: &material_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: palette_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: material_buffer.as_entire_binding(),
-                },
-            ],
-        });
 
         let compute_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -684,7 +638,7 @@ impl RenderContext {
                 label: Some("Compute Pipeline Layout"),
                 bind_group_layouts: &[
                     &compute_bind_group_layout,
-                    &material_bind_group_layout,
+                    &material_state.layout(),
                     &brick_state.layout(),
                 ],
                 push_constant_ranges: &[],
@@ -777,7 +731,6 @@ impl RenderContext {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Depth Texture Bind Group Layout"),
                 entries: &[
-                    // Depth Texture
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -788,7 +741,6 @@ impl RenderContext {
                         },
                         count: None,
                     },
-                    // Sampler
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -895,9 +847,7 @@ impl RenderContext {
             query_staging_buffer,
             brickmap,
             brick_state,
-            material_buffer,
-            palette_buffer,
-            material_bind_group,
+            material_state,
             compute_uniforms,
             compute_uniforms_buffer,
             compute_bind_group,
@@ -1012,7 +962,7 @@ impl RenderContext {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-            compute_pass.set_bind_group(1, &self.material_bind_group, &[]);
+            compute_pass.set_bind_group(1, &self.material_state.bind_group(), &[]);
             compute_pass.set_bind_group(2, &self.brick_state.bind_group(), &[]);
             compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
         }

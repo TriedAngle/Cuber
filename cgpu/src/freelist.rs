@@ -249,10 +249,9 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        on_resize(&new_buffer);
-
         *self.buffer.write() = new_buffer;
         *capacity = new_capacity;
+        on_resize(&self.buffer.read());
         Some(())
     }
 
@@ -307,10 +306,10 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        on_resize(&new_buffer);
-
         *self.buffer.write() = new_buffer;
         *self.capacity.write() = new_capacity;
+
+        on_resize(&self.buffer.read());
 
         let mut free_list = self.free_list.write();
         free_list.retain(|&index| index < new_capacity);
