@@ -2,12 +2,11 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
+use bricks::BrickState;
 use bytemuck::Zeroable;
 use camera::Camera;
-use dense::GPUDenseBuffer;
-use freelist::GPUFreeListBuffer;
 use game::{
-    brick::{BrickMap, TraceBrick},
+    brick::BrickMap,
     input::Input,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
@@ -21,13 +20,13 @@ use texture::Texture;
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
+mod bricks;
 mod buddy;
 mod camera;
 mod dense;
+mod freelist;
 mod mesh;
 mod texture;
-mod bricks;
-mod freelist;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -135,17 +134,15 @@ pub struct RenderContext {
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
 
-    pub brickmap: BrickMap,
-    pub brick_handle_buffer: wgpu::Buffer,
-    pub brick_trace_buffer: GPUFreeListBuffer<TraceBrick>,
-    // pub brick_buffer: GPUBuddyBuffer,
-    pub brick_buffer: GPUDenseBuffer,
+    pub brickmap: Arc<BrickMap>,
+    pub brick_state: BrickState,
+
+    pub material_bind_group: wgpu::BindGroup,
 
     // pub brick_buffer: wgpu::Buffer,
     pub palette_buffer: wgpu::Buffer,
     pub material_buffer: wgpu::Buffer,
 
-    brickmap_bind_group: wgpu::BindGroup,
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
     compute_bind_group: wgpu::BindGroup,
@@ -482,13 +479,10 @@ impl RenderContext {
 
         let generator = WorldGenerator::new();
 
-        // let brick_min_size = mem::size_of::<MaterialBrick1>() as u64;
-        // let brick_max_size = mem::size_of::<MaterialBrick4>() as u64;
-        // let brick_buffer = GPUBuddyBuffer::new(&device, 
-            // (brick_min_size, brick_max_size), 128 << 20);
-        let brick_buffer = GPUDenseBuffer::new(device.clone(), queue.clone(), 128 << 20);
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(64, 48, 64)));
 
-        let brickmap = BrickMap::new(na::Vector3::new(64, 48, 64));
+        let brick_state =
+            BrickState::new(brickmap.clone(), device.clone(), queue.clone(), 128 << 20);
 
         let total = Mutex::new(0);
         let counted = Mutex::new(0);
@@ -510,22 +504,10 @@ impl RenderContext {
                 };
 
                 let (material_brick, materials) = brick.compress(&material_mapping);
-                let bit_size = material_brick.element_size();
-
-                let offset = brick_buffer
-                    .allocate_brick(material_brick, |_|{})
-                    .expect("Failed to allocate");
-
-                // let offset = brick_buffer
-                //     .allocate_brick(material_brick, &device, &queue, |_|{ })
-                //     .expect("Should have enough memory");
 
                 let palette = palette_registry.register_palette(materials);
 
-                let _ = brickmap.modify_brick(handle, |trace| {
-                    trace.set_brick_info(bit_size as u32 - 1, offset as u32);
-                    trace.set_palette(palette);
-                });
+                let _ = brick_state.allocate_brick(material_brick, handle, palette);
             },
         );
 
@@ -535,32 +517,14 @@ impl RenderContext {
             na::Point3::from(dimensions),
         );
 
+        brick_state.update_all_handles();
+        brick_state.update_all_bricks();
+
         log::debug!(
             "WORLDGEN BRICK SIZE: {}, called: {}",
             total.lock(),
             counted.lock()
         );
-
-        let brick_handle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Brick Handle Buffer"),
-            contents: bytemuck::cast_slice(&brickmap.handles()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
-        let brick_trace_buffer = GPUFreeListBuffer::new(
-            device.clone(), 
-            queue.clone(), 
-        120, 
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, 
-            |_|{},
-        );
-
-        brick_trace_buffer.allocate_write_many(brickmap.bricks());
-        // let brick_trace_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        //     label: Some("Brick Trace Buffer"),
-        //     contents: bytemuck::cast_slice(brickmap.bricks()),
-        //     usage: wgpu::BufferUsages::STORAGE,
-        // });
 
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Material Buffer"),
@@ -617,7 +581,7 @@ impl RenderContext {
             ..Default::default()
         }));
 
-        let brickmap_bind_group_layout =
+        let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Brick Bind Group Layout"),
                 entries: &[
@@ -625,7 +589,7 @@ impl RenderContext {
                         binding: 0,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -641,62 +605,20 @@ impl RenderContext {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                 ],
             });
 
-        let brickmap_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let material_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Compute Bind Group"),
-            layout: &brickmap_bind_group_layout,
+            layout: &material_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: brick_handle_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: brick_trace_buffer.buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
                     resource: palette_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 1,
                     resource: material_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: brick_buffer.buffer().as_entire_binding(),
                 },
             ],
         });
@@ -760,7 +682,11 @@ impl RenderContext {
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Compute Pipeline Layout"),
-                bind_group_layouts: &[&compute_bind_group_layout, &brickmap_bind_group_layout],
+                bind_group_layouts: &[
+                    &compute_bind_group_layout,
+                    &material_bind_group_layout,
+                    &brick_state.layout(),
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -968,16 +894,10 @@ impl RenderContext {
             query_buffer,
             query_staging_buffer,
             brickmap,
-            brick_handle_buffer,
-            brick_trace_buffer,
-            brick_buffer,
+            brick_state,
             material_buffer,
             palette_buffer,
-            // brick1_buffer,
-            // brick2_buffer,
-            // brick4_buffer,
-            // brick8_buffer,
-            brickmap_bind_group,
+            material_bind_group,
             compute_uniforms,
             compute_uniforms_buffer,
             compute_bind_group,
@@ -1036,8 +956,6 @@ impl RenderContext {
             query_buffer_size,
         );
 
-        self.collect_mark_unread(&mut encoder);
-
         self.queue.submit([encoder.finish()]);
 
         output.present();
@@ -1068,28 +986,6 @@ impl RenderContext {
         self.query_staging_buffer.unmap();
     }
 
-    pub fn collect_mark_unread(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        //     {
-        //         let buffer_slice = self.brick_handle_buffer.slice(..);
-        //         buffer_slice.map_async(wgpu::MapMode::Write, |_| {});
-        //         self.queue.submit([]);
-        //         self.device.poll(wgpu::Maintain::Wait);
-        //
-        //         let mut data = buffer_slice.get_mapped_range_mut();
-        //         let handles: &mut [BrickHandle] = bytemuck::cast_slice_mut(&mut data);
-        //         let mut unread = Vec::new();
-        //         for handle in handles {
-        //             if !handle.is_read() {
-        //                 unread.push(*handle);
-        //             }
-        //             handle.set_unread();
-        //         }
-        //         println!("unread: {:?}", unread.len());
-        //     }
-        //     self.brick_handle_buffer.unmap();
-        // }
-    }
-
     pub fn render(&mut self) {
         let encoder = self.encoder.as_mut().expect("Render must be prepared");
         let output = self
@@ -1116,7 +1012,8 @@ impl RenderContext {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-            compute_pass.set_bind_group(1, &self.brickmap_bind_group, &[]);
+            compute_pass.set_bind_group(1, &self.material_bind_group, &[]);
+            compute_pass.set_bind_group(2, &self.brick_state.bind_group(), &[]);
             compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
         }
 

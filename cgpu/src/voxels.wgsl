@@ -45,20 +45,23 @@ var OutputTexture: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2)
 var DepthTexture: texture_storage_2d<r32float, write>;
 
+
 @group(1) @binding(0)
-var<storage, read_write> handles: array<u32>;
-
-@group(1) @binding(1)
-var<storage, read> trace_bricks: array<TraceBrick>;
-
-@group(1) @binding(2)
 var<storage, read> palettes: array<u32>;
 
-@group(1) @binding(3)
+@group(1) @binding(1)
 var<storage, read> materials: array<PbrMaterial>;
 
-@group(1) @binding(4)
+
+@group(2) @binding(0)
+var<storage, read_write> handles: array<u32>;
+
+@group(2) @binding(1)
+var<storage, read> trace_bricks: array<TraceBrick>;
+
+@group(2) @binding(2)
 var<storage, read> bricks: array<u32>;
+
 
 var<private> brightness: f32 = 0.0;
 
@@ -69,15 +72,13 @@ struct Hit {
     color: vec4<f32>,
 }
 
-fn new_hit(hit: bool, mask: vec3<f32>) -> Hit { 
+fn new_hit(hit: bool, mask: vec3<f32>) -> Hit {
     return Hit(hit, mask, vec4<f32>(0.0), vec4<f32>(0.0));
 }
 
 fn brick_index(pos: vec3<i32>) -> u32 {
     return u32(
-        pos.x + 
-        pos.y * uniforms.brick_grid_dimension.x + 
-        pos.z * (uniforms.brick_grid_dimension.x * uniforms.brick_grid_dimension.y)
+        pos.x + pos.y * uniforms.brick_grid_dimension.x + pos.z * (uniforms.brick_grid_dimension.x * uniforms.brick_grid_dimension.y)
     );
 }
 
@@ -116,8 +117,8 @@ fn set_brick_seen(pos: vec3<i32>) {
     handles[idx] = id;
 }
 
-fn get_brick_handle(pos: vec3<i32>) -> u32 { 
-    if (any(pos < vec3<i32>(0)) || any(pos >= uniforms.brick_grid_dimension)) {
+fn get_brick_handle(pos: vec3<i32>) -> u32 {
+    if any(pos < vec3<i32>(0)) || any(pos >= uniforms.brick_grid_dimension) {
         return 0u;
     }
 
@@ -127,9 +128,7 @@ fn get_brick_handle(pos: vec3<i32>) -> u32 {
 }
 
 fn get_trace_voxel(id: u32, local_pos: vec3<i32>) -> bool {
-    let voxel_idx = local_pos.x 
-            + local_pos.y * CHUNK_SIZE 
-            + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
+    let voxel_idx = local_pos.x + local_pos.y * CHUNK_SIZE + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
     let u32_index = voxel_idx / 32;
     let bit_index = voxel_idx % 32;
     let voxel_data = trace_bricks[id].raw[u32(u32_index)];
@@ -140,9 +139,7 @@ fn get_brick_voxel(brick_handle: u32, local_pos: vec3<i32>) -> u32 {
     let format = (brick_handle >> 29u) & 0x7u;
     let byte_offset = brick_handle & 0x1FFFFFFFu;
 
-    let voxel_idx = local_pos.x 
-        + local_pos.y * CHUNK_SIZE 
-        + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
+    let voxel_idx = local_pos.x + local_pos.y * CHUNK_SIZE + local_pos.z * CHUNK_SIZE * CHUNK_SIZE;
 
     var element_idx: u32;
     var bit_offset: u32;
@@ -177,45 +174,45 @@ fn get_brick_voxel(brick_handle: u32, local_pos: vec3<i32>) -> u32 {
     }
 
     let packed_value = bricks[element_idx];
-    
+
     return (packed_value >> bit_offset) & mask;
 }
 
-fn sd_sphere(p: vec3<f32>, d: f32) -> f32 { 
+fn sd_sphere(p: vec3<f32>, d: f32) -> f32 {
     return length(p) - d;
 }
 
-fn sd_box(p: vec3<f32>, b: vec3<f32>) -> f32 { 
+fn sd_box(p: vec3<f32>, b: vec3<f32>) -> f32 {
     let d = abs(p) - b;
     return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, vec3<f32>(0.0)));
 }
 
-fn step_mask(sideDist : vec3<f32>) -> vec3<f32> {
-    var mask : vec3<bool>;
+fn step_mask(sideDist: vec3<f32>) -> vec3<f32> {
+    var mask: vec3<bool>;
     let b1 = sideDist < sideDist.yzx;
     let b2 = sideDist <= sideDist.zxy;
-    
+
     mask.z = b1.z && b2.z;
     mask.x = b1.x && b2.x;
     mask.y = b1.y && b2.y;
-    
-    if (!any(mask)) {
+
+    if !any(mask) {
         mask.z = true;
     }
-    
+
     return vec3<f32>(f32(mask.x), f32(mask.y), f32(mask.z));
 }
 
 fn intersect_box(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> {
     let t1 = (box_min - ray_origin) / ray_dir;
     let t2 = (box_max - ray_origin) / ray_dir;
-    
+
     let tmin = min(t1, t2);
     let tmax = max(t1, t2);
-    
+
     let t_near = max(max(tmin.x, tmin.y), tmin.z);
     let t_far = min(min(tmax.x, tmax.y), tmax.z);
-    
+
     return vec2<f32>(t_near, t_far);
 }
 
@@ -227,7 +224,7 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
     var side_dist = ((map_pos - ray_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
     var mask = world_mask;
 
-    while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) { 
+    while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) {
         brightness = brightness + 0.001;
         let vox = get_trace_voxel(brick_handle, vec3<i32>(map_pos));
         if vox {
@@ -253,27 +250,27 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
     return new_hit(false, vec3<f32>(0.0));
 }
 
-fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit { 
+fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     let world_min = vec3<f32>(0.0);
     let world_max = vec3<f32>(uniforms.brick_grid_dimension);
-    
+
     var bounds = intersect_box(ray_pos, ray_dir, world_min, world_max);
-    
+
     if bounds.x > bounds.y || bounds.y < 0.0 {
         return new_hit(false, vec3<f32>(0.0));
     }
-    
+
     var current_pos = ray_pos;
     if bounds.x > 0.0 {
         current_pos = ray_pos + ray_dir * bounds.x;
     }
-    
+
     var map_pos = floor(current_pos);
     let ray_sign = sign(ray_dir);
     let delta_dist = 1.0 / ray_dir;
     var side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
     var mask = step_mask(side_dist);
-    
+
     for (var steps = 0; steps < MAX_RAY_STEPS; steps++) {
         let brick_handle_raw = get_brick_handle(vec3<i32>(floor(map_pos)));
         let brick_handle = get_brick_handle_offset(brick_handle_raw);
@@ -310,10 +307,10 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             return hit;
         } else {
             let sdf = get_brick_handle_sdf(brick_handle_raw);
-            
+
             if sdf > 1 {
                 current_pos = current_pos + (ray_dir * f32(sdf));
-                
+
                 map_pos = floor(current_pos);
                 side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
                 mask = step_mask(side_dist);                
@@ -322,10 +319,10 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
         }
 
         mask = step_mask(side_dist);
-        
+
         let t = min(side_dist.x, min(side_dist.y, side_dist.z));
         current_pos = current_pos + (ray_dir * t);
-        
+
         map_pos = map_pos + (mask * ray_sign);
         side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
 
@@ -339,12 +336,10 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
 @compute @workgroup_size(8, 8)
 fn main(
     @builtin(global_invocation_id) global_id: vec3<u32>
-) { 
+) {
     let frag_coord = vec2<f32>(global_id.xy);
 
-    if (frag_coord.x >= uniforms.resolution.x 
-        || frag_coord.y >= uniforms.resolution.y) 
-    { 
+    if frag_coord.x >= uniforms.resolution.x || frag_coord.y >= uniforms.resolution.y {
         return;
     }
 
@@ -367,9 +362,9 @@ fn main(
 
     var ray_pos = uniforms.camera_position;
 
-    if (any(ray_dir == vec3<f32>(0.0))) { 
+    if any(ray_dir == vec3<f32>(0.0)) {
         ray_dir += vec3<f32>(vec3<f32>(ray_dir == vec3<f32>(0.0))) * vec3<f32>(0.00001);
-    }    
+    }
 
     let hit = trace_world(ray_pos, ray_dir);
 
@@ -384,13 +379,13 @@ fn main(
     }
 
     var color = vec4<f32>(0.0);
-    
-    if uniforms.render_mode == 0 { 
+
+    if uniforms.render_mode == 0 {
         color = hit.color;
-    } else if uniforms.render_mode == 1 { 
-        let depth2 = pow(depth, uniforms.depth_boost); 
+    } else if uniforms.render_mode == 1 {
+        let depth2 = pow(depth, uniforms.depth_boost);
         color = vec4<f32>(depth2, depth2, depth2, 1.0);
-    } else if uniforms.render_mode == 2 { 
+    } else if uniforms.render_mode == 2 {
         if hit.hit {
             var normal = vec3<f32>(0.0);
             if mask.x > 0.0 {
@@ -408,16 +403,15 @@ fn main(
             if any(normal < vec3<f32>(0.0)) {
                 normal_color = vec3<f32>(1.0) - normal_color;
             }
-            
+
             color = vec4<f32>(normal_color, 1.0);
         } else {
             color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
-    } else if uniforms.render_mode == 3 { 
+    } else if uniforms.render_mode == 3 {
         let brightness = min(brightness, 1.0); // Clamp to avoid over-bright areas
         color = vec4<f32>(brightness, brightness, brightness, 1.0);
-    } else { 
-        
+    } else {
     }
 
     textureStore(OutputTexture, vec2<u32>(global_id.xy), color);

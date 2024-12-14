@@ -12,7 +12,6 @@ pub struct GPUFreeListBuffer<T: bytemuck::Pod + bytemuck::Zeroable> {
     usage: wgpu::BufferUsages,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
-    on_resize: Box<dyn Fn(&wgpu::Buffer) + Send + Sync>,
     _phantom: PhantomData<T>,
 }
 
@@ -22,7 +21,6 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         queue: Arc<wgpu::Queue>,
         initial_capacity: u64,
         usage: wgpu::BufferUsages,
-        on_resize: impl Fn(&wgpu::Buffer) + Send + Sync + 'static,
     ) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Managed Buffer"),
@@ -39,12 +37,14 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
             usage,
             device,
             queue,
-            on_resize: Box::new(on_resize),
             _phantom: PhantomData,
         }
     }
 
-    pub fn allocate(&self) -> Option<u64> {
+    pub fn allocate<F>(&self, on_resize: F) -> Option<u64>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let mut free_list = self.free_list.write();
 
         if let Some(index) = free_list.pop_front() {
@@ -58,10 +58,10 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
             // Drop locks before trying to grow
             drop(free_list);
             drop(size);
-            
+
             // Try to grow the buffer
-            self.try_grow()?;
-            
+            self.try_grow(on_resize)?;
+
             // Reacquire locks after growing
             size = self.size.write();
         }
@@ -71,7 +71,10 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         Some(index)
     }
 
-    pub fn allocate_many(&self, count: usize) -> Option<Vec<u64>> {
+    pub fn allocate_many<F>(&self, count: usize, on_resize: F) -> Option<Vec<u64>>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let mut indices = Vec::with_capacity(count);
         let mut free_list = self.free_list.write();
         let mut size = self.size.write();
@@ -87,10 +90,10 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
             // Drop locks before trying to grow
             drop(free_list);
             drop(size);
-            
+
             // Try to grow the buffer
-            self.try_grow()?;
-            
+            self.try_grow(&on_resize)?;
+
             // Reacquire locks and update capacity
             free_list = self.free_list.write();
             size = self.size.write();
@@ -105,7 +108,6 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
 
         Some(indices)
     }
-
 
     pub fn write(&self, index: u64, data: &T) -> Option<()> {
         let capacity = *self.capacity.read();
@@ -183,8 +185,11 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         Some(())
     }
 
-    pub fn allocate_write(&self, data: &T) -> Option<u64> {
-        let index = self.allocate()?;
+    pub fn allocate_write<F>(&self, data: &T, on_resize: F) -> Option<u64>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
+        let index = self.allocate(on_resize)?;
         match self.write(index, data) {
             Some(_) => Some(index),
             None => {
@@ -194,8 +199,11 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         }
     }
 
-    pub fn allocate_write_many(&self, data: &[T]) -> Option<Vec<u64>> {
-        let indices = self.allocate_many(data.len())?;
+    pub fn allocate_write_many<F>(&self, data: &[T], on_resize: F) -> Option<Vec<u64>>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
+        let indices = self.allocate_many(data.len(), on_resize)?;
         match self.write_many(&indices, data) {
             Some(_) => Some(indices),
             None => {
@@ -208,7 +216,10 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         }
     }
 
-    pub fn try_grow(&self) -> Option<()> {
+    pub fn try_grow<F>(&self, on_resize: F) -> Option<()>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let mut capacity = self.capacity.write();
         let old_capacity = *capacity;
         let new_capacity = old_capacity * 2;
@@ -238,14 +249,17 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        (self.on_resize)(&new_buffer);
+        on_resize(&new_buffer);
 
         *self.buffer.write() = new_buffer;
         *capacity = new_capacity;
         Some(())
     }
 
-    pub fn deallocate(&self, index: u64) -> Option<()> {
+    pub fn deallocate<F>(&self, index: u64, on_resize: F) -> Option<()>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let capacity = *self.capacity.read();
         if index >= capacity {
             return None;
@@ -257,13 +271,16 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         let used_count = capacity - free_list.len() as u64;
         if used_count < capacity / 4 && capacity > 1 {
             drop(free_list);
-            self.try_shrink()?;
+            self.try_shrink(on_resize)?;
         }
 
         Some(())
     }
 
-    fn try_shrink(&self) -> Option<()> {
+    fn try_shrink<F>(&self, on_resize: F) -> Option<()>
+    where
+        F: Fn(&wgpu::Buffer),
+    {
         let old_capacity = *self.capacity.read();
         let new_capacity = old_capacity / 2;
 
@@ -290,7 +307,7 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        (self.on_resize)(&new_buffer);
+        on_resize(&new_buffer);
 
         *self.buffer.write() = new_buffer;
         *self.capacity.write() = new_capacity;
@@ -307,5 +324,13 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
 
     pub fn get_capacity(&self) -> u64 {
         *self.capacity.read()
+    }
+
+    pub fn clear(&self) {
+        let mut size = self.size.write();
+        let mut free_list = self.free_list.write();
+        *size = 0;
+
+        free_list.clear();
     }
 }

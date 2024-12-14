@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use game::brick::MaterialBrick;
 use parking_lot::RwLock;
 
-
 fn round_up_pow2(mut x: u64) -> u64 {
     if x == 0 {
         return 1;
@@ -143,12 +142,7 @@ impl GPUBuddyBuffer {
         }
     }
 
-    pub fn write<T: bytemuck::Pod>(
-        &self,
-        queue: &wgpu::Queue,
-        offset: u64,
-        data: &T,
-    ) {
+    pub fn write<T: bytemuck::Pod>(&self, queue: &wgpu::Queue, offset: u64, data: &T) {
         queue.write_buffer(
             &self.buffer.read(),
             offset,
@@ -406,13 +400,14 @@ impl GPUBuddyBuffer {
     }
 
     pub fn allocate_brick<F>(
-        &self, 
-        brick: MaterialBrick, 
-        device: &wgpu::Device, 
+        &self,
+        brick: MaterialBrick,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         on_buffer_update: F,
-    ) -> Option<u64> 
-    where  F: Fn(&wgpu::Buffer),
+    ) -> Option<u64>
+    where
+        F: Fn(&wgpu::Buffer),
     {
         match brick {
             MaterialBrick::Size1(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
@@ -420,6 +415,5 @@ impl GPUBuddyBuffer {
             MaterialBrick::Size4(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
             MaterialBrick::Size8(b) => self.allocate_and_write(&b, device, queue, on_buffer_update),
         }
-        
     }
 }
