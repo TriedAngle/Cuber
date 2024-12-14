@@ -2,8 +2,15 @@ extern crate nalgebra as na;
 
 use std::{collections::HashMap, sync::Arc, time};
 
-use cgpu::RenderContext;
-use game::{input::Input, Diagnostics};
+use cgpu::{state::GPUState, RenderContext};
+use game::{
+    brick::BrickMap,
+    input::Input,
+    material::{ExpandedMaterialMapping, MaterialRegistry},
+    palette::PaletteRegistry,
+    worldgen::{GeneratedBrick, WorldGenerator},
+    Diagnostics,
+};
 use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, WindowEvent},
@@ -25,11 +32,20 @@ pub struct AppState {
     pub input: game::input::Input,
     pub proxy: EventLoopProxy<AppEvent>,
     pub windows: HashMap<WindowId, Arc<Window>>,
+
+    pub gpu: Arc<GPUState>,
     pub renderers: HashMap<WindowId, Arc<RenderContext>>,
     pub eguis: HashMap<WindowId, Arc<EguiRenderer>>,
     pub scale_factor: f32,
     pub focus: bool,
     pub active_window: Option<Arc<Window>>,
+
+    pub generator: WorldGenerator,
+    pub material_mapping: ExpandedMaterialMapping,
+
+    pub brickmap: Arc<BrickMap>,
+    pub palettes: Arc<PaletteRegistry>,
+    pub materials: Arc<MaterialRegistry>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +55,71 @@ pub enum AppEvent {
 
 impl AppState {
     pub fn new(event_loop: &EventLoop<AppEvent>) -> Self {
+        let materials = Arc::new(MaterialRegistry::new());
+
+        materials.register_default_materials();
+
+        let palettes = Arc::new(PaletteRegistry::new());
+
+        let brickmap_dimensions = na::Vector3::new(128, 64, 128);
+        let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
+
+        let generator = WorldGenerator::new();
+
+        let mut material_mapping = ExpandedMaterialMapping::new();
+        material_mapping.add_from_registry(&materials, "air", 0);
+        material_mapping.add_from_registry(&materials, "stone", 1);
+        material_mapping.add_from_registry(&materials, "bedrock", 2);
+        material_mapping.add_from_registry(&materials, "dirt", 3);
+        material_mapping.add_from_registry(&materials, "grass", 4);
+        material_mapping.add_from_registry(&materials, "snow", 5);
+
+        let gpu = Arc::new(pollster::block_on(GPUState::new(
+            brickmap.clone(),
+            materials.clone(),
+            palettes.clone(),
+            512 << 20,
+            128 << 20,
+        )));
+
+        let dimensions = brickmap.dimensions();
+
+        generator.generate_volume(
+            &brickmap,
+            na::Point3::origin(),
+            na::Point3::from(dimensions),
+            na::Point3::new(128, 20, 128),
+            100,
+            &material_mapping,
+            |brick, _at, handle| {
+                let brick = match brick {
+                    GeneratedBrick::Brick(material_brick) => material_brick,
+                    GeneratedBrick::Lod(_lod_material) => {
+                        return;
+                    }
+                    GeneratedBrick::None => return,
+                };
+
+                let (material_brick, materials) = brick.compress(&material_mapping);
+
+                let palette = palettes.register_palette(materials);
+
+                let _ = gpu.bricks.allocate_brick(material_brick, handle, palette);
+            },
+        );
+
+        // sdf::distance_field_parallel_pass(
+        //     &brickmap,
+        //     na::Point3::zeroed(),
+        //     na::Point3::from(dimensions),
+        // );
+
+        gpu.bricks.update_all_handles();
+        gpu.bricks.update_all_bricks();
+
+        gpu.materials.update_all_materials();
+        gpu.materials.update_all_palettes();
+
         Self {
             last_update: time::SystemTime::now(),
             delta_time: time::Duration::from_nanos(0),
@@ -46,11 +127,20 @@ impl AppState {
             input: Input::new(),
             proxy: event_loop.create_proxy(),
             windows: HashMap::new(),
+
+            gpu,
             renderers: HashMap::new(),
             eguis: HashMap::new(),
             scale_factor: 1.0,
             focus: true,
             active_window: None,
+
+            generator,
+            material_mapping,
+
+            brickmap,
+            palettes,
+            materials,
         }
     }
 
@@ -178,7 +268,7 @@ impl AppState {
     }
 
     pub fn new_renderer(&mut self, window: Arc<Window>) {
-        let renderer = pollster::block_on(RenderContext::new(window.clone()));
+        let renderer = pollster::block_on(RenderContext::new(window.clone(), self.gpu.clone()));
 
         log::info!("Renderer Created");
 

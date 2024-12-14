@@ -1,40 +1,25 @@
 extern crate nalgebra as na;
 
-use std::{
-    mem,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{mem, sync::Arc, time::Duration};
 
 use bricks::BrickState;
-use bytemuck::Zeroable;
 use camera::Camera;
-use game::{
-    brick::BrickMap,
-    input::Input,
-    material::{ExpandedMaterialMapping, MaterialRegistry},
-    palette::PaletteRegistry,
-    sdf,
-    worldgen::{GeneratedBrick, WorldGenerator},
-    Diagnostics, Transform,
-};
+use game::{input::Input, Diagnostics, Transform};
 use materials::MaterialState;
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
-use parking_lot::Mutex;
+use state::GPUState;
 use texture::Texture;
-use wgpu::util::DeviceExt;
+use wgpu::{core::device, util::DeviceExt};
 use winit::{dpi::PhysicalSize, window::Window};
 
-mod bricks;
+pub mod bricks;
 mod buddy;
 mod camera;
 mod dense;
 mod freelist;
-mod materials;
+pub mod materials;
 mod mesh;
+pub mod state;
 mod texture;
 
 #[repr(C)]
@@ -116,14 +101,16 @@ impl CameraUniform {
 }
 
 pub struct RenderContext {
+    pub gpu: Arc<GPUState>,
+
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+
     pub window: Arc<Window>,
-    pub instance: wgpu::Instance,
     pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
 
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
     pub render_pipeline: wgpu::RenderPipeline,
 
     pub encoder: Option<wgpu::CommandEncoder>,
@@ -142,10 +129,6 @@ pub struct RenderContext {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
-
-    pub brickmap: Arc<BrickMap>,
-    pub brick_state: BrickState,
-    pub material_state: MaterialState,
 
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
@@ -202,75 +185,16 @@ const TEX_VERTICES2: &[TexVertex] = &[
 const TEX_INDICES2: &[u32] = &[0, 1, 2];
 
 impl RenderContext {
-    pub async fn new(window: Arc<Window>) -> RenderContext {
+    pub async fn new(window: Arc<Window>, gpu: Arc<GPUState>) -> RenderContext {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
-            ..Default::default()
-        });
+        let device = gpu.device.clone();
+        let queue = gpu.queue.clone();
 
         let static_window: &'static Window = unsafe { mem::transmute(&*window) };
-        let surface = match instance.create_surface(static_window) {
-            Ok(surface) => surface,
-            Err(e) => panic!("Error creating surface: {:?}", e),
-        };
+        let surface = gpu.instance.create_surface(static_window).unwrap();
 
-        let adapter = match instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-        {
-            Some(adapter) => adapter,
-            None => panic!("Error creating adapter"),
-        };
-
-        let features = adapter.features();
-
-        let custom_features = wgpu::Features::empty()
-            | wgpu::Features::TIMESTAMP_QUERY
-            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-        // TODO: implement this
-        // | wgpu::Features::SHADER_INT64;
-
-        let mut custom_limits = if cfg!(target_arch = "wasm32") {
-            wgpu::Limits::downlevel_webgl2_defaults()
-        } else {
-            wgpu::Limits::default()
-        };
-
-        custom_limits.max_storage_buffer_binding_size = 1073741820;
-        custom_limits.max_buffer_size = u64::MAX;
-        // custom_limits.min_storage_buffer_offset_alignment = 32;
-
-        if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
-            panic!("TIMESTAMP QUERY REQUIRED");
-        };
-
-        let (device, queue) = match adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: custom_features,
-                    required_limits: custom_limits,
-                    label: None,
-                    memory_hints: Default::default(),
-                },
-                None,
-            )
-            .await
-        {
-            Ok(res) => res,
-            Err(e) => panic!("Error requesting device and queue: {:?}", e),
-        };
-
-        let device = Arc::new(device);
-        let queue = Arc::new(queue);
-
-        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_caps = surface.get_capabilities(&gpu.adapter);
 
         let surface_format = surface_caps
             .formats
@@ -332,8 +256,6 @@ impl RenderContext {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
@@ -470,76 +392,10 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("compute_present.wgsl").into()),
         });
 
-        let palettes = Arc::new(PaletteRegistry::new());
-
-        let materials = Arc::new(MaterialRegistry::new());
-        materials.register_default_materials();
-
-        let mut material_mapping = ExpandedMaterialMapping::new();
-        material_mapping.add_from_registry(&materials, "air", 0);
-        material_mapping.add_from_registry(&materials, "stone", 1);
-        material_mapping.add_from_registry(&materials, "bedrock", 2);
-        material_mapping.add_from_registry(&materials, "dirt", 3);
-        material_mapping.add_from_registry(&materials, "grass", 4);
-        material_mapping.add_from_registry(&materials, "snow", 5);
-
-        let generator = WorldGenerator::new();
-
-        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(256, 48, 256)));
-
-        let brick_state =
-            BrickState::new(brickmap.clone(), device.clone(), queue.clone(), 512 << 20);
-
-        let material_state = MaterialState::new(
-            palettes.clone(),
-            materials.clone(),
-            device.clone(),
-            queue.clone(),
-            128 << 20,
-        );
-
-        let dimensions = brickmap.dimensions();
-
-        generator.generate_volume(
-            &brickmap,
-            na::Point3::zeroed(),
-            na::Point3::from(dimensions),
-            na::Point3::new(128, 20, 128),
-            100,
-            &material_mapping,
-            |brick, _at, handle| {
-                let brick = match brick {
-                    GeneratedBrick::Brick(material_brick) => material_brick,
-                    GeneratedBrick::Lod(_lod_material) => {
-                        return;
-                    }
-                    GeneratedBrick::None => return,
-                };
-
-                let (material_brick, materials) = brick.compress(&material_mapping);
-
-                let palette = palettes.register_palette(materials);
-
-                let _ = brick_state.allocate_brick(material_brick, handle, palette);
-            },
-        );
-
-        sdf::distance_field_parallel_pass(
-            &brickmap,
-            na::Point3::zeroed(),
-            na::Point3::from(dimensions),
-        );
-
-        brick_state.update_all_handles();
-        brick_state.update_all_bricks();
-
-        material_state.update_all_materials();
-        material_state.update_all_palettes();
-
         let mut compute_uniforms = ComputeUniforms::new(
             [size.width as f32, size.height as f32],
             0.,
-            *brickmap.dimensions().as_ref(),
+            *gpu.bricks.brickmap.dimensions().as_ref(),
         );
 
         compute_uniforms.update_camera(&camera);
@@ -640,14 +496,14 @@ impl RenderContext {
                 label: Some("Compute Pipeline Layout"),
                 bind_group_layouts: &[
                     &compute_bind_group_layout,
-                    &material_state.layout(),
-                    &brick_state.layout(),
+                    &gpu.materials.layout(),
+                    &gpu.bricks.layout(),
                 ],
                 push_constant_ranges: &[],
             });
 
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Compute Pipeline Layout"),
+            label: Some("Compute Pipeline"),
             layout: Some(&compute_pipeline_layout),
             module: &voxel_shader,
             entry_point: "main",
@@ -825,13 +681,14 @@ impl RenderContext {
         });
 
         Self {
-            instance,
+            gpu,
+            device,
+            queue,
             window,
             surface,
             surface_config,
             size,
-            device,
-            queue,
+
             render_pipeline,
             diffuse_bind_group,
             meshes,
@@ -847,9 +704,6 @@ impl RenderContext {
             query_set,
             query_buffer,
             query_staging_buffer,
-            brickmap,
-            brick_state,
-            material_state,
             compute_uniforms,
             compute_uniforms_buffer,
             compute_bind_group_layout,
@@ -1029,8 +883,8 @@ impl RenderContext {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-            compute_pass.set_bind_group(1, &self.material_state.bind_group(), &[]);
-            compute_pass.set_bind_group(2, &self.brick_state.bind_group(), &[]);
+            compute_pass.set_bind_group(1, &self.gpu.materials.bind_group(), &[]);
+            compute_pass.set_bind_group(2, &self.gpu.bricks.bind_group(), &[]);
             compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
         }
 
@@ -1123,7 +977,8 @@ impl RenderContext {
         let (width, height) = (self.surface_config.width, self.surface_config.height);
         self.compute_uniforms
             .update([width as f32, height as f32], dt);
-        self.compute_uniforms.brick_grid_dimension = *self.brickmap.dimensions().as_ref();
+        self.compute_uniforms.brick_grid_dimension =
+            *self.gpu.bricks.brickmap.dimensions().as_ref();
         self.queue.write_buffer(
             &self.compute_uniforms_buffer,
             0,

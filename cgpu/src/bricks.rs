@@ -10,7 +10,7 @@ use wgpu::util::DeviceExt;
 use crate::{dense::GPUDenseBuffer, freelist::GPUFreeListBuffer};
 
 pub struct BrickState {
-    brickmap: Arc<BrickMap>,
+    pub brickmap: Arc<BrickMap>,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     handle_buffer: RwLock<wgpu::Buffer>,
