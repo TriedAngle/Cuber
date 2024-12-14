@@ -5,7 +5,6 @@ use game::{
     palette::PaletteRegistry,
 };
 use parking_lot::RwLock;
-use wgpu::core::device;
 
 use crate::{dense::GPUDenseBuffer, freelist::GPUFreeListBuffer};
 

@@ -48,6 +48,7 @@ impl GPUDenseBuffer {
     }
 
     fn try_grow<F: FnOnce(&wgpu::Buffer)>(&self, required_size: u64, on_resize: F) -> bool {
+        log::debug!("Resizing Buffer");
         let current_capacity = self.capacity.load(Ordering::Relaxed);
         let new_capacity = current_capacity.checked_mul(2).unwrap_or(current_capacity);
 
@@ -163,7 +164,7 @@ impl GPUDenseBuffer {
 
     pub fn write<T: bytemuck::Pod>(&self, offset: u64, data: &T) {
         self.queue.write_buffer(
-            &self.buffer.read(),
+            &self.buffer(),
             offset,
             bytemuck::cast_slice(std::slice::from_ref(data)),
         );
@@ -344,6 +345,74 @@ impl GPUDenseBuffer {
             MaterialBrick::Size4(b) => self.allocate_and_write(&b, on_resize),
             MaterialBrick::Size8(b) => self.allocate_and_write(&b, on_resize),
         }
+    }
+
+    pub fn allocate_bricks<F: FnOnce(&wgpu::Buffer)>(
+        &self,
+        bricks: &[MaterialBrick],
+        on_resize: F,
+    ) -> Option<Vec<(u64, u64)>> {
+        if bricks.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let total_size: u64 = bricks
+            .iter()
+            .map(|brick| match brick {
+                MaterialBrick::Size1(_) => 64,  // 512 bits = 64 bytes
+                MaterialBrick::Size2(_) => 128, // 1024 bits = 128 bytes
+                MaterialBrick::Size4(_) => 256, // 2048 bits = 256 bytes
+                MaterialBrick::Size8(_) => 512, // 4096 bits = 512 bytes
+            })
+            .sum();
+
+        let base_offset = self.allocate_dense::<u8, F>(total_size as usize, on_resize)?;
+
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Brick Staging Buffer"),
+            size: total_size,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
+            mapped_at_creation: true,
+        });
+
+        let mut current_offset = 0;
+        let mut offsets = Vec::with_capacity(bricks.len());
+        {
+            let mut staging_view = staging_buffer.slice(..).get_mapped_range_mut();
+
+            for brick in bricks {
+                let bits = brick.element_size();
+                let size = match brick {
+                    MaterialBrick::Size1(_) => 64,
+                    MaterialBrick::Size2(_) => 128,
+                    MaterialBrick::Size4(_) => 256,
+                    MaterialBrick::Size8(_) => 512,
+                };
+
+                // Copy brick data to staging buffer
+                staging_view[current_offset as usize..current_offset as usize + size as usize]
+                    .copy_from_slice(brick.data());
+
+                offsets.push((base_offset + current_offset, bits));
+                current_offset += size;
+            }
+        }
+
+        staging_buffer.unmap();
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Brick Copy Encoder"),
+            });
+
+        // Copy from staging buffer to main buffer
+        encoder.copy_buffer_to_buffer(&staging_buffer, 0, self.buffer(), base_offset, total_size);
+
+        // Submit copy command
+        self.queue.submit(Some(encoder.finish()));
+
+        Some(offsets)
     }
 
     pub fn allocate_palette<F: FnOnce(&wgpu::Buffer)>(

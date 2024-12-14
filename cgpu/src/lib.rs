@@ -506,7 +506,7 @@ impl RenderContext {
             label: Some("Compute Pipeline"),
             layout: Some(&compute_pipeline_layout),
             module: &voxel_shader,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             cache: None,
         });
@@ -564,13 +564,13 @@ impl RenderContext {
                 layout: Some(&compute_present_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &compute_present_shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &compute_present_shader,
-                    entry_point: "fs_main",
+                    entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: surface_config.format,
                         blend: Some(wgpu::BlendState::REPLACE),
@@ -641,13 +641,13 @@ impl RenderContext {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[TexVertex::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -835,6 +835,7 @@ impl RenderContext {
             let buffer_slice = self.query_staging_buffer.slice(..);
 
             buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+
             self.queue.submit([]);
             self.device.poll(wgpu::Maintain::Wait);
 
@@ -883,8 +884,8 @@ impl RenderContext {
 
             compute_pass.set_pipeline(&self.compute_pipeline);
             compute_pass.set_bind_group(0, &self.compute_bind_group, &[]);
-            compute_pass.set_bind_group(1, &self.gpu.materials.bind_group(), &[]);
-            compute_pass.set_bind_group(2, &self.gpu.bricks.bind_group(), &[]);
+            compute_pass.set_bind_group(1, self.gpu.materials.bind_group(), &[]);
+            compute_pass.set_bind_group(2, self.gpu.bricks.bind_group(), &[]);
             compute_pass.dispatch_workgroups(workgroup_x, workgroup_y, 1);
         }
 

@@ -199,13 +199,7 @@ impl AppState {
                     });
                 });
 
-            egui_renderer.end_frame_and_draw(
-                &renderer.device,
-                &renderer.queue,
-                &mut encoder,
-                &view,
-                screen_descriptor,
-            );
+            egui_renderer.end_frame_and_draw(&mut encoder, &view, screen_descriptor);
 
             if cycle_renderer {
                 renderer.cycle_compute_render_mode();

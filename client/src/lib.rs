@@ -1,13 +1,22 @@
 extern crate nalgebra as na;
 
-use std::{collections::HashMap, sync::Arc, time};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicI32, Ordering},
+        mpsc, Arc,
+    },
+    thread, time,
+};
 
 use cgpu::{state::GPUState, RenderContext};
+use egui_integration::EguiRenderer;
 use game::{
     brick::BrickMap,
     input::Input,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
+    sdf,
     worldgen::{GeneratedBrick, WorldGenerator},
     Diagnostics,
 };
@@ -22,8 +31,6 @@ use winit::{
 mod diagnostics;
 mod egui_integration;
 mod ui;
-
-use egui_integration::EguiRenderer;
 
 pub struct AppState {
     pub last_update: time::SystemTime,
@@ -40,8 +47,8 @@ pub struct AppState {
     pub focus: bool,
     pub active_window: Option<Arc<Window>>,
 
-    pub generator: WorldGenerator,
-    pub material_mapping: ExpandedMaterialMapping,
+    pub generator: Arc<WorldGenerator>,
+    pub material_mapping: Arc<ExpandedMaterialMapping>,
 
     pub brickmap: Arc<BrickMap>,
     pub palettes: Arc<PaletteRegistry>,
@@ -56,71 +63,37 @@ pub enum AppEvent {
 impl AppState {
     pub fn new(event_loop: &EventLoop<AppEvent>) -> Self {
         let materials = Arc::new(MaterialRegistry::new());
-
         materials.register_default_materials();
 
         let palettes = Arc::new(PaletteRegistry::new());
 
-        let brickmap_dimensions = na::Vector3::new(128, 64, 128);
+        let brickmap_dimensions = na::Vector3::new(256, 64, 256);
         let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
 
-        let generator = WorldGenerator::new();
+        let generator = Arc::new(WorldGenerator::new());
 
-        let mut material_mapping = ExpandedMaterialMapping::new();
-        material_mapping.add_from_registry(&materials, "air", 0);
-        material_mapping.add_from_registry(&materials, "stone", 1);
-        material_mapping.add_from_registry(&materials, "bedrock", 2);
-        material_mapping.add_from_registry(&materials, "dirt", 3);
-        material_mapping.add_from_registry(&materials, "grass", 4);
-        material_mapping.add_from_registry(&materials, "snow", 5);
+        let mut material_mapping = Arc::new(ExpandedMaterialMapping::new());
+
+        if let Some(mapping) = Arc::get_mut(&mut material_mapping) {
+            mapping.add_from_registry(&materials, "air", 0);
+            mapping.add_from_registry(&materials, "stone", 1);
+            mapping.add_from_registry(&materials, "bedrock", 2);
+            mapping.add_from_registry(&materials, "dirt", 3);
+            mapping.add_from_registry(&materials, "grass", 4);
+            mapping.add_from_registry(&materials, "snow", 5);
+        }
 
         let gpu = Arc::new(pollster::block_on(GPUState::new(
             brickmap.clone(),
             materials.clone(),
             palettes.clone(),
-            512 << 20,
+            1000 << 20,
             128 << 20,
         )));
 
-        let dimensions = brickmap.dimensions();
-
-        generator.generate_volume(
-            &brickmap,
-            na::Point3::origin(),
-            na::Point3::from(dimensions),
-            na::Point3::new(128, 20, 128),
-            100,
-            &material_mapping,
-            |brick, _at, handle| {
-                let brick = match brick {
-                    GeneratedBrick::Brick(material_brick) => material_brick,
-                    GeneratedBrick::Lod(_lod_material) => {
-                        return;
-                    }
-                    GeneratedBrick::None => return,
-                };
-
-                let (material_brick, materials) = brick.compress(&material_mapping);
-
-                let palette = palettes.register_palette(materials);
-
-                let _ = gpu.bricks.allocate_brick(material_brick, handle, palette);
-            },
-        );
-
-        // sdf::distance_field_parallel_pass(
-        //     &brickmap,
-        //     na::Point3::zeroed(),
-        //     na::Point3::from(dimensions),
-        // );
-
-        gpu.bricks.update_all_handles();
-        gpu.bricks.update_all_bricks();
-
         gpu.materials.update_all_materials();
-        gpu.materials.update_all_palettes();
 
-        Self {
+        let state = Self {
             last_update: time::SystemTime::now(),
             delta_time: time::Duration::from_nanos(0),
             diagnostics: Diagnostics::new(),
@@ -141,7 +114,71 @@ impl AppState {
             brickmap,
             palettes,
             materials,
-        }
+        };
+
+        state.generate_volume();
+
+        state
+    }
+
+    pub fn generate_volume(&self) {
+        let brickmap = self.brickmap.clone();
+        let material_mapping = self.material_mapping.clone();
+        let palettes = self.palettes.clone();
+        let generator = self.generator.clone();
+        let gpu = self.gpu.clone();
+
+        thread::spawn(move || {
+            let dimensions = brickmap.dimensions();
+            let last_update = AtomicI32::new(0);
+
+            generator.generate_volume(
+                &brickmap,
+                na::Point3::origin(),
+                na::Point3::from(dimensions),
+                na::Point3::new(32, 32, 32),
+                60,
+                &material_mapping,
+                &palettes,
+                8,
+                |_, _, _, _| {},
+                |bricks, palettes, handles, ats, percentage| {
+                    let _ = gpu.bricks.allocate_bricks(&bricks, &handles, &palettes);
+                    let current_percentage = percentage as i32;
+                    let previous = last_update.load(Ordering::Relaxed);
+                    if current_percentage >= previous + 10 || current_percentage == 100 {
+                        if last_update
+                            .compare_exchange(
+                                previous,
+                                current_percentage - (current_percentage % 10),
+                                Ordering::SeqCst,
+                                Ordering::Relaxed,
+                            )
+                            .is_ok()
+                        {
+                            log::debug!("Updated Buffers");
+                            gpu.bricks.update_all_handles();
+                            gpu.bricks.update_all_bricks();
+                            gpu.materials.update_all_palettes();
+                        }
+                    }
+                },
+            );
+            gpu.bricks.update_all_handles();
+            gpu.bricks.update_all_bricks();
+            gpu.materials.update_all_palettes();
+
+            sdf::distance_field_parallel_pass(
+                &brickmap,
+                na::Point3::origin(),
+                na::Point3::from(dimensions),
+                10,
+                |_percentage| {
+                    gpu.bricks.update_all_handles();
+                },
+            );
+            gpu.bricks.update_all_handles();
+        });
     }
 
     pub fn handle_window_event(&mut self, event: &WindowEvent, window_id: WindowId) {
@@ -212,14 +249,12 @@ impl AppState {
 
             self.diagnostics.stop("vertex");
         }
-
         self.diagnostics.start("egui");
         self.draw_egui(window);
         self.diagnostics.stop("egui");
 
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
-
             renderer.finish_render(&mut self.diagnostics);
         }
 
@@ -273,7 +308,8 @@ impl AppState {
         log::info!("Renderer Created");
 
         let egui_renderer = EguiRenderer::new(
-            &renderer.device,
+            renderer.device.clone(),
+            renderer.queue.clone(),
             renderer.surface_config.format,
             None,
             1,

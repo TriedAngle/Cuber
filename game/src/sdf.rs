@@ -14,6 +14,8 @@ pub fn distance_field_parallel_pass(
     brickmap: &BrickMap,
     from: na::Point3<u32>,
     to: na::Point3<u32>,
+    progress_interval: u64,
+    progress_callback: impl Fn(u64) + Send + Sync,
 ) {
     let coords: Vec<_> = (from.x..to.x)
         .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
@@ -176,10 +178,12 @@ pub fn distance_field_parallel_pass(
             let last = distance_last_percentage.load(Ordering::Relaxed);
 
             if percentage > last
+                && percentage >= last + progress_interval
                 && distance_last_percentage
                     .compare_exchange(last, percentage, Ordering::Relaxed, Ordering::Relaxed)
                     .is_ok()
             {
+                progress_callback(percentage);
                 log::info!("Distance Calculation Pass Progress: {}%", percentage);
             }
         }

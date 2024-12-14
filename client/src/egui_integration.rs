@@ -9,6 +9,8 @@ pub struct EguiRenderer {
     pub state: ewin::State,
     pub renderer: egpu::Renderer,
     pub frame_started: bool,
+    pub device: Arc<egpu::wgpu::Device>,
+    pub queue: Arc<egpu::wgpu::Queue>,
     pub window: Arc<Window>,
 }
 
@@ -18,7 +20,8 @@ impl EguiRenderer {
     }
 
     pub fn new(
-        device: &egpu::wgpu::Device,
+        device: Arc<egpu::wgpu::Device>,
+        queue: Arc<egpu::wgpu::Queue>,
         output_color_format: egpu::wgpu::TextureFormat,
         output_depth_format: Option<egpu::wgpu::TextureFormat>,
         msaa_samples: u32,
@@ -37,7 +40,7 @@ impl EguiRenderer {
         log::debug!("Egui State created");
 
         let renderer = egpu::Renderer::new(
-            device,
+            &device,
             output_color_format,
             output_depth_format,
             msaa_samples,
@@ -46,6 +49,8 @@ impl EguiRenderer {
         log::debug!("Egui Renderer created");
 
         Self {
+            device,
+            queue,
             state,
             renderer,
             frame_started: false,
@@ -69,8 +74,6 @@ impl EguiRenderer {
 
     pub fn end_frame_and_draw(
         &mut self,
-        device: &egpu::wgpu::Device,
-        queue: &egpu::wgpu::Queue,
         encoder: &mut egpu::wgpu::CommandEncoder,
         window_surface_view: &egpu::wgpu::TextureView,
         screen_descriptor: egpu::ScreenDescriptor,
@@ -92,10 +95,15 @@ impl EguiRenderer {
             .tessellate(full_output.shapes, self.state.egui_ctx().pixels_per_point());
         for (id, image_delta) in &full_output.textures_delta.set {
             self.renderer
-                .update_texture(device, queue, *id, image_delta);
+                .update_texture(&self.device, &self.queue, *id, image_delta);
         }
-        self.renderer
-            .update_buffers(device, queue, encoder, &tris, &screen_descriptor);
+        self.renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            encoder,
+            &tris,
+            &screen_descriptor,
+        );
         let rpass = encoder.begin_render_pass(&egpu::wgpu::RenderPassDescriptor {
             color_attachments: &[Some(egpu::wgpu::RenderPassColorAttachment {
                 view: window_surface_view,

@@ -2,7 +2,7 @@ use std::{mem, sync::Arc};
 
 use game::{
     brick::{BrickHandle, BrickMap, MaterialBrick, TraceBrick},
-    palette::PaletteId,
+    palette::{self, PaletteId},
 };
 use parking_lot::RwLock;
 use wgpu::util::DeviceExt;
@@ -160,6 +160,28 @@ impl BrickState {
         Some(offset)
     }
 
+    pub fn allocate_bricks(
+        &self,
+        bricks: &[MaterialBrick],
+        handles: &[BrickHandle],
+        palettes: &[PaletteId],
+    ) -> Option<Vec<(u64, u64)>> {
+        let offsets = self.brick_buffer.allocate_bricks(bricks, |_buffer| {
+            self.recreate_bind_group();
+        })?;
+
+        offsets.iter().zip(handles).zip(palettes).for_each(
+            |((&(offset, size), &handle), &palette)| {
+                let _ = self.brickmap.modify_brick(handle, |trace| {
+                    trace.set_brick_info(size as u32 - 1, offset as u32);
+                    trace.set_palette(palette);
+                });
+            },
+        );
+
+        Some(offsets)
+    }
+
     pub fn recreate_bind_group(&self) {
         let mut bind_group = self.bind_group.write();
 
@@ -199,6 +221,10 @@ impl BrickState {
                 },
             ],
         })
+    }
+
+    pub fn submit(&self) -> wgpu::SubmissionIndex {
+        self.queue.submit([])
     }
 
     pub fn bind_group(&self) -> &wgpu::BindGroup {

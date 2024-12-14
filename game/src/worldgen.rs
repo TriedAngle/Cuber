@@ -10,8 +10,9 @@ use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use rayon::prelude::*;
 
 use crate::{
-    brick::{BrickHandle, BrickMap, ExpandedBrick},
+    brick::{BrickHandle, BrickMap, ExpandedBrick, MaterialBrick},
     material::{ExpandedMaterialMapping, MaterialId},
+    palette::{self, PaletteId, PaletteRegistry},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -96,7 +97,7 @@ impl WorldGenerator {
         let continent_val = self.continent_noise.get_noise_2d(x as f32, z as f32);
         let terrain_val = self.terrain_noise.get_noise_2d(x as f32, z as f32);
         let final_height = (100.0 + (continent_val * 150.0) + (terrain_val * 180.0).round()) as u32;
-        let height_diff = final_height - y;
+        let height_diff = final_height as i32 - y as i32;
 
         if y == 0 {
             bedrock
@@ -214,7 +215,7 @@ impl WorldGenerator {
             .unwrap_or_else(|| materials.material(materials.get("air"))) // Default to air if something goes wrong
     }
 
-    pub fn generate_volume<F>(
+    pub fn generate_volume<F, C>(
         &self,
         brickmap: &BrickMap,
         from: na::Point3<u32>,
@@ -222,16 +223,23 @@ impl WorldGenerator {
         center: na::Point3<u32>,
         lod_distance: u32,
         materials: &ExpandedMaterialMapping,
+        palettes: &PaletteRegistry,
+        chunk_size: u32,
         callback: F,
+        chunk_callback: C,
     ) where
-        F: Fn(GeneratedBrick, na::Point3<u32>, BrickHandle) + Send + Sync,
+        F: Fn(&GeneratedBrick, BrickHandle, na::Point3<u32>, f64) + Send + Sync,
+        C: Fn(Vec<MaterialBrick>, Vec<PaletteId>, Vec<BrickHandle>, Vec<na::Point3<u32>>, f64)
+            + Send
+            + Sync,
     {
-        let coords: Vec<_> = (from.x..to.x)
-            .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
-            .collect();
+        let chunk_dims = na::Point3::new(
+            ((to.x - from.x + chunk_size - 1) / chunk_size).max(1),
+            ((to.y - from.y + chunk_size - 1) / chunk_size).max(1),
+            ((to.z - from.z + chunk_size - 1) / chunk_size).max(1),
+        );
 
-        let total_volume = coords.len() as u64;
-
+        let total_volume = ((to.x - from.x) * (to.y - from.y) * (to.z - from.z)) as u64;
         let start = SystemTime::now();
         log::info!(
             "Starting Generating Volume [{}] {} -> {}",
@@ -243,49 +251,99 @@ impl WorldGenerator {
         let processed = Arc::new(AtomicU64::new(0));
         let last_percentage = Arc::new(AtomicU64::new(0));
 
-        coords.par_iter().for_each(|&(x, y, z)| {
-            let at = na::Point3::new(x, y, z);
-            let distance = na::distance(&center.cast::<f32>(), &at.cast::<f32>());
+        let chunk_coords: Vec<_> = (0..chunk_dims.x)
+            .flat_map(|cx| {
+                (0..chunk_dims.y).flat_map(move |cy| (0..chunk_dims.z).map(move |cz| (cx, cy, cz)))
+            })
+            .collect();
 
-            let (brick, handle) = if distance >= lod_distance as f32 {
-                let lod = self.generate_lod_chunk(materials, x, y, z, LodSamples::A1);
-                if lod == materials.material(materials.get("air")) {
-                    let handle = BrickHandle::empty();
-                    brickmap.set_handle(handle, at);
-                    (GeneratedBrick::None, handle)
-                } else {
-                    let mut handle = BrickHandle::empty();
-                    handle.write_lod(lod);
-                    brickmap.set_handle(handle, at);
-                    (GeneratedBrick::Lod(lod), handle)
+        chunk_coords.par_iter().for_each(|&(cx, cy, cz)| {
+            let chunk_start = na::Point3::new(
+                from.x + cx * chunk_size,
+                from.y + cy * chunk_size,
+                from.z + cz * chunk_size,
+            );
+            let chunk_end = na::Point3::new(
+                (from.x + (cx + 1) * chunk_size).min(to.x),
+                (from.y + (cy + 1) * chunk_size).min(to.y),
+                (from.z + (cz + 1) * chunk_size).min(to.z),
+            );
+
+            let mut chunk_bricks = Vec::new();
+            let mut chunk_palettes = Vec::new();
+            let mut chunk_positions = Vec::new();
+            let mut chunk_handles = Vec::new();
+
+            for x in chunk_start.x..chunk_end.x {
+                for y in chunk_start.y..chunk_end.y {
+                    for z in chunk_start.z..chunk_end.z {
+                        let at = na::Point3::new(x, y, z);
+                        let distance = na::distance(&center.cast::<f32>(), &at.cast::<f32>());
+                        let (brick, handle) = if distance >= lod_distance as f32 {
+                            let lod = self.generate_lod_chunk(materials, x, y, z, LodSamples::A1);
+                            if lod == materials.material(materials.get("air")) {
+                                let handle = BrickHandle::empty();
+                                brickmap.set_handle(handle, at);
+                                (GeneratedBrick::None, handle)
+                            } else {
+                                let mut handle = BrickHandle::empty();
+                                handle.write_lod(lod);
+                                brickmap.set_handle(handle, at);
+                                (GeneratedBrick::Lod(lod), handle)
+                            }
+                        } else {
+                            let expanded_brick = self.generate_chunk(materials, x, y, z);
+                            let brick = expanded_brick.to_trace_brick();
+                            if brick.is_empty() {
+                                let handle = BrickHandle::empty();
+                                brickmap.set_handle(handle, at);
+                                (GeneratedBrick::None, handle)
+                            } else {
+                                let handle = brickmap.get_or_push_brick(brick, at);
+
+                                let (compressed, materials) = expanded_brick.compress(&materials);
+
+                                let palette_id = palettes.register_palette(materials);
+
+                                chunk_bricks.push(compressed);
+                                chunk_palettes.push(palette_id);
+                                chunk_positions.push(at);
+                                chunk_handles.push(handle);
+                                (GeneratedBrick::Brick(expanded_brick), handle)
+                            }
+                        };
+
+                        let current = processed.fetch_add(1, Ordering::Relaxed);
+                        let percentagef = (current as f64 * 100.0) / total_volume as f64;
+                        let percentage = (current * 100) / total_volume;
+                        let last = last_percentage.load(Ordering::Relaxed);
+                        if percentage > last
+                            && last_percentage
+                                .compare_exchange(
+                                    last,
+                                    percentage,
+                                    Ordering::Relaxed,
+                                    Ordering::Relaxed,
+                                )
+                                .is_ok()
+                        {
+                            log::info!("World Generation Progress: {}%", percentage);
+                        }
+
+                        callback(&brick, handle, at, percentagef);
+                    }
                 }
-            } else {
-                let expanded_brick = self.generate_chunk(materials, x, y, z);
-                let brick = expanded_brick.to_trace_brick();
-
-                if brick.is_empty() {
-                    let handle = BrickHandle::empty();
-                    brickmap.set_handle(handle, at);
-                    (GeneratedBrick::None, handle)
-                } else {
-                    let handle = brickmap.get_or_push_brick(brick, at);
-                    (GeneratedBrick::Brick(expanded_brick), handle)
-                }
-            };
-
-            let current = processed.fetch_add(1, Ordering::Relaxed);
-            let percentage = (current * 100) / total_volume;
-            let last = last_percentage.load(Ordering::Relaxed);
-
-            if percentage > last
-                && last_percentage
-                    .compare_exchange(last, percentage, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_ok()
-            {
-                log::info!("World Generation Progress: {}%", percentage);
             }
 
-            callback(brick, at, handle);
+            let current = processed.load(Ordering::Relaxed);
+            let percentagef = (current as f64 * 100.0) / total_volume as f64;
+            chunk_callback(
+                chunk_bricks,
+                chunk_palettes,
+                chunk_handles,
+                chunk_positions,
+                percentagef,
+            );
         });
 
         log::info!(
