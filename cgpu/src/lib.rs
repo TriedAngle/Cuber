@@ -5,8 +5,9 @@ use std::{mem, sync::Arc, time::Duration};
 use bytemuck::Zeroable;
 use camera::Camera;
 use dense::GPUDenseBuffer;
+use freelist::GPUFreeListBuffer;
 use game::{
-    brick::BrickMap,
+    brick::{BrickMap, TraceBrick},
     input::Input,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
@@ -26,6 +27,7 @@ mod dense;
 mod mesh;
 mod texture;
 mod bricks;
+mod freelist;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -112,8 +114,8 @@ pub struct RenderContext {
     pub surface_config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
 
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
     pub render_pipeline: wgpu::RenderPipeline,
 
     pub encoder: Option<wgpu::CommandEncoder>,
@@ -135,7 +137,7 @@ pub struct RenderContext {
 
     pub brickmap: BrickMap,
     pub brick_handle_buffer: wgpu::Buffer,
-    pub brick_trace_buffer: wgpu::Buffer,
+    pub brick_trace_buffer: GPUFreeListBuffer<TraceBrick>,
     // pub brick_buffer: GPUBuddyBuffer,
     pub brick_buffer: GPUDenseBuffer,
 
@@ -261,6 +263,9 @@ impl RenderContext {
             Ok(res) => res,
             Err(e) => panic!("Error requesting device and queue: {:?}", e),
         };
+
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
 
         let surface_caps = surface.get_capabilities(&adapter);
 
@@ -481,7 +486,7 @@ impl RenderContext {
         // let brick_max_size = mem::size_of::<MaterialBrick4>() as u64;
         // let brick_buffer = GPUBuddyBuffer::new(&device, 
             // (brick_min_size, brick_max_size), 128 << 20);
-        let brick_buffer = GPUDenseBuffer::new(&device, 128 << 20);
+        let brick_buffer = GPUDenseBuffer::new(device.clone(), queue.clone(), 128 << 20);
 
         let brickmap = BrickMap::new(na::Vector3::new(64, 48, 64));
 
@@ -508,7 +513,7 @@ impl RenderContext {
                 let bit_size = material_brick.element_size();
 
                 let offset = brick_buffer
-                    .allocate_brick(material_brick, &queue)
+                    .allocate_brick(material_brick, |_|{})
                     .expect("Failed to allocate");
 
                 // let offset = brick_buffer
@@ -542,11 +547,20 @@ impl RenderContext {
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        let brick_trace_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Brick Trace Buffer"),
-            contents: bytemuck::cast_slice(brickmap.bricks()),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let brick_trace_buffer = GPUFreeListBuffer::new(
+            device.clone(), 
+            queue.clone(), 
+        120, 
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST, 
+            |_|{},
+        );
+
+        brick_trace_buffer.allocate_write_many(brickmap.bricks());
+        // let brick_trace_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //     label: Some("Brick Trace Buffer"),
+        //     contents: bytemuck::cast_slice(brickmap.bricks()),
+        //     usage: wgpu::BufferUsages::STORAGE,
+        // });
 
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Material Buffer"),
@@ -670,7 +684,7 @@ impl RenderContext {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: brick_trace_buffer.as_entire_binding(),
+                    resource: brick_trace_buffer.buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
