@@ -142,10 +142,12 @@ pub struct RenderContext {
 
     pub compute_uniforms: ComputeUniforms,
     compute_uniforms_buffer: wgpu::Buffer,
+    compute_bind_group_layout: wgpu::BindGroupLayout,
     compute_bind_group: wgpu::BindGroup,
     compute_pipeline: wgpu::ComputePipeline,
     compute_depth_texture_bind_group: wgpu::BindGroup,
 
+    compute_present_bind_group_layout: wgpu::BindGroupLayout,
     compute_present_bind_group: wgpu::BindGroup,
     compute_present_pipeline: wgpu::RenderPipeline,
 }
@@ -850,10 +852,11 @@ impl RenderContext {
             material_state,
             compute_uniforms,
             compute_uniforms_buffer,
+            compute_bind_group_layout,
             compute_bind_group,
             compute_depth_texture_bind_group,
             compute_pipeline,
-
+            compute_present_bind_group_layout,
             compute_present_bind_group,
             compute_present_pipeline,
         }
@@ -874,6 +877,56 @@ impl RenderContext {
             &self.surface_config,
             Some("depth_texture"),
         );
+
+        let compute_render_texture = Texture::create_storage_texture(
+            &self.device,
+            &self.surface_config,
+            Texture::COLOR_FORMAT,
+            Some("Compute Texture"),
+            true,
+        );
+
+        let compute_depth_texture = Texture::create_storage_texture(
+            &self.device,
+            &self.surface_config,
+            Texture::FLOAT_FORMAT,
+            Some("Compute Depth Texture"),
+            false,
+        );
+        self.compute_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compute Bind Group"),
+            layout: &self.compute_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.compute_uniforms_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&compute_render_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&compute_depth_texture.view),
+                },
+            ],
+        });
+
+        self.compute_present_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Compute Present Bind Group"),
+                layout: &self.compute_present_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&compute_render_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&compute_render_texture.sampler()),
+                    },
+                ],
+            });
     }
 
     pub fn update(&mut self) {}
