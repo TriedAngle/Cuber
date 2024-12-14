@@ -1,6 +1,13 @@
 extern crate nalgebra as na;
 
-use std::{mem, sync::Arc, time::Duration};
+use std::{
+    mem,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use bricks::BrickState;
 use bytemuck::Zeroable;
@@ -478,10 +485,10 @@ impl RenderContext {
 
         let generator = WorldGenerator::new();
 
-        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(64, 48, 64)));
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(256, 48, 256)));
 
         let brick_state =
-            BrickState::new(brickmap.clone(), device.clone(), queue.clone(), 128 << 20);
+            BrickState::new(brickmap.clone(), device.clone(), queue.clone(), 512 << 20);
 
         let material_state = MaterialState::new(
             palettes.clone(),
@@ -491,15 +498,14 @@ impl RenderContext {
             128 << 20,
         );
 
-        let total = Mutex::new(0);
-        let counted = Mutex::new(0);
         let dimensions = brickmap.dimensions();
+
         generator.generate_volume(
             &brickmap,
             na::Point3::zeroed(),
             na::Point3::from(dimensions),
-            na::Point3::new(32, 20, 32),
-            16,
+            na::Point3::new(128, 20, 128),
+            100,
             &material_mapping,
             |brick, _at, handle| {
                 let brick = match brick {
@@ -526,12 +532,6 @@ impl RenderContext {
 
         brick_state.update_all_handles();
         brick_state.update_all_bricks();
-
-        log::debug!(
-            "WORLDGEN BRICK SIZE: {}, called: {}",
-            total.lock(),
-            counted.lock()
-        );
 
         material_state.update_all_materials();
         material_state.update_all_palettes();
@@ -886,13 +886,27 @@ impl RenderContext {
             true,
         );
 
-        let compute_depth_texture = Texture::create_storage_texture(
+        let mut compute_depth_texture = Texture::create_storage_texture(
             &self.device,
             &self.surface_config,
             Texture::FLOAT_FORMAT,
             Some("Compute Depth Texture"),
             false,
         );
+
+        compute_depth_texture.sampler =
+            Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Compute Depth Texture"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                compare: None,
+                ..Default::default()
+            }));
+
         self.compute_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Compute Bind Group"),
             layout: &self.compute_bind_group_layout,

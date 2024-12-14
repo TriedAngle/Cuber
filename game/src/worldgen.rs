@@ -1,3 +1,11 @@
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::SystemTime,
+};
+
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use rayon::prelude::*;
 
@@ -222,6 +230,19 @@ impl WorldGenerator {
             .flat_map(|x| (from.y..to.y).flat_map(move |y| (from.z..to.z).map(move |z| (x, y, z))))
             .collect();
 
+        let total_volume = coords.len() as u64;
+
+        let start = SystemTime::now();
+        log::info!(
+            "Starting Generating Volume [{}] {} -> {}",
+            total_volume,
+            from,
+            to
+        );
+
+        let processed = Arc::new(AtomicU64::new(0));
+        let last_percentage = Arc::new(AtomicU64::new(0));
+
         coords.par_iter().for_each(|&(x, y, z)| {
             let at = na::Point3::new(x, y, z);
             let distance = na::distance(&center.cast::<f32>(), &at.cast::<f32>());
@@ -252,7 +273,25 @@ impl WorldGenerator {
                 }
             };
 
+            let current = processed.fetch_add(1, Ordering::Relaxed);
+            let percentage = (current * 100) / total_volume;
+            let last = last_percentage.load(Ordering::Relaxed);
+
+            if percentage > last
+                && last_percentage
+                    .compare_exchange(last, percentage, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
+                log::info!("World Generation Progress: {}%", percentage);
+            }
+
             callback(brick, at, handle);
         });
+
+        log::info!(
+            "Finish Generation of Volume [{}] took: {:.3}s",
+            total_volume,
+            start.elapsed().unwrap().as_secs_f64()
+        );
     }
 }

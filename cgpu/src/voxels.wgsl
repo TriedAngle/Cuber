@@ -304,6 +304,7 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             let material = materials[material_handle];
             var hit = new_hit(true, map_pos);
             hit.color = material.color;
+            hit.mask = mask;
             return hit;
         } else {
             let sdf = get_brick_handle_sdf(brick_handle_raw);
