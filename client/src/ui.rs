@@ -1,6 +1,6 @@
 use crate::AppState;
 
-use egui::{Button, DragValue, RichText, Vec2};
+use egui::{Align2, Button, Color32, DragValue, Pos2, RichText, Stroke, Vec2};
 use std::sync::Arc;
 use winit::window::WindowId;
 
@@ -33,6 +33,35 @@ impl AppState {
             egui_renderer.begin_frame();
             let mut cycle_renderer = false;
             let mut updated_camera = false;
+
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none())
+                .show(egui_renderer.context(), |ui| {
+                    let painter = ui.painter();
+
+                    let screen_rect = ui.max_rect();
+                    let center = screen_rect.center();
+
+                    let crosshair_size = 10.0;
+                    let stroke = Stroke::new(2.0, Color32::WHITE);
+
+                    painter.line_segment(
+                        [
+                            Pos2::new(center.x - crosshair_size, center.y),
+                            Pos2::new(center.x + crosshair_size, center.y),
+                        ],
+                        stroke,
+                    );
+
+                    painter.line_segment(
+                        [
+                            Pos2::new(center.x, center.y - crosshair_size),
+                            Pos2::new(center.x, center.y + crosshair_size),
+                        ],
+                        stroke,
+                    );
+                });
+
             egui::Window::new("Debug")
                 .resizable(true)
                 .default_size(Vec2::new(200.0, 100.0))
