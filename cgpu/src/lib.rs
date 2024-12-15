@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
+use game::raytrace::RayHit;
 use game::Camera;
 use game::{Diagnostics, Transform};
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
@@ -37,7 +38,11 @@ pub struct ComputeUniforms {
     pub view_projection: [[f32; 4]; 4],
     pub inverse_view_projection: [[f32; 4]; 4],
     pub camera_position: [f32; 3],
-    _padding1: f32,
+    pub brick_hit_flags: u32,
+    pub brick_hit: [u32; 3], // TODO: probably merge these
+    pub voxel_hit_flags: u32,
+    pub voxel_hit: [u32; 3],
+    pub disable_sdf: u32,
 }
 
 impl ComputeUniforms {
@@ -51,7 +56,11 @@ impl ComputeUniforms {
             view_projection: *na::Matrix4::identity().as_ref(),
             inverse_view_projection: *na::Matrix4::identity().try_inverse().unwrap().as_ref(),
             camera_position: [0.; 3],
-            _padding1: 0.,
+            brick_hit_flags: 0,
+            brick_hit: [0; 3],
+            voxel_hit_flags: 0,
+            voxel_hit: [0; 3],
+            disable_sdf: 0,
         }
     }
     pub fn update_camera(&mut self, camera: &Camera) {
@@ -65,9 +74,37 @@ impl ComputeUniforms {
         self.view_projection = *view_projection.as_ref();
         self.inverse_view_projection = *inverse_view_projection.as_ref();
     }
+
     pub fn update(&mut self, resolution: [f32; 2], dt: f32) {
         self.resolution = resolution;
         self.dt = dt;
+    }
+
+    pub fn update_brick_hit(&mut self, hit: Option<RayHit>) {
+        if let Some(hit) = hit {
+            self.brick_hit_flags = 1;
+            self.brick_hit = *hit.brick_pos.coords.as_ref();
+            if let Some(voxel) = hit.voxel_local_pos {
+                self.voxel_hit_flags = 1;
+                self.voxel_hit = *voxel.coords.as_ref();
+            } else {
+                self.voxel_hit_flags = 0;
+                self.voxel_hit = [0; 3];
+            }
+        } else {
+            self.brick_hit_flags = 0;
+            self.brick_hit = [0; 3];
+            self.voxel_hit_flags = 0;
+            self.voxel_hit = [0; 3];
+        }
+    }
+
+    pub fn toggle_sdf(&mut self) {
+        if self.disable_sdf == 0 {
+            self.disable_sdf = 1;
+        } else {
+            self.disable_sdf = 0;
+        }
     }
 }
 
@@ -215,8 +252,6 @@ impl RenderContext {
         let texture =
             Texture::from_bytes(&device, &queue, diffuse_bytes, Some("Happy Tree Texture"));
 
-
-
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("tex_shader.wgsl").into()),
@@ -270,7 +305,6 @@ impl RenderContext {
         let mut meshes = Vec::new();
         meshes.push(mesh);
         meshes.push(mesh2);
-
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &surface_config, Some("depth_texture"));
@@ -492,8 +526,6 @@ impl RenderContext {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&compute_render_texture.sampler()),
                 },
-
-
             ],
         });
 
@@ -893,7 +925,6 @@ impl RenderContext {
         encoder.write_timestamp(&self.query_set, 3);
     }
 
-
     pub fn update_uniforms(&mut self, camera: &Camera, delta_time: Duration) {
         if camera.updated() {
             self.compute_uniforms.update_camera(&camera);
@@ -910,6 +941,10 @@ impl RenderContext {
             0,
             bytemuck::cast_slice(&[self.compute_uniforms]),
         );
+    }
+
+    pub fn update_brick_hit(&mut self, hit: Option<RayHit>) {
+        self.compute_uniforms.update_brick_hit(hit);
     }
 
     pub fn cycle_compute_render_mode(&mut self) {

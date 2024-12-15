@@ -16,9 +16,11 @@ use game::{
     brick::BrickMap,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
+    raytrace,
     worldgen::WorldGenerator,
     Camera, Diagnostics, Input,
 };
+use na::AbstractRotation;
 use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, WindowEvent},
@@ -68,7 +70,7 @@ impl AppState {
 
         let palettes = Arc::new(PaletteRegistry::new());
 
-        let brickmap_dimensions = na::Vector3::new(256, 64, 256);
+        let brickmap_dimensions = na::Vector3::new(1028, 64, 512);
         let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
 
         let generator = Arc::new(WorldGenerator::new());
@@ -94,9 +96,9 @@ impl AppState {
 
         gpu.materials.update_all_materials();
 
-        let camera = Camera::new(
-            na::Point3::new(-30.0, 80., -30.),
-            na::UnitQuaternion::from_euler_angles(3.1, 2.6, -0.4),
+        let mut camera = Camera::new(
+            na::Point3::new(256.0, 80., 256.),
+            na::UnitQuaternion::identity(),
             50.,
             0.002,
             45.,
@@ -104,6 +106,8 @@ impl AppState {
             0.1,
             100.,
         );
+
+        camera.look_at(na::Point3::new(256., 80., 257.), &na::Vector3::y_axis());
 
         let state = Self {
             last_update: SystemTime::now(),
@@ -150,8 +154,8 @@ impl AppState {
                 &brickmap,
                 na::Point3::origin(),
                 na::Point3::from(dimensions),
-                na::Point3::new(32, 32, 32),
-                60,
+                na::Point3::new(256, 32, 256),
+                128,
                 &material_mapping,
                 &palettes,
                 8,
@@ -182,16 +186,20 @@ impl AppState {
             gpu.bricks.update_all_bricks();
             gpu.materials.update_all_palettes();
 
+            let sdf_start = SystemTime::now();
+            log::debug!("Start: generate SDF");
             let sdf = cgpu::sdf::SDFGenerator::new(
                 gpu.device.clone(),
                 gpu.queue.clone(),
                 gpu.bricks.clone(),
             );
-            log::debug!("generate SDF");
             let dims = gpu.bricks.brickmap.dimensions();
             let steps = dims.x.max(dims.y.max(dims.z));
             sdf.generate(steps);
-            log::debug!("Finish SDF");
+            log::debug!(
+                "Finish: generate SDF, took: {:.3}s",
+                sdf_start.elapsed().unwrap().as_secs_f64()
+            );
         });
     }
 
@@ -250,6 +258,22 @@ impl AppState {
 
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
+
+            let hit = if self.focus {
+                raytrace::cast_center_ray(&self.camera, &self.brickmap, 64)
+            } else {
+                let pos = self.input.cursor();
+                let size = renderer.window().inner_size();
+                raytrace::cast_screen_ray(
+                    &self.camera,
+                    pos,
+                    na::Vector2::new(size.width as f32, size.height as f32),
+                    &self.brickmap,
+                    64,
+                )
+            };
+            renderer.update_brick_hit(hit);
+
             if self.focus {
                 let dt = self.delta_time.as_secs_f32();
                 self.camera.update_keyboard(dt, &self.input);
@@ -281,7 +305,6 @@ impl AppState {
 
             if let Some(egui) = self.eguis.get_mut(window) {
                 let _egui = Arc::get_mut(egui).unwrap();
-                // TODO
             }
         }
     }

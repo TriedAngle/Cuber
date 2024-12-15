@@ -160,6 +160,21 @@ impl BrickMap {
         handles
     }
 
+    pub fn get_brick(&self, handle: BrickHandle) -> Option<TraceBrick> {
+        if !handle.is_data() {
+            return None;
+        }
+        let bricks = self.bricks.read();
+
+        let offset = (handle.0 & BrickHandle::DATA_MASK) as usize;
+
+        if offset >= bricks.len() {
+            return None;
+        }
+
+        Some(bricks[offset])
+    }
+
     pub fn modify_brick<F>(&self, handle: BrickHandle, modifier: F) -> Option<()>
     where
         F: FnOnce(&mut TraceBrick),

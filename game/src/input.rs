@@ -55,10 +55,10 @@ impl Input {
                         if self.pressed.contains(&key) {
                             self.pressed.remove(&key);
                             self.held.insert(key);
-                            log::debug!("Hold: {:?}", key);
+                            log::trace!("Hold: {:?}", key);
                         } else if self.held.contains(&key) {
                         } else {
-                            log::debug!("Pressed: {:?}", key);
+                            log::trace!("Pressed: {:?}", key);
                             self.pressed.insert(key);
                         }
                     }
@@ -66,7 +66,7 @@ impl Input {
                         self.pressed.remove(&key);
                         self.held.remove(&key);
                         self.released.insert(key);
-                        log::debug!("Released: {:?}", key);
+                        log::trace!("Released: {:?}", key);
                     }
                 }
             }
@@ -84,7 +84,7 @@ impl Input {
                         let h = if h != 0. { h.signum() } else { 0. };
                         self.scroll_delta = na::Vector2::new(h, -v);
                         self.scroll_cooldown = 0.1;
-                        log::debug!("Scroll: {:?}", self.scroll_delta);
+                        log::trace!("Scroll: {:?}", self.scroll_delta);
                     }
                     MouseScrollDelta::PixelDelta(p) => {
                         const PIXEL_TO_LINE_FACTOR: f32 = 0.005;
@@ -93,7 +93,7 @@ impl Input {
                             (p.y as f32) * PIXEL_TO_LINE_FACTOR,
                         );
                         self.scroll_cooldown = 0.1;
-                        log::debug!("Touchpad: {:?}, raw: {:?}", self.scroll_delta, p);
+                        log::trace!("Touchpad: {:?}, raw: {:?}", self.scroll_delta, p);
                     }
                 };
             }
@@ -103,18 +103,10 @@ impl Input {
 
     pub fn update_window(&mut self, event: &WindowEvent) {
         match event {
-            // WindowEvent::MouseWheel { delta, .. } => {
-            //     // Only update if cooldown is expired
-            //     match *delta {
-            //         MouseScrollDelta::LineDelta(h, v) => {
-            //             println!("delta: {}{},", h, v);
-            //             // self.scroll_delta = normalized;
-            //         }
-            //         MouseScrollDelta::PixelDelta(p) => {
-            //             // self.scroll_delta = v;
-            //         }
-            //     }
-            // }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_position = na::Point2::new(position.x as f32, position.y as f32);
+            }
+
             _ => {}
         }
     }

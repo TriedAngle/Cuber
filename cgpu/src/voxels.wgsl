@@ -10,7 +10,11 @@ struct ComputeUniforms {
     view_projection: mat4x4<f32>,
     inverse_view_projection: mat4x4<f32>,
     camera_position: vec3<f32>,
-    _padding1: f32
+    brick_hit_flags: u32,
+    brick_hit: vec3<i32>,
+    voxel_hit_flags: u32,
+    voxel_hit: vec3<i32>,
+    disable_sdf: u32,
 }
 
 struct TraceBrick { 
@@ -219,7 +223,7 @@ fn intersect_box(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, 
     return vec2<f32>(t_near, t_far);
 }
 
-fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, world_mask: vec3<f32>) -> Hit {
+fn trace_brick(brick_handle: u32, brick_pos: vec3<i32>, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, world_mask: vec3<f32>) -> Hit {
     let ray_pos = clamp(in_ray_pos, vec3<f32>(0.0001), vec3<f32>(7.9999));
     var map_pos = floor(ray_pos);
     let ray_sign = sign(ray_dir);
@@ -227,22 +231,35 @@ fn trace_brick(brick_handle: u32, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, wor
     var side_dist = ((map_pos - ray_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
     var mask = world_mask;
 
+    let hit_target_brick = uniforms.brick_hit_flags == 1 && all(brick_pos == uniforms.brick_hit);
+
     while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) {
         brightness = brightness + 0.001;
-        let vox = get_trace_voxel(brick_handle, vec3<i32>(map_pos));
+        let vox = get_trace_voxel(brick_handle, vec3<i32>(floor(map_pos)));
         if vox {
             let trace = trace_bricks[brick_handle];
 
-            let palette_vox_id = get_brick_voxel(trace.brick, vec3<i32>(map_pos));
+            let palette_vox_id = get_brick_voxel(trace.brick, vec3<i32>(floor(map_pos)));
 
             let palette_offset = trace.palette;
             let material_id = palettes[palette_offset + palette_vox_id];
             let material = materials[material_id];
 
+            let hit_target_voxel = uniforms.voxel_hit_flags == 1 && all(vec3<i32>(floor(map_pos)) == uniforms.voxel_hit);
+
 
             var hit = new_hit(true, mask);
             hit.pos = vec4<f32>(floor(map_pos) / 8.0, 1.0);
-            hit.color = material.color;
+
+            if hit_target_brick && hit_target_voxel { 
+                hit.color = mix(
+                    material.color,
+                    vec4<f32>(0.0, 0.0, 0.0, hit.color.a),
+                    0.3
+                );
+            } else {
+                hit.color = material.color;
+            }
             return hit;
         }
         mask = step_mask(side_dist);
@@ -294,7 +311,7 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
                     sub_space = ray_pos - map_pos;
                 }
 
-                var hit = trace_brick(brick_handle, sub_space * 8.0, ray_dir, mask);
+                var hit = trace_brick(brick_handle, vec3<i32>(floor(map_pos)), sub_space * 8.0, ray_dir, mask);
 
                 if hit.hit {
                     let hit_local_pos = hit.pos.xyz;
@@ -307,12 +324,19 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             let material = materials[material_handle];
             var hit = new_hit(true, map_pos);
             hit.color = material.color;
+            if uniforms.brick_hit_flags == 1u && all(uniforms.brick_hit == vec3<i32>(floor(map_pos))){
+                hit.color = mix(
+                    hit.color,
+                    vec4<f32>(0.0, 0.0, 0.0, hit.color.a),
+                    0.3
+                );
+            }
             hit.mask = mask;
             return hit;
         } else {
             let sdf_val = get_brick_handle_sdf(brick_handle_raw);
 
-            if sdf_val > 1 && sdf_val != MAX_DISTANCE {
+            if sdf_val > 1 && sdf_val != MAX_DISTANCE && uniforms.disable_sdf == 0 {
                 let sdf = sdf_val - 1;
                 current_pos = current_pos + (ray_dir * f32(sdf));
 

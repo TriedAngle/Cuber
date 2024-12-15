@@ -7,7 +7,10 @@ struct ComputeUniforms {
     view_projection: mat4x4<f32>,
     inverse_view_projection: mat4x4<f32>,
     camera_position: vec3<f32>,
-    _padding1: f32
+    brick_hit_flags: u32,
+    brick_hit: vec3<i32>,
+    voxel_hit_flags: u32,
+    voxel_hit: vec3<i32>,
 }
 
 struct ModelUniform { 

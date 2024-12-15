@@ -33,6 +33,7 @@ impl AppState {
             egui_renderer.begin_frame();
             let mut cycle_renderer = false;
             let mut updated_camera = false;
+            let mut toggle_sdf = false;
 
             egui::CentralPanel::default()
                 .frame(egui::Frame::none())
@@ -94,7 +95,9 @@ impl AppState {
                     if ui.add(Button::new("Cycle render mode")).clicked() {
                         cycle_renderer = true;
                     }
-
+                    if ui.add(Button::new("Toggle SDF accelleration")).clicked() {
+                        toggle_sdf = true;
+                    }
                     ui.label(RichText::new("Player:").underline());
                     ui.horizontal(|ui| {
                         ui.label("Position: ");
@@ -138,8 +141,7 @@ impl AppState {
 
                     ui.horizontal(|ui| {
                         ui.label("Rotation: ");
-                        let (mut roll, mut pitch, mut yaw) =
-                            self.camera.rotation.euler_angles();
+                        let (mut roll, mut pitch, mut yaw) = self.camera.rotation.euler_angles();
 
                         roll = roll.to_degrees();
                         pitch = pitch.to_degrees();
@@ -232,6 +234,10 @@ impl AppState {
 
             if cycle_renderer {
                 renderer.cycle_compute_render_mode();
+            }
+
+            if toggle_sdf {
+                renderer.compute_uniforms.toggle_sdf();
             }
 
             if updated_camera {

@@ -101,7 +101,6 @@ impl Camera {
             self.updated = true;
         }
 
-        // Handle speed adjustment
         if input.pressing(KeyCode::ControlLeft) {
             let scroll = input.scroll().y;
             if scroll != 0.0 {
@@ -115,9 +114,7 @@ impl Camera {
                     30.0
                 };
 
-                self.speed = (self.speed + scroll * speed_factor)
-                    .max(0.1) // Minimum speed
-                    .min(1000.0); // Maximum speed
+                self.speed = (self.speed + scroll * speed_factor).max(0.1).min(1000.0);
 
                 log::trace!("New speed: {}", self.speed);
             }
@@ -128,9 +125,7 @@ impl Camera {
             let scroll = input.scroll().y;
             if scroll != 0.0 {
                 let zoom_speed = 2.0;
-                self.fov = (self.fov - scroll * zoom_speed)
-                    .max(10.0) // Minimum FOV
-                    .min(120.0); // Maximum FOV
+                self.fov = (self.fov - scroll * zoom_speed).max(10.0).min(120.0);
                 self.updated = true;
                 log::trace!("New FOV: {}", self.fov);
             }
