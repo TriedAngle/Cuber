@@ -313,7 +313,7 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             let sdf_val = get_brick_handle_sdf(brick_handle_raw);
 
             if sdf_val > 1 && sdf_val != MAX_DISTANCE {
-                let sdf = sdf_val;
+                let sdf = sdf_val - 1;
                 current_pos = current_pos + (ray_dir * f32(sdf));
 
                 map_pos = floor(current_pos);
