@@ -11,7 +11,7 @@ use crate::{
 pub struct BrickHandle(pub u32);
 
 impl BrickHandle {
-    const FLAG_MASK: u32 = 0xE0000000; // 111 in top 3 bits
+    pub const FLAG_MASK: u32 = 0xE0000000; // 111 in top 3 bits
     const SEEN_BIT: u32 = 0x80000000; // 1 in top bit
     const STATE_MASK: u32 = 0x60000000; // 11 in bits 30-29
 
@@ -146,6 +146,10 @@ impl BrickMap {
         let bricks = unsafe { ptr.as_ref().unwrap() };
 
         bricks
+    }
+
+    pub fn as_ptr(&self) -> *mut BrickHandle {
+        self.handles.data_ptr() as *mut _
     }
 
     pub fn handles(&self) -> &[BrickHandle] {

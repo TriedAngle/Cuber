@@ -36,6 +36,9 @@ const STATE_DATA = 0x20000000u;     // x01
 const STATE_LOADING = 0x40000000u;  // x10
 const STATE_LOD = 0x60000000u;      // x11
 
+const DISTANCE_MASK: u32 = 0x1FFFFFFF;  
+const MAX_DISTANCE: u32 = DISTANCE_MASK;
+
 @group(0) @binding(0)
 var<uniform> uniforms: ComputeUniforms;
 
@@ -307,9 +310,10 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             hit.mask = mask;
             return hit;
         } else {
-            let sdf = get_brick_handle_sdf(brick_handle_raw);
+            let sdf_val = get_brick_handle_sdf(brick_handle_raw);
 
-            if sdf > 1 {
+            if sdf_val > 1 && sdf_val != MAX_DISTANCE {
+                let sdf = sdf_val;
                 current_pos = current_pos + (ray_dir * f32(sdf));
 
                 map_pos = floor(current_pos);

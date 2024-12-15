@@ -2,14 +2,12 @@ extern crate nalgebra as na;
 
 use std::{mem, sync::Arc, time::Duration};
 
-use bricks::BrickState;
 use camera::Camera;
 use game::{input::Input, Diagnostics, Transform};
-use materials::MaterialState;
 use mesh::{SimpleTextureMesh, TexVertex, Vertex};
 use state::GPUState;
 use texture::Texture;
-use wgpu::{core::device, util::DeviceExt};
+use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub mod bricks;
@@ -19,6 +17,7 @@ mod dense;
 mod freelist;
 pub mod materials;
 mod mesh;
+pub mod sdf;
 pub mod state;
 mod texture;
 
@@ -333,8 +332,8 @@ impl RenderContext {
         meshes.push(mesh2);
 
         let mut camera = Camera::new(
-            na::Point3::new(60., 70., 50.),
-            na::UnitQuaternion::from_euler_angles(-175., 175., -50.),
+            na::Point3::new(-30.0, 80., -30.),
+            na::UnitQuaternion::from_euler_angles(3.1, 2.6, -0.4),
             50.,
             0.002,
             45.,

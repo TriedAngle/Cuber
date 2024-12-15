@@ -4,9 +4,10 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicI32, Ordering},
-        mpsc, Arc,
+        Arc,
     },
-    thread, time,
+    thread,
+    time::{self, Duration},
 };
 
 use cgpu::{state::GPUState, RenderContext};
@@ -16,8 +17,7 @@ use game::{
     input::Input,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
-    sdf,
-    worldgen::{GeneratedBrick, WorldGenerator},
+    worldgen::WorldGenerator,
     Diagnostics,
 };
 use winit::{
@@ -129,6 +129,7 @@ impl AppState {
         let gpu = self.gpu.clone();
 
         thread::spawn(move || {
+            thread::sleep(Duration::from_secs(3));
             let dimensions = brickmap.dimensions();
             let last_update = AtomicI32::new(0);
 
@@ -168,16 +169,16 @@ impl AppState {
             gpu.bricks.update_all_bricks();
             gpu.materials.update_all_palettes();
 
-            sdf::distance_field_parallel_pass(
-                &brickmap,
-                na::Point3::origin(),
-                na::Point3::from(dimensions),
-                10,
-                |_percentage| {
-                    gpu.bricks.update_all_handles();
-                },
+            let sdf = cgpu::sdf::SDFGenerator::new(
+                gpu.device.clone(),
+                gpu.queue.clone(),
+                gpu.bricks.clone(),
             );
-            gpu.bricks.update_all_handles();
+            log::debug!("generate SDF");
+            let dims = gpu.bricks.brickmap.dimensions();
+            let steps = dims.x.max(dims.y.max(dims.z));
+            sdf.generate(steps);
+            log::debug!("Finish SDF");
         });
     }
 
