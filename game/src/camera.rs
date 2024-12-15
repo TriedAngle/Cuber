@@ -1,4 +1,4 @@
-use game::input::Input;
+use crate::Input;
 use winit::keyboard::KeyCode;
 
 pub struct Camera {

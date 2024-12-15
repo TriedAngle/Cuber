@@ -7,18 +7,17 @@ use std::{
         Arc,
     },
     thread,
-    time::{self, Duration},
+    time::{Duration, SystemTime},
 };
 
 use cgpu::{state::GPUState, RenderContext};
 use egui_integration::EguiRenderer;
 use game::{
     brick::BrickMap,
-    input::Input,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
     worldgen::WorldGenerator,
-    Diagnostics,
+    Camera, Diagnostics, Input,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -33,10 +32,10 @@ mod egui_integration;
 mod ui;
 
 pub struct AppState {
-    pub last_update: time::SystemTime,
-    pub delta_time: time::Duration,
+    pub last_update: SystemTime,
+    pub delta_time: Duration,
     pub diagnostics: Diagnostics,
-    pub input: game::input::Input,
+    pub input: Input,
     pub proxy: EventLoopProxy<AppEvent>,
     pub windows: HashMap<WindowId, Arc<Window>>,
 
@@ -53,6 +52,8 @@ pub struct AppState {
     pub brickmap: Arc<BrickMap>,
     pub palettes: Arc<PaletteRegistry>,
     pub materials: Arc<MaterialRegistry>,
+
+    pub camera: Camera,
 }
 
 #[derive(Debug, Clone)]
@@ -93,9 +94,20 @@ impl AppState {
 
         gpu.materials.update_all_materials();
 
+        let camera = Camera::new(
+            na::Point3::new(-30.0, 80., -30.),
+            na::UnitQuaternion::from_euler_angles(3.1, 2.6, -0.4),
+            50.,
+            0.002,
+            45.,
+            16.0 / 9.0,
+            0.1,
+            100.,
+        );
+
         let state = Self {
-            last_update: time::SystemTime::now(),
-            delta_time: time::Duration::from_nanos(0),
+            last_update: SystemTime::now(),
+            delta_time: Duration::from_nanos(0),
             diagnostics: Diagnostics::new(),
             input: Input::new(),
             proxy: event_loop.create_proxy(),
@@ -114,6 +126,7 @@ impl AppState {
             brickmap,
             palettes,
             materials,
+            camera,
         };
 
         state.generate_volume();
@@ -226,12 +239,9 @@ impl AppState {
                 }
             }
         }
-
-        for (_, renderer) in self.renderers.iter_mut() {
-            let renderer = Arc::get_mut(renderer).unwrap();
-            if self.focus {
-                renderer.update_camera_mouse(self.delta_time, &self.input);
-            }
+        if self.focus {
+            let dt = self.delta_time.as_secs_f32();
+            self.camera.update_mouse(dt, &self.input);
         }
     }
 
@@ -241,10 +251,12 @@ impl AppState {
         if let Some(renderer) = self.renderers.get_mut(window) {
             let renderer = Arc::get_mut(renderer).unwrap();
             if self.focus {
-                renderer.update_camera_keyboard(self.delta_time, &self.input);
+                let dt = self.delta_time.as_secs_f32();
+                self.camera.update_keyboard(dt, &self.input);
             }
             self.diagnostics.start("vertex");
-            renderer.update_uniforms(self.delta_time);
+            renderer.update_uniforms(&self.camera, self.delta_time);
+            self.camera.reset_update();
             let _ = renderer.prepare_render();
             renderer.render();
 

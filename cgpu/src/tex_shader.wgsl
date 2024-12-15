@@ -1,15 +1,33 @@
-struct CameraUniform { 
+struct ComputeUniforms { 
+    resolution: vec2<f32>,
+    dt: f32, 
+    render_mode: u32, // 0 game, 1 depth, 2 normals, 3 traversal
+    brick_grid_dimension: vec3<i32>,
+    depth_boost: f32,
     view_projection: mat4x4<f32>,
+    inverse_view_projection: mat4x4<f32>,
+    camera_position: vec3<f32>,
+    _padding1: f32
 }
 
 struct ModelUniform { 
     transform: mat4x4<f32>,
 }
+@group(0) @binding(0)
+var t_diffuse: texture_2d<f32>;
+@group(0) @binding(1)
+var s_diffuse: sampler;
+
+@group(0) @binding(2)
+var<uniform> uniforms: ComputeUniforms;
+
+@group(1) @binding(0)
+var ComputeDepthTexture: texture_2d<f32>;
+
+@group(1) @binding(1)
+var ComputeDepthSampler: sampler;
 
 @group(2) @binding(0)
-var<uniform> camera: CameraUniform;
-
-@group(3) @binding(0)
 var<uniform> model: ModelUniform;
 
 struct VertexInput {
@@ -30,7 +48,7 @@ fn vs_main(
 ) -> VertexOutput { 
     var out: VertexOutput;
     var world_position = model.transform * vec4<f32>(vertex.position, 1.0);
-    let clip_position = camera.view_projection * world_position;
+    let clip_position = uniforms.view_projection * world_position;
     out.clip_position = clip_position;
     out.clip_space_position = clip_position;
     out.tex_coords = vertex.tex_coords;
@@ -38,16 +56,7 @@ fn vs_main(
     return out;
 }
 
-@group(0) @binding(0)
-var t_diffuse: texture_2d<f32>;
-@group(0) @binding(1)
-var s_diffuse: sampler;
 
-@group(1) @binding(0)
-var ComputeDepthTexture: texture_2d<f32>;
-
-@group(1) @binding(1)
-var ComputeDepthSampler: sampler;
 
 @fragment
 fn fs_main(

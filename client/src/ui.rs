@@ -1,6 +1,6 @@
 use crate::AppState;
 
-use egui::{Align2, Button, Color32, DragValue, Pos2, RichText, Stroke, Vec2};
+use egui::{Button, Color32, DragValue, Pos2, RichText, Stroke, Vec2};
 use std::sync::Arc;
 use winit::window::WindowId;
 
@@ -101,7 +101,7 @@ impl AppState {
 
                         if ui
                             .add(
-                                DragValue::new(&mut renderer.camera.position.x)
+                                DragValue::new(&mut self.camera.position.x)
                                     .speed(0.1)
                                     .prefix("x: ")
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
@@ -113,7 +113,7 @@ impl AppState {
 
                         if ui
                             .add(
-                                DragValue::new(&mut renderer.camera.position.y)
+                                DragValue::new(&mut self.camera.position.y)
                                     .speed(0.1)
                                     .prefix("y: ")
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
@@ -125,7 +125,7 @@ impl AppState {
 
                         if ui
                             .add(
-                                DragValue::new(&mut renderer.camera.position.z)
+                                DragValue::new(&mut self.camera.position.z)
                                     .speed(0.1)
                                     .prefix("z: ")
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
@@ -139,7 +139,7 @@ impl AppState {
                     ui.horizontal(|ui| {
                         ui.label("Rotation: ");
                         let (mut roll, mut pitch, mut yaw) =
-                            renderer.camera.rotation.euler_angles();
+                            self.camera.rotation.euler_angles();
 
                         roll = roll.to_degrees();
                         pitch = pitch.to_degrees();
@@ -185,7 +185,7 @@ impl AppState {
                             roll = roll.to_radians();
                             pitch = pitch.to_radians();
                             yaw = yaw.to_radians();
-                            renderer.camera.rotation =
+                            self.camera.rotation =
                                 na::UnitQuaternion::from_euler_angles(roll, pitch, yaw);
                         }
                     });
@@ -194,7 +194,7 @@ impl AppState {
 
                         if ui
                             .add(
-                                DragValue::new(&mut renderer.camera.speed)
+                                DragValue::new(&mut self.camera.speed)
                                     .speed(1.0)
                                     .prefix("Speed: ")
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
@@ -203,7 +203,7 @@ impl AppState {
                         {}
                         if ui
                             .add(
-                                DragValue::new(&mut renderer.camera.fov)
+                                DragValue::new(&mut self.camera.fov)
                                     .speed(1.0)
                                     .prefix("Fov: ")
                                     .custom_formatter(|val, _| format!("{:.2}", val)),
@@ -235,8 +235,8 @@ impl AppState {
             }
 
             if updated_camera {
-                renderer.camera.force_udpate();
-                renderer.update_uniforms(self.delta_time);
+                self.camera.force_udpate();
+                renderer.update_uniforms(&self.camera, self.delta_time);
             }
         }
     }

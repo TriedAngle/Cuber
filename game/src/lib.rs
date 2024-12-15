@@ -1,13 +1,15 @@
 extern crate nalgebra as na;
 
 pub mod brick;
-pub mod input;
+mod input;
 pub mod material;
 pub mod palette;
-pub mod sdf;
 pub mod worldgen;
+mod camera;
 
 pub use input::Input;
+pub use camera::Camera;
+
 use std::{
     collections::HashMap,
     time::{self, Duration},
