@@ -53,7 +53,7 @@ impl WorldGenerator {
         let mut terrain_noise = FastNoiseLite::new();
         terrain_noise.set_noise_type(Some(NoiseType::Perlin));
         terrain_noise.set_seed(Some(2324));
-        terrain_noise.set_frequency(Some(0.005));
+        terrain_noise.set_frequency(Some(0.009));
         terrain_noise.set_fractal_type(Some(FractalType::FBm));
         terrain_noise.set_fractal_octaves(Some(4));
         terrain_noise.set_fractal_lacunarity(Some(2.0));
@@ -96,13 +96,13 @@ impl WorldGenerator {
 
         let continent_val = self.continent_noise.get_noise_2d(x as f32, z as f32);
         let terrain_val = self.terrain_noise.get_noise_2d(x as f32, z as f32);
-        let final_height = (100.0 + (continent_val * 150.0) + (terrain_val * 180.0).round()) as u32;
+        let final_height = (300.0 + (continent_val * 200.0) + (terrain_val * 380.0).round()) as u32;
         let height_diff = final_height as i32 - y as i32;
 
         if y == 0 {
             bedrock
         } else if y == final_height {
-            if final_height >= 200 {
+            if final_height >= 800 {
                 snow
             } else {
                 grass

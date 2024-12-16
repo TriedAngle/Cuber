@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::bricks::BrickState;
-
 pub struct SDFGenerator {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,

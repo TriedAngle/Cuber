@@ -70,7 +70,7 @@ impl AppState {
 
         let palettes = Arc::new(PaletteRegistry::new());
 
-        let brickmap_dimensions = na::Vector3::new(1028, 64, 512);
+        let brickmap_dimensions = na::Vector3::new(1000, 512, 1000);
         let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
 
         let generator = Arc::new(WorldGenerator::new());
@@ -144,6 +144,11 @@ impl AppState {
         let palettes = self.palettes.clone();
         let generator = self.generator.clone();
         let gpu = self.gpu.clone();
+        let sdf = Arc::new(cgpu::sdf::SDFGenerator::new(
+            gpu.device.clone(),
+            gpu.queue.clone(),
+            gpu.bricks.clone(),
+        ));
 
         thread::spawn(move || {
             thread::sleep(Duration::from_secs(3));
@@ -188,11 +193,7 @@ impl AppState {
 
             let sdf_start = SystemTime::now();
             log::debug!("Start: generate SDF");
-            let sdf = cgpu::sdf::SDFGenerator::new(
-                gpu.device.clone(),
-                gpu.queue.clone(),
-                gpu.bricks.clone(),
-            );
+
             let dims = gpu.bricks.brickmap.dimensions();
             let steps = dims.x.max(dims.y.max(dims.z));
             sdf.generate(steps);

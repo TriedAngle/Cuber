@@ -33,6 +33,7 @@ impl BrickState {
 
         let handle_size = mem::size_of::<BrickHandle>() as u64 * count;
 
+        println!("HANDLES: {:?}", handle_size);
         let handle_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Handle Buffer"),
             size: handle_size,
@@ -44,7 +45,7 @@ impl BrickState {
 
         let dims = brickmap.dimensions();
         let count = dims.x * dims.y * dims.z;
-        let count = count as u64;
+        let count = count.min(3728268) as u64;
 
         let trace_buffer = GPUFreeListBuffer::new(
             device.clone(),

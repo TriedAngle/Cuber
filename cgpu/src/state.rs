@@ -45,9 +45,7 @@ impl GPUState {
 
         let custom_features = wgpu::Features::empty()
             | wgpu::Features::TIMESTAMP_QUERY
-            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
-        // TODO: implement this
-           | wgpu::Features::SHADER_INT64;
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
 
         let mut custom_limits = if cfg!(target_arch = "wasm32") {
             wgpu::Limits::downlevel_webgl2_defaults()
@@ -55,7 +53,7 @@ impl GPUState {
             wgpu::Limits::default()
         };
 
-        custom_limits.max_storage_buffer_binding_size = 4000 << 20;
+        custom_limits.max_storage_buffer_binding_size = limits.max_storage_buffer_binding_size;
         custom_limits.max_buffer_size = limits.max_buffer_size;
 
         if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
