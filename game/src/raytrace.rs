@@ -120,8 +120,13 @@ pub fn trace_world(
 
     let mut mask = step_mask(&side_dist);
 
+    let dims = brickmap.dimensions();
     for _ in 0..max_steps {
         let brick_pos = na::Point3::new(map_pos.x as u32, map_pos.y as u32, map_pos.z as u32);
+
+        if brick_pos.x >= dims.x || brick_pos.y >= dims.y || brick_pos.z >= dims.z { 
+            return None;
+        }
 
         let handle = brickmap.get_handle(brick_pos);
         if handle.is_data() {

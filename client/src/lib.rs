@@ -70,7 +70,7 @@ impl AppState {
 
         let palettes = Arc::new(PaletteRegistry::new());
 
-        let brickmap_dimensions = na::Vector3::new(1000, 512, 1000);
+        let brickmap_dimensions = na::Vector3::new(256, 256, 256);
         let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
 
         let generator = Arc::new(WorldGenerator::new());
@@ -97,7 +97,7 @@ impl AppState {
         gpu.materials.update_all_materials();
 
         let mut camera = Camera::new(
-            na::Point3::new(256.0, 80., 256.),
+            na::Point3::new(128.0, 80., 128.),
             na::UnitQuaternion::identity(),
             50.,
             0.002,
@@ -107,7 +107,7 @@ impl AppState {
             100.,
         );
 
-        camera.look_at(na::Point3::new(256., 80., 257.), &na::Vector3::y_axis());
+        camera.look_at(na::Point3::new(128., 80., 129.), &na::Vector3::y_axis());
 
         let state = Self {
             last_update: SystemTime::now(),
@@ -159,8 +159,8 @@ impl AppState {
                 &brickmap,
                 na::Point3::origin(),
                 na::Point3::from(dimensions),
-                na::Point3::new(256, 32, 256),
-                128,
+                na::Point3::new(128, 32, 128),
+                100,
                 &material_mapping,
                 &palettes,
                 8,

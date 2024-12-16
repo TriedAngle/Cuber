@@ -24,16 +24,16 @@ impl App {
         if let Some(window) = self.state.windows.get(window_id) {
             self.state.active_window = Some(window.clone());
 
-            // if self.state.focus {
-            //     if window
-            //         .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-            //         .is_ok()
-            //     {
-            //         window.set_cursor_visible(false);
-            //     } else {
-            //         log::error!("Failed to grab: {:?}", window_id);
-            //     }
-            // }
+            if self.state.focus {
+                if window
+                    .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                    .is_ok()
+                {
+                    window.set_cursor_visible(false);
+                } else {
+                    log::error!("Failed to grab: {:?}", window_id);
+                }
+            }
         }
     }
 
