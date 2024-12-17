@@ -1,6 +1,7 @@
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
+use std::num::{NonZero, NonZeroU64};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -117,29 +118,17 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         }
 
         let bytes = bytemuck::bytes_of(data);
-        let staging_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Staging Buffer"),
-                contents: bytes,
-                usage: wgpu::BufferUsages::COPY_SRC,
-            });
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Write Command Encoder"),
-            });
-
-        encoder.copy_buffer_to_buffer(
-            &staging_buffer,
-            0,
+        
+        if let Some(mut view) = self.queue.write_buffer_with(
             &self.buffer.read(),
             index * std::mem::size_of::<T>() as u64,
-            std::mem::size_of::<T>() as u64,
-        );
+        NonZeroU64::new(bytes.len() as u64).unwrap(),
+        ) {
+            view.copy_from_slice(bytes);
+        }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        // self.device.poll(wgpu::Maintain::Wait);
+        self.queue.submit([]);
         Some(())
     }
 

@@ -184,19 +184,18 @@ impl BrickState {
     }
 
     pub fn transfer_brick(&self, handle: BrickHandle) {
-        if handle.is_data() {
-            let brick = self.brickmap.get_brick(handle).unwrap();
-            let offset = brick.get_brick_offset();
-            let bits_per_elment = brick.get_brick_size();
-            let total_size = (bits_per_elment + 1) * 512;
-            let _ = self.trace_buffer.write(handle.data() as u64, &brick);
-            self.brick_buffer.copy_from_cpu(
-                self.brickmap.material_bricks(),
-                offset as usize,
-                total_size as usize,
-                offset as u64,
-            );
-        }
+        let index = handle.data();
+        let brick = self.brickmap.get_brick(handle).unwrap();
+        let offset = brick.get_brick_offset();
+        let bits_per_elment = brick.get_brick_size();
+        let total_size = (bits_per_elment + 1) * 512;
+        let _ = self.trace_buffer.write(index as u64, &brick);
+        self.brick_buffer.copy_from_cpu(
+            self.brickmap.material_bricks(),
+            offset as usize,
+            total_size as usize,
+            offset as u64,
+        );
     }
 
     pub fn allocate_brick(
@@ -246,6 +245,7 @@ impl BrickState {
         let offset = brick.get_brick_offset();
         let bits_per_element = brick.get_brick_size();
         let total_size = bits_per_element * 512;
+        self.brickmap.material_bricks().deallocate_size(offset as usize, total_size as usize);
         self.brick_buffer.deallocate_size(offset as u64, total_size as u64, |_buffer| {
             self.recreate_bind_group();
         });

@@ -109,6 +109,18 @@ impl DenseBuffer {
         self.try_shrink();
     }
 
+    
+    pub fn deallocate_size(&self, offset: usize, size: usize) {
+        let mut free_blocks = self.free_blocks.write();
+
+        free_blocks
+            .entry(size)
+            .or_insert_with(Vec::new)
+            .push(FreeBlock { offset });
+
+        self.try_shrink();
+    }
+
     pub fn write<T: Copy>(&self, offset: usize, data: &T) {
         let size = std::mem::size_of::<T>();
         let buffer = self.buffer.read();

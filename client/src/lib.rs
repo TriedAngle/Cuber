@@ -203,6 +203,7 @@ impl AppState {
             );
             gpu.bricks.update_all_handles();
             gpu.bricks.update_all_bricks();
+            gpu.bricks.update_all_material_bricks();
             gpu.materials.update_all_palettes();
 
             let sdf_start = SystemTime::now();
