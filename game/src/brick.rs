@@ -4,6 +4,7 @@ use rand::Rng;
 use crate::{
     material::{ExpandedMaterialMapping, MaterialId},
     palette::PaletteId,
+    DenseBuffer,
 };
 
 #[repr(transparent)]
@@ -11,7 +12,7 @@ use crate::{
 pub struct BrickHandle(pub u32);
 
 impl BrickHandle {
-    pub const FLAG_MASK: u32 = 0xE0000000; // 111 in top 3 bits
+    const FLAG_MASK: u32 = 0xE0000000; // 111 in top 3 bits
     const SEEN_BIT: u32 = 0x80000000; // 1 in top bit
     const STATE_MASK: u32 = 0x60000000; // 11 in bits 30-29
 
@@ -30,6 +31,10 @@ impl BrickHandle {
         Self::zero()
     }
 
+    pub fn data(&self) -> u32 {
+        self.0 & Self::DATA_MASK
+    }
+
     pub fn write_data(&mut self, data: u32) {
         let seen_bits = self.0 & Self::SEEN_BIT;
         let masked_data = data & Self::DATA_MASK;
@@ -42,16 +47,16 @@ impl BrickHandle {
         self.0 = masked_data | Self::STATE_EMPTY | seen_bits;
     }
 
-    pub fn set_loading(&mut self) {
-        let seen_bits = self.0 & Self::SEEN_BIT;
-        let data_bits = self.0 & Self::DATA_MASK;
-        self.0 = data_bits | Self::STATE_LOADING | seen_bits;
-    }
-
     pub fn write_lod(&mut self, material: MaterialId) {
         let seen_bits = self.0 & Self::SEEN_BIT;
         let masked_data = material.0 & Self::DATA_MASK;
         self.0 = masked_data | Self::STATE_LOD | seen_bits;
+    }
+
+    pub fn set_loading(&mut self) {
+        let seen_bits = self.0 & Self::SEEN_BIT;
+        let data_bits = self.0 & Self::DATA_MASK;
+        self.0 = data_bits | Self::STATE_LOADING | seen_bits;
     }
 
     pub fn mark_seen(&mut self) {
@@ -97,6 +102,7 @@ pub struct BrickMap {
     size: na::Vector3<u32>,
     handles: RwLock<Vec<BrickHandle>>,
     bricks: RwLock<Vec<TraceBrick>>,
+    material_bricks: DenseBuffer,
 }
 
 impl BrickMap {
@@ -104,11 +110,13 @@ impl BrickMap {
         let volume = size.x * size.y * size.z;
         let handles = RwLock::new(vec![BrickHandle::empty(); volume as usize]);
         let bricks = RwLock::new(vec![]);
+        let material_bricks = DenseBuffer::new(512 << 20);
 
         Self {
             size,
             handles,
             bricks,
+            material_bricks,
         }
     }
 
@@ -218,6 +226,58 @@ impl BrickMap {
 
     pub fn volume(&self) -> u32 {
         self.size.x * self.size.y * self.size.z
+    }
+
+    pub fn material_bricks(&self) -> &DenseBuffer {
+        &self.material_bricks
+    }
+
+    pub fn edit_brick_no_resize(
+        &self,
+        handle: BrickHandle,
+        at: Option<na::Point3<u32>>,
+        value: u8,
+    ) {
+        let mut offset = 0;
+        let mut bits_per_element = 0;
+        self.modify_brick(handle, |brick| {
+            offset = brick.get_brick_offset();
+            bits_per_element = brick.get_brick_size() + 1;
+            if let Some(at) = at {
+                brick.set(at.x, at.y, at.z, value != 0);
+            }
+        });
+
+        if let Some(at) = at {
+            let data = self.material_bricks.data_mut();
+            match bits_per_element {
+                1 => {
+                    let brick: &mut MaterialBrick1 = unsafe {
+                        &mut *(data[offset as usize..].as_mut_ptr() as *mut MaterialBrick1)
+                    };
+                    brick.set(at.x, at.y, at.z, value);
+                }
+                2 => {
+                    let brick: &mut MaterialBrick2 = unsafe {
+                        &mut *(data[offset as usize..].as_mut_ptr() as *mut MaterialBrick2)
+                    };
+                    brick.set(at.x, at.y, at.z, value);
+                }
+                4 => {
+                    let brick: &mut MaterialBrick4 = unsafe {
+                        &mut *(data[offset as usize..].as_mut_ptr() as *mut MaterialBrick4)
+                    };
+                    brick.set(at.x, at.y, at.z, value);
+                }
+                8 => {
+                    let brick: &mut MaterialBrick8 = unsafe {
+                        &mut *(data[offset as usize..].as_mut_ptr() as *mut MaterialBrick8)
+                    };
+                    brick.set(at.x, at.y, at.z, value);
+                }
+                _ => panic!("Invalid brick size: {}", bits_per_element),
+            }
+        }
     }
 }
 

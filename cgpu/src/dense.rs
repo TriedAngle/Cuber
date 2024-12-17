@@ -1,5 +1,5 @@
 #![allow(unused)]
-use game::{brick::MaterialBrick, material::MaterialId};
+use game::{brick::MaterialBrick, material::MaterialId, DenseBuffer};
 use parking_lot::RwLock;
 use std::{
     collections::BTreeMap,
@@ -421,5 +421,34 @@ impl GPUDenseBuffer {
         on_resize: F,
     ) -> Option<u64> {
         self.allocate_and_write_dense(palette, on_resize)
+    }
+
+    pub fn reset_copy_from_cpu(&self, cpu_buffer: &DenseBuffer) {
+        let mut buffer = self.buffer.write();
+        let new = Self::create_buffer(&self.device, cpu_buffer.data().len() as u64);
+
+        self.queue.write_buffer(&new, 0, &cpu_buffer.data());
+        self.queue.submit([]);
+
+        *buffer = new;
+        self.current_offset.store(
+            cpu_buffer.current_offset.load(Ordering::SeqCst) as u64,
+            Ordering::SeqCst,
+        );
+    }
+
+    pub fn copy_from_cpu(
+        &self,
+        cpu_buffer: &DenseBuffer,
+        src_offset: usize,
+        size: usize,
+        dst_offset: u64,
+    ) {
+        self.queue.write_buffer(
+            &self.buffer.read(),
+            dst_offset,
+            &cpu_buffer.data()[src_offset..src_offset + size],
+        );
+        self.queue.submit([]);
     }
 }

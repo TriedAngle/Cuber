@@ -140,6 +140,28 @@ impl BrickState {
             });
     }
 
+    pub fn update_all_material_bricks(&self) {
+        self.brick_buffer.clear();
+        self.brick_buffer
+            .reset_copy_from_cpu(self.brickmap.material_bricks());
+    }
+
+    pub fn transfer_brick(&self, handle: BrickHandle) {
+        if handle.is_data() {
+            let brick = self.brickmap.get_brick(handle).unwrap();
+            let offset = brick.get_brick_offset();
+            let bits_per_elment = brick.get_brick_size();
+            let total_size = (bits_per_elment + 1) * 512;
+            let _ = self.trace_buffer.write(handle.data() as u64, &brick);
+            self.brick_buffer.copy_from_cpu(
+                self.brickmap.material_bricks(),
+                offset as usize,
+                total_size as usize,
+                offset as u64,
+            );
+        }
+    }
+
     pub fn allocate_brick(
         &self,
         brick: MaterialBrick,

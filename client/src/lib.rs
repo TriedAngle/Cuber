@@ -22,7 +22,7 @@ use game::{
 };
 use winit::{
     dpi::PhysicalSize,
-    event::{DeviceEvent, WindowEvent},
+    event::{DeviceEvent, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::KeyCode,
     window::{Window, WindowAttributes, WindowId},
@@ -165,7 +165,21 @@ impl AppState {
                 8,
                 |_, _, _, _| {},
                 |bricks, palettes, handles, _ats, percentage| {
-                    let _ = gpu.bricks.allocate_bricks(&bricks, &handles, &palettes);
+                    // let _ = gpu.bricks.allocate_bricks(&bricks, &handles, &palettes);
+                    let offsets = brickmap
+                        .material_bricks()
+                        .allocate_bricks(&bricks)
+                        .expect("Must be able to allocate");
+
+                    offsets.iter().zip(handles).zip(palettes).for_each(
+                        |((&(offset, size), handle), palette)| {
+                            let _ = brickmap.modify_brick(handle, |trace| {
+                                trace.set_brick_info(size as u32 - 1, offset as u32);
+                                trace.set_palette(palette);
+                            });
+                        },
+                    );
+
                     let current_percentage = percentage as i32;
                     let previous = last_update.load(Ordering::Relaxed);
                     if current_percentage >= previous + 10 || current_percentage == 100 {
@@ -181,6 +195,7 @@ impl AppState {
                             log::debug!("Updated Buffers");
                             gpu.bricks.update_all_handles();
                             gpu.bricks.update_all_bricks();
+                            gpu.bricks.update_all_material_bricks();
                             gpu.materials.update_all_palettes();
                         }
                     }
@@ -247,6 +262,31 @@ impl AppState {
                 }
             }
         }
+
+        if let Some(window) = &self.active_window {
+            if self.input.mouse_pressed(MouseButton::Left) {
+                let hit = if self.focus {
+                    raytrace::cast_center_ray(&self.camera, &self.brickmap, 64)
+                } else {
+                    let pos = self.input.cursor();
+                    let size = window.inner_size();
+                    raytrace::cast_screen_ray(
+                        &self.camera,
+                        pos,
+                        na::Vector2::new(size.width as f32, size.height as f32),
+                        &self.brickmap,
+                        64,
+                    )
+                };
+
+                if let Some(hit) = hit {
+                    self.brickmap
+                        .edit_brick_no_resize(hit.handle, hit.voxel_local_pos, 0);
+                    self.gpu.bricks.transfer_brick(hit.handle);
+                }
+            }
+        }
+
         if self.focus {
             let dt = self.delta_time.as_secs_f32();
             self.camera.update_mouse(dt, &self.input);

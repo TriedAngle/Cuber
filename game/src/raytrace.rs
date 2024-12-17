@@ -1,5 +1,5 @@
 use crate::{
-    brick::{BrickMap, TraceBrick},
+    brick::{BrickHandle, BrickMap, TraceBrick},
     Camera,
 };
 
@@ -10,6 +10,7 @@ pub struct RayHit {
     pub position: na::Point3<f32>,
     pub normal: na::Vector3<f32>,
     pub distance: f32,
+    pub handle: BrickHandle,
     pub pos: na::Point3<f32>,
     pub brick_pos: na::Point3<u32>,
     pub voxel_local_pos: Option<na::Point3<u32>>,
@@ -157,6 +158,7 @@ pub fn trace_world(
                     normal,
                     distance: d,
                     pos,
+                    handle,
                     brick_pos,
                     voxel_local_pos: Some(na::Point3::new(
                         (hit_pos.x * 8.0) as u32,
@@ -179,6 +181,7 @@ pub fn trace_world(
                 position: na::Point3::from(map_pos.map(|x| x / 8.0)),
                 normal,
                 distance: d,
+                handle,
                 pos,
                 brick_pos,
                 voxel_local_pos: None,

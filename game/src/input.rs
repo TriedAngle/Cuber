@@ -2,7 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use bytemuck::Zeroable;
 use winit::{
-    event::{DeviceEvent, ElementState, MouseScrollDelta, WindowEvent},
+    event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     keyboard::{KeyCode, PhysicalKey},
 };
 
@@ -14,6 +14,10 @@ pub struct Input {
     pressed: HashSet<KeyCode>,
     held: HashSet<KeyCode>,
     released: HashSet<KeyCode>,
+
+    pressed_buttons: HashSet<MouseButton>,
+    held_buttons: HashSet<MouseButton>,
+    released_buttons: HashSet<MouseButton>,
 }
 
 impl Input {
@@ -26,6 +30,10 @@ impl Input {
             pressed: HashSet::new(),
             held: HashSet::new(),
             released: HashSet::new(),
+
+            pressed_buttons: HashSet::new(),
+            held_buttons: HashSet::new(),
+            released_buttons: HashSet::new(),
         }
     }
 
@@ -33,6 +41,7 @@ impl Input {
         self.cursor_delta = na::Vector2::zeros();
         self.scroll_delta = na::Vector2::zeros();
         self.released.clear();
+        self.released_buttons.clear();
 
         if self.scroll_cooldown > 0.0 {
             self.scroll_cooldown -= dt.as_secs_f64() as f32;
@@ -105,6 +114,25 @@ impl Input {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_position = na::Point2::new(position.x as f32, position.y as f32);
             }
+            WindowEvent::MouseInput { state, button, .. } => match state {
+                ElementState::Pressed => {
+                    if self.pressed_buttons.contains(button) {
+                        self.pressed_buttons.remove(button);
+                        self.held_buttons.insert(*button);
+                        log::trace!("Hold: {:?}", button);
+                    } else if self.held_buttons.contains(&button) {
+                    } else {
+                        log::trace!("Pressed: {:?}", button);
+                        self.pressed_buttons.insert(*button);
+                    }
+                }
+                ElementState::Released => {
+                    self.pressed_buttons.remove(button);
+                    self.held_buttons.remove(button);
+                    self.released_buttons.insert(*button);
+                    log::trace!("Released: {:?}", button);
+                }
+            },
 
             _ => {}
         }
@@ -136,5 +164,21 @@ impl Input {
 
     pub fn scroll(&self) -> na::Vector2<f32> {
         self.scroll_delta
+    }
+
+    pub fn mouse_pressed(&self, code: MouseButton) -> bool {
+        self.pressed_buttons.contains(&code)
+    }
+
+    pub fn mouse_held(&self, code: MouseButton) -> bool {
+        self.held_buttons.contains(&code)
+    }
+
+    pub fn mouse_pressing(&self, code: MouseButton) -> bool {
+        self.pressed_buttons.contains(&code) || self.held_buttons.contains(&code)
+    }
+
+    pub fn mouse_released(&self, code: MouseButton) -> bool {
+        self.released_buttons.contains(&code)
     }
 }

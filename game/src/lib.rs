@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 
 pub mod brick;
 mod camera;
+mod dense;
 mod input;
 pub mod material;
 pub mod octree;
@@ -10,6 +11,7 @@ pub mod raytrace;
 pub mod worldgen;
 
 pub use camera::Camera;
+pub use dense::DenseBuffer;
 pub use input::Input;
 
 use std::{
