@@ -13,7 +13,7 @@ use std::{
 use cgpu::{state::GPUState, RenderContext};
 use egui_integration::EguiRenderer;
 use game::{
-    brick::BrickMap,
+    brick::{BrickHandle, BrickMap},
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
     raytrace,
@@ -72,7 +72,7 @@ impl AppState {
         let brickmap_dimensions = na::Vector3::new(128, 128, 128);
         let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
 
-        let generator = Arc::new(WorldGenerator::new());
+        let generator = Arc::new(WorldGenerator::new(Some(420)));
 
         let mut material_mapping = Arc::new(ExpandedMaterialMapping::new());
 
@@ -280,9 +280,15 @@ impl AppState {
                 };
 
                 if let Some(hit) = hit {
-                    self.brickmap
+                    if hit.voxel_local_pos.is_none() && hit.handle.is_lod() {
+                        let handle = BrickHandle::empty();
+                        self.brickmap.set_handle(handle, hit.brick_pos);
+                        self.gpu.bricks.transfer_handle(handle, hit.brick_pos);
+                    } else {
+                        self.brickmap
                         .edit_brick_no_resize(hit.handle, hit.voxel_local_pos, 0);
-                    self.gpu.bricks.transfer_brick(hit.handle);
+                        self.gpu.bricks.transfer_brick(hit.handle);
+                    }
                 }
             }
         }

@@ -43,93 +43,179 @@ impl LodSamples {
 }
 
 pub struct WorldGenerator {
-    terrain_noise: FastNoiseLite,
-    continent_noise: FastNoiseLite,
-    cave_noise: FastNoiseLite,
+    base_terrain: FastNoiseLite,
+    mountain_noise: FastNoiseLite,
+    mountain_mask: FastNoiseLite,
+    mountain_blend: FastNoiseLite,
+    cheese_cave_noise: FastNoiseLite,
+    spaghetti_cave_noise: FastNoiseLite,
+    spaghetti_size_noise: FastNoiseLite,
+    seed: i32,
 }
 
 impl WorldGenerator {
-    pub fn new() -> Self {
-        let mut terrain_noise = FastNoiseLite::new();
-        terrain_noise.set_noise_type(Some(NoiseType::Perlin));
-        terrain_noise.set_seed(Some(2324));
-        terrain_noise.set_frequency(Some(0.009));
-        terrain_noise.set_fractal_type(Some(FractalType::FBm));
-        terrain_noise.set_fractal_octaves(Some(4));
-        terrain_noise.set_fractal_lacunarity(Some(2.0));
-        terrain_noise.set_fractal_gain(Some(0.5));
-
-        let mut continent_noise = FastNoiseLite::new();
-        continent_noise.set_noise_type(Some(NoiseType::Perlin));
-        continent_noise.set_seed(Some(9999));
-        continent_noise.set_frequency(Some(0.0005));
-        continent_noise.set_fractal_type(Some(FractalType::FBm));
-        continent_noise.set_fractal_octaves(Some(3));
-        continent_noise.set_fractal_lacunarity(Some(2.0));
-        continent_noise.set_fractal_gain(Some(0.5));
-
-        let mut cave_noise = FastNoiseLite::new();
-        cave_noise.set_noise_type(Some(NoiseType::Perlin));
-        cave_noise.set_seed(Some(12345));
-        cave_noise.set_frequency(Some(0.03));
-        cave_noise.set_fractal_type(Some(FractalType::FBm));
-        cave_noise.set_fractal_octaves(Some(3));
-        cave_noise.set_fractal_lacunarity(Some(2.0));
-        cave_noise.set_fractal_gain(Some(0.5));
-
-        let generator = Self {
-            terrain_noise,
-            continent_noise,
-            cave_noise,
+    pub fn new(seed: Option<i32>) -> Self {
+        let base_seed = seed.unwrap_or(42);
+        let mut generator = WorldGenerator {
+            base_terrain: FastNoiseLite::new(),
+            mountain_noise: FastNoiseLite::new(),
+            mountain_mask: FastNoiseLite::new(),
+            mountain_blend: FastNoiseLite::new(),
+            cheese_cave_noise: FastNoiseLite::new(),
+            spaghetti_cave_noise: FastNoiseLite::new(),
+            spaghetti_size_noise: FastNoiseLite::new(),
+            seed: base_seed,
         };
+        
+        generator.base_terrain.set_noise_type(Some(NoiseType::Perlin));
+        generator.base_terrain.set_seed(Some(base_seed));
+        generator.base_terrain.set_frequency(Some(0.0025));
+        generator.base_terrain.set_fractal_type(Some(FractalType::FBm));
+        generator.base_terrain.set_fractal_octaves(Some(4));
+        generator.base_terrain.set_fractal_lacunarity(Some(2.0));
+        generator.base_terrain.set_fractal_gain(Some(0.5));
+        
+        generator.mountain_noise.set_noise_type(Some(NoiseType::Perlin));
+        generator.mountain_noise.set_seed(Some(base_seed + 1));
+        generator.mountain_noise.set_frequency(Some(0.005));
+        generator.mountain_noise.set_fractal_type(Some(FractalType::FBm));
+        generator.mountain_noise.set_fractal_octaves(Some(5));
+        generator.mountain_noise.set_fractal_lacunarity(Some(2.5));
+        generator.mountain_noise.set_fractal_gain(Some(0.6));
+        
+        generator.mountain_mask.set_noise_type(Some(NoiseType::Perlin));
+        generator.mountain_mask.set_seed(Some(base_seed + 2));
+        generator.mountain_mask.set_frequency(Some(0.00125));
+        generator.mountain_mask.set_fractal_type(Some(FractalType::FBm));
+        generator.mountain_mask.set_fractal_octaves(Some(2));
+        
+        generator.mountain_blend.set_noise_type(Some(NoiseType::Perlin));
+        generator.mountain_blend.set_seed(Some(base_seed + 3));
+        generator.mountain_blend.set_frequency(Some(0.00375));
 
+        generator.cheese_cave_noise.set_noise_type(Some(NoiseType::Perlin));
+        generator.cheese_cave_noise.set_seed(Some(base_seed + 4));
+        generator.cheese_cave_noise.set_frequency(Some(0.005));
+        generator.cheese_cave_noise.set_fractal_type(Some(FractalType::FBm));
+        generator.cheese_cave_noise.set_fractal_octaves(Some(3));
+        generator.cheese_cave_noise.set_fractal_lacunarity(Some(2.0));
+        generator.cheese_cave_noise.set_fractal_gain(Some(0.5));
+
+        generator.spaghetti_cave_noise.set_noise_type(Some(NoiseType::Perlin));
+        generator.spaghetti_cave_noise.set_seed(Some(base_seed + 5));
+        generator.spaghetti_cave_noise.set_frequency(Some(0.0125));
+        generator.spaghetti_cave_noise.set_fractal_type(Some(FractalType::FBm));
+        generator.spaghetti_cave_noise.set_fractal_octaves(Some(2));
+
+        generator.spaghetti_size_noise.set_noise_type(Some(NoiseType::Perlin));
+        generator.spaghetti_size_noise.set_seed(Some(base_seed + 6));
+        generator.spaghetti_size_noise.set_frequency(Some(0.0075));
+        
         generator
     }
-
-    fn generate_block(&self, materials: &ExpandedMaterialMapping, x: u32, y: u32, z: u32) -> u8 {
-        let air = materials.get("air");
-        let stone = materials.get("stone");
-        let bedrock = materials.get("bedrock");
-        let dirt = materials.get("dirt");
-        let grass = materials.get("grass");
-        let snow = materials.get("snow");
-
-        let continent_val = self.continent_noise.get_noise_2d(x as f32, z as f32);
-        let terrain_val = self.terrain_noise.get_noise_2d(x as f32, z as f32);
-        let final_height = (300.0 + (continent_val * 200.0) + (terrain_val * 380.0).round()) as u32;
-        let height_diff = final_height as i32 - y as i32;
-
-        if y == 0 {
-            bedrock
-        } else if y == final_height {
-            if final_height >= 800 {
-                snow
-            } else {
-                grass
-            }
-        } else if y <= final_height {
-            if height_diff <= 3 {
-                dirt
-            } else {
-                let cave_val = self.cave_noise.get_noise_3d(x as f32, y as f32, z as f32);
-                let cave_val = (cave_val + 1.0) / 2.0;
-
-                if (0.7 > cave_val && cave_val > 0.5) && height_diff > 6 {
-                    air
-                } else if ((0.72 >= cave_val && cave_val >= 0.7)
-                    || (0.5 >= cave_val && cave_val >= 0.48))
-                    && height_diff > 6
-                {
-                    bedrock
-                } else {
-                    stone
-                }
-            }
-        } else {
-            air
+    
+    pub fn generate_block(&self, m: &ExpandedMaterialMapping, x: u32, y: u32, z: u32) -> u8 {
+        let height = self.get_height(x as f32, z as f32);
+        let current_y = y as f32;
+        
+        if current_y > height {
+            return m.get("air");
         }
+
+        if self.is_cave(x as f32, y as f32, z as f32) {
+            return m.get("air");
+        }
+        
+        let snow_height = height - 5.0;
+        if current_y >= snow_height && height > 200.0 {
+            return m.get("snow");
+        }
+        
+        if current_y >= height - 1.0 {
+            return m.get("grass");
+        }
+        
+        if current_y >= height - 4.0 {
+            return m.get("dirt");
+        }
+
+        if self.is_near_cave(x as f32, y as f32, z as f32) {
+            return m.get("bedrock");
+        }
+        
+        m.get("stone")
     }
 
+    fn is_cave(&self, x: f32, y: f32, z: f32) -> bool {
+        let height = self.get_height(x, z);
+        if y > height - 10.0 {
+            return false;
+        }
+
+        let cheese_value = self.cheese_cave_noise.get_noise_3d(x, y, z);
+        if cheese_value > 0.7 { 
+            let size = (cheese_value - 0.7) * 133.33; 
+            if size > 10.0 {
+                return true;
+            }
+        }
+
+        let spaghetti_value = self.spaghetti_cave_noise.get_noise_3d(x, y, z);
+        let size_variation = self.spaghetti_size_noise.get_noise_3d(x, y, z);
+        
+        let tunnel_size = 0.5 + (size_variation + 1.0) * 3.75;
+        
+        if spaghetti_value >= -0.1 && spaghetti_value <= 0.1 {
+            let distance_from_center = spaghetti_value.abs() * 10.0;
+            return distance_from_center * 8.0 <= tunnel_size;
+        }
+
+        false
+    }
+
+
+    fn get_height(&self, x: f32, z: f32) -> f32 {
+        let base_height = self.base_terrain.get_noise_2d(x, z);
+        let base_scaled = (base_height + 1.0) * 50.0 + 200.0;
+        
+        let mountain_height = self.mountain_noise.get_noise_2d(x, z);
+        let mountain_scaled = (mountain_height + 1.0) * 100.0 + 200.0;
+        
+        let mask = (self.mountain_mask.get_noise_2d(x, z) + 1.0) * 0.5;
+        
+        let blend = (self.mountain_blend.get_noise_2d(x, z) + 1.0) * 0.5;
+        
+        let mountain_influence = (mask * blend).powf(2.0);
+        let height = base_scaled * (1.0 - mountain_influence) + 
+                    mountain_scaled * mountain_influence;
+        
+        let peak_variation = if height > 250.0 {
+            let peak_noise = self.mountain_blend.get_noise_2d(x * 2.0, z * 2.0);
+            peak_noise * 15.0
+        } else {
+            0.0
+        };
+        
+        height + peak_variation
+    }
+
+    fn is_near_cave(&self, x: f32, y: f32, z: f32) -> bool {
+        // Check surrounding blocks for cave proximity
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        continue;
+                    }
+                    if self.is_cave(x + dx as f32, y + dy as f32, z + dz as f32) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    
     pub fn generate_chunk(
         &self,
         materials: &ExpandedMaterialMapping,
