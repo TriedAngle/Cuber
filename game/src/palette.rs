@@ -6,10 +6,9 @@ use std::collections::HashMap;
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PaletteId(pub u32);
-impl PaletteId { 
+impl PaletteId {
     pub const EMPTY: Self = Self(0);
 }
-
 
 #[derive(Debug)]
 pub struct PaletteRegistry {

@@ -1,7 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
 use bytemuck::Zeroable;
-use na::ComplexField;
 use winit::{
     event::{DeviceEvent, ElementState, MouseScrollDelta, WindowEvent},
     keyboard::{KeyCode, PhysicalKey},

@@ -15,6 +15,7 @@ pub struct GPUFreeListBuffer<T: bytemuck::Pod + bytemuck::Zeroable> {
     _phantom: PhantomData<T>,
 }
 
+#[allow(unused)]
 impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
     pub fn new(
         device: Arc<wgpu::Device>,

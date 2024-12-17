@@ -331,6 +331,7 @@ fn trace_world(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
                     0.3
                 );
             }
+            hit.pos = vec4<f32>(map_pos, 1.0);
             hit.mask = mask;
             return hit;
         } else {

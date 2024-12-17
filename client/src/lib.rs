@@ -20,7 +20,6 @@ use game::{
     worldgen::WorldGenerator,
     Camera, Diagnostics, Input,
 };
-use na::AbstractRotation;
 use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, WindowEvent},
@@ -70,7 +69,7 @@ impl AppState {
 
         let palettes = Arc::new(PaletteRegistry::new());
 
-        let brickmap_dimensions = na::Vector3::new(256, 256, 256);
+        let brickmap_dimensions = na::Vector3::new(128, 128, 128);
         let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
 
         let generator = Arc::new(WorldGenerator::new());
@@ -97,7 +96,7 @@ impl AppState {
         gpu.materials.update_all_materials();
 
         let mut camera = Camera::new(
-            na::Point3::new(128.0, 80., 128.),
+            na::Point3::new(64., 64., 64.),
             na::UnitQuaternion::identity(),
             50.,
             0.002,
@@ -107,7 +106,7 @@ impl AppState {
             100.,
         );
 
-        camera.look_at(na::Point3::new(128., 80., 129.), &na::Vector3::y_axis());
+        camera.look_at(na::Point3::new(64., 64., 63.), &na::Vector3::y_axis());
 
         let state = Self {
             last_update: SystemTime::now(),
@@ -159,13 +158,13 @@ impl AppState {
                 &brickmap,
                 na::Point3::origin(),
                 na::Point3::from(dimensions),
-                na::Point3::new(128, 32, 128),
-                100,
+                na::Point3::new(100, 32, 100),
+                50,
                 &material_mapping,
                 &palettes,
                 8,
                 |_, _, _, _| {},
-                |bricks, palettes, handles, ats, percentage| {
+                |bricks, palettes, handles, _ats, percentage| {
                     let _ = gpu.bricks.allocate_bricks(&bricks, &handles, &palettes);
                     let current_percentage = percentage as i32;
                     let previous = last_update.load(Ordering::Relaxed);

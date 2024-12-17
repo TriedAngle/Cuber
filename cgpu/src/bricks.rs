@@ -2,7 +2,7 @@ use std::{mem, sync::Arc};
 
 use game::{
     brick::{BrickHandle, BrickMap, MaterialBrick, TraceBrick},
-    palette::{self, PaletteId},
+    palette::PaletteId,
 };
 use parking_lot::RwLock;
 use wgpu::util::DeviceExt;
@@ -33,7 +33,6 @@ impl BrickState {
 
         let handle_size = mem::size_of::<BrickHandle>() as u64 * count;
 
-        println!("HANDLES: {:?}", handle_size);
         let handle_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Handle Buffer"),
             size: handle_size,

@@ -1,10 +1,10 @@
 extern crate nalgebra as na;
 
 pub mod brick;
-pub mod octree;
 mod camera;
 mod input;
 pub mod material;
+pub mod octree;
 pub mod palette;
 pub mod raytrace;
 pub mod worldgen;

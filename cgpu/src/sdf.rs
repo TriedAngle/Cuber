@@ -6,7 +6,6 @@ pub struct SDFGenerator {
     queue: Arc<wgpu::Queue>,
     bricks: Arc<BrickState>,
     pipeline: wgpu::ComputePipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
 }
@@ -82,7 +81,6 @@ impl SDFGenerator {
             queue,
             bricks,
             pipeline,
-            bind_group_layout,
             uniform_buffer,
             uniform_bind_group,
         }

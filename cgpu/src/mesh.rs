@@ -34,6 +34,7 @@ pub struct SimpleMesh<V: Vertex> {
 }
 
 pub type SimpleTextureMesh = SimpleMesh<TexVertex>;
+#[allow(unused)]
 pub type SimpleColorMesh = SimpleMesh<ColorVertex>;
 
 impl<V: Vertex> SimpleMesh<V> {

@@ -12,6 +12,7 @@ pub struct MaterialState {
     palettes: Arc<PaletteRegistry>,
     materials: Arc<MaterialRegistry>,
     device: Arc<wgpu::Device>,
+    #[allow(unused)]
     queue: Arc<wgpu::Queue>,
     palette_buffer: GPUDenseBuffer,
     material_buffer: GPUFreeListBuffer<PbrMaterial>,
@@ -100,8 +101,6 @@ impl MaterialState {
     }
 
     pub fn recreate_bind_group(&self) {
-        let mut bind_group = self.bind_group.write();
-
         let new = Self::create_bind_group(
             &self.device,
             &self.layout,
@@ -109,6 +108,7 @@ impl MaterialState {
             self.material_buffer.buffer(),
         );
 
+        let mut bind_group = self.bind_group.write();
         *bind_group = new;
     }
 

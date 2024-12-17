@@ -124,7 +124,7 @@ pub fn trace_world(
     for _ in 0..max_steps {
         let brick_pos = na::Point3::new(map_pos.x as u32, map_pos.y as u32, map_pos.z as u32);
 
-        if brick_pos.x >= dims.x || brick_pos.y >= dims.y || brick_pos.z >= dims.z { 
+        if brick_pos.x >= dims.x || brick_pos.y >= dims.y || brick_pos.z >= dims.z {
             return None;
         }
 
