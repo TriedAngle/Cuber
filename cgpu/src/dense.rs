@@ -162,6 +162,18 @@ impl GPUDenseBuffer {
         self.try_shrink(on_resize);
     }
 
+    pub fn deallocate_size<F: FnOnce(&wgpu::Buffer)>(&self, offset: u64, size: u64, on_resize: F) {
+        let mut free_blocks = self.free_blocks.write();
+
+        free_blocks
+            .entry(size)
+            .or_insert_with(Vec::new)
+            .push(FreeBlock { offset });
+
+        self.try_shrink(on_resize);
+    }
+
+
     pub fn write<T: bytemuck::Pod>(&self, offset: u64, data: &T) {
         self.queue.write_buffer(
             &self.buffer(),

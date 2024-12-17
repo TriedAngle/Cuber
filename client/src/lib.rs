@@ -162,7 +162,7 @@ impl AppState {
                 50,
                 &material_mapping,
                 &palettes,
-                8,
+                4,
                 |_, _, _, _| {},
                 |bricks, palettes, handles, _ats, percentage| {
                     // let _ = gpu.bricks.allocate_bricks(&bricks, &handles, &palettes);
@@ -280,14 +280,26 @@ impl AppState {
                 };
 
                 if let Some(hit) = hit {
-                    if hit.voxel_local_pos.is_none() && hit.handle.is_lod() {
-                        let handle = BrickHandle::empty();
-                        self.brickmap.set_handle(handle, hit.brick_pos);
-                        self.gpu.bricks.transfer_handle(handle, hit.brick_pos);
-                    } else {
-                        self.brickmap
-                        .edit_brick_no_resize(hit.handle, hit.voxel_local_pos, 0);
-                        self.gpu.bricks.transfer_brick(hit.handle);
+                    let center = na::Point3::new(
+                        hit.brick_pos.x as f32 + hit.normal.x as f32 * 0.5,
+                        hit.brick_pos.y as f32 + hit.normal.y as f32 * 0.5,
+                        hit.brick_pos.z as f32 + hit.normal.z as f32 * 0.5,
+                    );
+
+                    // Get all modified brick handles
+                    let (update, remove) = self.brickmap.draw_sphere_sdf(center, 2.0);
+
+                    for (handle, at) in remove {
+                        if handle.is_data() {
+                            self.gpu.bricks.deallocate_brick(handle, at);
+                        } else if handle.is_lod() {
+                            self.gpu.bricks.transfer_handle(BrickHandle::empty(), at);
+                        }
+                        self.brickmap.set_handle(BrickHandle::empty(), at);
+                    }
+                    // Update GPU for all modified bricks
+                    for handle in update {
+                        self.gpu.bricks.transfer_brick(handle);
                     }
                 }
             }

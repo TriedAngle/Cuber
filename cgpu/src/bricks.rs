@@ -148,20 +148,21 @@ impl BrickState {
 
     pub fn transfer_handle(&self, handle: BrickHandle, at: na::Point3<u32>) {
         let target_index = self.brickmap.index(at) as u64;
-        
+
         let byte_offset = target_index * mem::size_of::<BrickHandle>() as u64;
-        
+
         let aligned_offset = byte_offset & !(32 - 1);
-        
+
         let start_handle_index = aligned_offset / std::mem::size_of::<BrickHandle>() as u64;
-        let handles_to_write = (32 + byte_offset - aligned_offset) / std::mem::size_of::<BrickHandle>() as u64;
-        
+        let handles_to_write =
+            (32 + byte_offset - aligned_offset) / std::mem::size_of::<BrickHandle>() as u64;
+
         let mut handles = Vec::with_capacity(handles_to_write as usize);
-        
+
         let dims = self.brickmap.dimensions().cast::<u64>();
         for i in 0..handles_to_write {
             let current_index = start_handle_index + i;
-            
+
             if current_index == target_index {
                 handles.push(handle);
             } else {
@@ -169,19 +170,18 @@ impl BrickState {
                 let y = (current_index / dims.x) % dims.y;
                 let z = current_index / (dims.x * dims.y);
                 let pos = na::Point3::new(x, y, z);
-                
+
                 let existing_handle = self.brickmap.get_handle(pos.cast::<u32>());
                 handles.push(existing_handle);
             }
         }
-        
+
         self.queue.write_buffer(
             &self.handle_buffer.write(),
             aligned_offset,
-            bytemuck::cast_slice(&handles)
+            bytemuck::cast_slice(&handles),
         );
     }
-
 
     pub fn transfer_brick(&self, handle: BrickHandle) {
         if handle.is_data() {
@@ -239,6 +239,18 @@ impl BrickState {
         );
 
         Some(offsets)
+    }
+
+    pub fn deallocate_brick(&self, handle: BrickHandle, at: na::Point3<u32>) {
+        let brick = self.brickmap.get_brick(handle).unwrap();
+        let offset = brick.get_brick_offset();
+        let bits_per_element = brick.get_brick_size();
+        let total_size = bits_per_element * 512;
+        self.brick_buffer.deallocate_size(offset as u64, total_size as u64, |_buffer| {
+            self.recreate_bind_group();
+        });
+
+        self.transfer_handle(BrickHandle::empty(), at);
     }
 
     pub fn recreate_bind_group(&self) {

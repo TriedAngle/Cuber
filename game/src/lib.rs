@@ -1,6 +1,7 @@
 extern crate nalgebra as na;
 
 pub mod brick;
+mod brickmap_edit;
 mod camera;
 mod dense;
 mod input;
