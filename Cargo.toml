@@ -7,4 +7,14 @@ members = [
     "liverking", 
     "cgpu",
 ]
-default-run = "game"
+
+default-run = "client"
+
+[workspace.dependencies]
+winit = { version = "0.30.5" }
+nalgebra = { version = "0.33.2", features = ["convert-bytemuck"] }
+bytemuck = { version = "1.20.0", features = ["derive"] }
+parking_lot = { version = "0.12.3" }
+log = { version = "0.4.22" }
+anyhow = "1.0"
+
