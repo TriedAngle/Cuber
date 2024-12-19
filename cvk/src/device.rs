@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
 use ash::vk;
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, mem};
 
 use crate::{Adapter, Instance, Queue, QueueRequest};
 
 pub struct Device {
-    pub allocator: Arc<vkm::Allocator>,
     pub handle: Arc<ash::Device>,
     pub instance: Arc<Instance>,
     pub adapter: Arc<Adapter>,
+    pub allocator: Arc<vkm::Allocator>,
 }
 
 impl std::fmt::Debug for Device {
@@ -125,6 +125,9 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
+            let allocator = mem::replace(Arc::get_mut(&mut self.allocator).unwrap(), mem::zeroed());
+            mem::drop(allocator);
+            let _ = self.handle.device_wait_idle();
             self.handle.destroy_device(None);
         }
     }

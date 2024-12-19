@@ -84,8 +84,10 @@ impl Device {
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_sampler(self.sampler, None);
+            println!("DROPPED");
+
             self.device.destroy_image_view(self.view, None);
+            self.device.destroy_sampler(self.sampler, None);
             self.allocator
                 .destroy_image(self.image, &mut self.allocation);
         }

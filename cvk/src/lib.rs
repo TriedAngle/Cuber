@@ -5,6 +5,7 @@ mod adapter;
 mod device;
 mod instance;
 mod queues;
+mod semaphore;
 mod surface;
 mod texture;
 

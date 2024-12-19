@@ -84,7 +84,8 @@ impl Render {
 
         let compute_shader = device.create_shader(COMPUTE_SHADER)?;
         let present_shader = device.create_shader(PRSENT_SHADER)?;
-        // let present_texture = device.create_texture(surface.format().format, size.width, size.height);
+        let present_texture =
+            device.create_texture(surface.format().format, size.width, size.height);
 
         let new = Self {
             instance,
