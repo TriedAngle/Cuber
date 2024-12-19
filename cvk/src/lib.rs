@@ -1,26 +1,25 @@
 extern crate nalgebra as na;
 extern crate vk_mem as vkm;
 
-mod instance;
-mod device;
-mod queues;
 mod adapter;
+mod device;
+mod instance;
+mod queues;
 mod surface;
 mod texture;
 
 pub mod utils;
 
-pub use instance::Instance;
 pub use adapter::Adapter;
 pub use device::Device;
+pub use instance::Instance;
 pub use queues::{Queue, QueueRequest};
 pub use surface::Surface;
 
-pub use ash::vk::{Format, QueueFlags};
 pub use ash as raw;
+pub use ash::vk::{Format, QueueFlags};
 
 use anyhow::Result;
-
 
 pub struct Shader {
     module: naga::Module,
@@ -34,8 +33,8 @@ pub struct ShaderFunction<'a> {
     pub entry_point: &'a str,
 }
 
-impl ShaderFunction<'_> { 
-    pub fn entry_point_idx(&self) -> usize { 
+impl ShaderFunction<'_> {
+    pub fn entry_point_idx(&self) -> usize {
         self.shader
             .module
             .entry_points
@@ -45,7 +44,7 @@ impl ShaderFunction<'_> {
     }
 }
 
-impl Device { 
+impl Device {
     pub fn create_shader(&self, source: &str) -> Result<Shader> {
         let module = naga::front::wgsl::parse_str(source)?;
 

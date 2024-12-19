@@ -1,17 +1,17 @@
 use anyhow::Result;
-use winit::raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use std::{ffi, sync::Arc};
 use ash::vk;
+use std::{ffi, sync::Arc};
+use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::{Adapter, Device, Queue, QueueRequest, Surface};
 
 pub struct Instance {
     #[allow(unused)]
-    entry: ash::Entry,
-    handle: ash::Instance,
+    pub entry: ash::Entry,
+    pub handle: ash::Instance,
 }
 
-impl Instance { 
+impl Instance {
     pub fn new(app: &str, engine: &str) -> Result<Self> {
         let entry = unsafe { ash::Entry::load()? };
         let app_name = ffi::CString::new(app)?;
@@ -37,7 +37,6 @@ impl Instance {
         #[cfg(target_os = "macos")]
         instance_extensions.push(ash::ext::metal_surface::NAME.as_ptr());
 
-
         let validation_layer = ffi::CString::new("VK_LAYER_KHRONOS_validation")?;
         let instance_layers = vec![validation_layer.as_ptr()];
 
@@ -45,12 +44,12 @@ impl Instance {
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
                     | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
             )
             .message_type(
                 vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
                     | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
             )
             .pfn_user_callback(Some(debug_callback));
 
@@ -61,43 +60,62 @@ impl Instance {
             .push_next(&mut dfo);
 
         let handle = unsafe { entry.create_instance(&ifo, None)? };
-        
+
         let new = Self { entry, handle };
         Ok(new)
     }
-    
-    pub fn create_surface(&self, adapter: &Adapter, window: &winit::window::Window, choose_format: impl Fn(&[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR) -> Result<Surface> {
-        let handle = unsafe { ash_window::create_surface(&self.entry,&self.handle, window.raw_display_handle()?, window.raw_window_handle()?, None)? };
+
+    pub fn create_surface(
+        &self,
+        adapter: &Adapter,
+        window: &winit::window::Window,
+        choose_format: impl Fn(&[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR,
+    ) -> Result<Surface> {
+        let handle = unsafe {
+            ash_window::create_surface(
+                &self.entry,
+                &self.handle,
+                window.display_handle().unwrap().as_raw(),
+                window.window_handle().unwrap().as_raw(),
+                None,
+            )?
+        };
         let instance = ash::khr::surface::Instance::new(&self.entry, &self.handle);
-        let surface = Surface::new(handle, instance, adapter,choose_format)?;
+        let surface = Surface::new(handle, instance, adapter, choose_format)?;
         Ok(surface)
     }
 
-    pub fn adapters(&self, formats: &[vk::Format]) -> Result<Vec<Arc<Adapter>>> { 
+    pub fn adapters(&self, formats: &[vk::Format]) -> Result<Vec<Arc<Adapter>>> {
         let pdevs = unsafe { self.handle.enumerate_physical_devices()? };
 
-        let adapters = pdevs.into_iter().map(|physical_device| 
-            Arc::new(Adapter::new(&self, physical_device, formats))).collect::<Vec<_>>();
-        
+        let adapters = pdevs
+            .into_iter()
+            .map(|physical_device| Arc::new(Adapter::new(&self, physical_device, formats)))
+            .collect::<Vec<_>>();
+
         Ok(adapters)
     }
 
-    pub fn request_device(&self, adapter: Arc<Adapter>, queue_requestes: &[QueueRequest]) -> Result<(Arc<Device>, Vec<Arc<Queue>>)> {
-        Device::new(self, adapter, queue_requestes)
+    pub fn request_device(
+        self: Arc<Instance>,
+        adapter: Arc<Adapter>,
+        queue_requestes: &[QueueRequest],
+    ) -> Result<(Arc<Device>, Vec<Arc<Queue>>)> {
+        Device::new(self.clone(), adapter, queue_requestes)
     }
 
-    pub fn handle(&self) -> &ash::Instance { 
+    pub fn handle(&self) -> &ash::Instance {
         &self.handle
     }
 
-    pub fn entry(&self) -> &ash::Entry { 
+    pub fn entry(&self) -> &ash::Entry {
         &self.entry
     }
 }
 
-impl Drop for Instance { 
+impl Drop for Instance {
     fn drop(&mut self) {
-        unsafe { 
+        unsafe {
             self.handle.destroy_instance(None);
         }
     }

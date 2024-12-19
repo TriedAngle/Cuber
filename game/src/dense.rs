@@ -109,7 +109,6 @@ impl DenseBuffer {
         self.try_shrink();
     }
 
-    
     pub fn deallocate_size(&self, offset: usize, size: usize) {
         let mut free_blocks = self.free_blocks.write();
 

@@ -42,7 +42,9 @@ impl GPUDenseBuffer {
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dense Buffer Allocator"),
             size: capacity,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         })
     }
@@ -172,7 +174,6 @@ impl GPUDenseBuffer {
 
         self.try_shrink(on_resize);
     }
-
 
     pub fn write<T: bytemuck::Pod>(&self, offset: u64, data: &T) {
         self.queue.write_buffer(

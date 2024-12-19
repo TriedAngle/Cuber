@@ -27,7 +27,13 @@ pub fn print_queues_pretty(adapter: &Adapter) {
             println!("\t\t\tPROTECTED");
         }
 
-        println!("\t\tTimestamp Valid Bits: {}", queue_family.timestamp_valid_bits);
-        println!("\t\tMin Image Transfer Granularity: {:?}", queue_family.min_image_transfer_granularity);
+        println!(
+            "\t\tTimestamp Valid Bits: {}",
+            queue_family.timestamp_valid_bits
+        );
+        println!(
+            "\t\tMin Image Transfer Granularity: {:?}",
+            queue_family.min_image_transfer_granularity
+        );
     }
-} 
+}

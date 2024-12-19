@@ -11,6 +11,7 @@ pub struct Queue {
     flags: vk::QueueFlags,
     family_index: u32,
     queue_index: u32,
+    is_shared: bool, // New field to track if this queue is shared
 }
 
 #[derive(Debug, Clone)]
@@ -18,6 +19,7 @@ pub struct QueueRequest {
     pub required_flags: vk::QueueFlags,
     pub exclude_flags: vk::QueueFlags,
     pub strict: bool,
+    pub allow_fallback_share: bool, // New field to control fallback sharing
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +27,7 @@ pub struct QueueFamilyInfo {
     pub flags: vk::QueueFlags,
     pub family_index: u32,
     pub queue_index: u32,
+    pub is_shared: bool, // New field to indicate if this queue will be shared
 }
 
 impl Queue {
@@ -42,6 +45,7 @@ impl Queue {
             flags: info.flags,
             family_index: info.family_index,
             queue_index: info.queue_index,
+            is_shared: info.is_shared,
         };
 
         Arc::new(new)
@@ -61,7 +65,9 @@ impl Queue {
             let mut result = vec![None; queue_requests.len()];
             let mut used_queues: Vec<(u32, u32)> = Vec::new(); // (family_index, count)
             let mut used_family_indices = std::collections::HashSet::new();
+            let mut shared_queues: Vec<QueueFamilyInfo> = Vec::new(); // Track queues available for sharing
 
+            // First pass: Try to fulfill strict requests with dedicated queues
             for (idx, request) in queue_requests.iter().enumerate().filter(|(_, r)| r.strict) {
                 if let Some(info) = Self::find_best_queue_match(
                     &queue_families,
@@ -73,17 +79,19 @@ impl Queue {
                 ) {
                     used_family_indices.insert(info.family_index);
                     Self::update_used_queues(&mut used_queues, info.family_index, info.queue_index);
+                    shared_queues.push(info);
                     result[idx] = Some(info);
                 }
             }
 
+            // Second pass: Try to fulfill remaining strict requests with shared queues
             for (idx, request) in queue_requests.iter().enumerate() {
                 if result[idx].is_none() && request.strict {
                     if let Some(info) = Self::find_best_queue_match(
                         &queue_families,
                         request,
-                        false, // allow shared queues
-                        true,  // respect exclusions
+                        false,
+                        true,
                         &used_queues,
                         &used_family_indices,
                     ) {
@@ -93,18 +101,20 @@ impl Queue {
                             info.family_index,
                             info.queue_index,
                         );
+                        shared_queues.push(info);
                         result[idx] = Some(info);
                     }
                 }
             }
 
+            // Third pass: Try to fulfill non-strict requests
             for (idx, request) in queue_requests.iter().enumerate() {
                 if result[idx].is_none() {
                     if let Some(info) = Self::find_best_queue_match(
                         &queue_families,
                         request,
-                        false, // allow shared queues
-                        false, // relaxed exclusions
+                        false,
+                        false,
                         &used_queues,
                         &used_family_indices,
                     ) {
@@ -114,6 +124,20 @@ impl Queue {
                             info.family_index,
                             info.queue_index,
                         );
+                        shared_queues.push(info);
+                        result[idx] = Some(info);
+                    }
+                }
+            }
+
+            // Final pass: Try fallback sharing for remaining requests
+            for (idx, request) in queue_requests.iter().enumerate() {
+                if result[idx].is_none() && request.allow_fallback_share {
+                    if let Some(shared_info) =
+                        Self::find_shareable_queue(request.required_flags, &shared_queues)
+                    {
+                        let mut info = shared_info;
+                        info.is_shared = true;
                         result[idx] = Some(info);
                     }
                 }
@@ -125,6 +149,16 @@ impl Queue {
                 None
             }
         }
+    }
+
+    fn find_shareable_queue(
+        required_flags: vk::QueueFlags,
+        shared_queues: &[QueueFamilyInfo],
+    ) -> Option<QueueFamilyInfo> {
+        shared_queues
+            .iter()
+            .find(|info| info.flags.contains(required_flags))
+            .copied()
     }
 
     fn find_best_queue_match(
@@ -141,12 +175,10 @@ impl Queue {
         for (index, properties) in queue_families.iter().enumerate() {
             let family_index = index as u32;
 
-            // Skip if this family index is already used
             if used_family_indices.contains(&family_index) {
                 continue;
             }
 
-            // Check available queues
             let used_count = used_queues
                 .iter()
                 .find(|(idx, _)| *idx == family_index)
@@ -159,17 +191,14 @@ impl Queue {
 
             let flags = properties.queue_flags;
 
-            // Check required flags
             if !flags.contains(request.required_flags) {
                 continue;
             }
 
-            // Check dedicated queue requirement
             if dedicated_only && flags != request.required_flags {
                 continue;
             }
 
-            // Handle exclusions
             let excluded_flags_present = flags & request.exclude_flags;
             let excluded_count = excluded_flags_present.as_raw().count_ones();
 
@@ -177,20 +206,12 @@ impl Queue {
                 continue;
             }
 
-            // Calculate score based on how well this queue matches our needs
             let mut score = 0u32;
-
-            // Prefer queues with fewer additional capabilities beyond what we need
             score +=
                 (flags.as_raw().count_ones() - request.required_flags.as_raw().count_ones()) * 2;
-
-            // Prefer queues with more available slots
             score += used_count;
-
-            // Penalize queues with excluded flags
             score += excluded_count * 4;
 
-            // Update best match if this is better
             if excluded_count < min_excluded_flags
                 || (excluded_count == min_excluded_flags
                     && best_match.map_or(true, |(_, _, _, best_score)| score < best_score))
@@ -204,6 +225,7 @@ impl Queue {
             family_index,
             flags,
             queue_index,
+            is_shared: false,
         })
     }
 
@@ -214,6 +236,7 @@ impl Queue {
             used_queues.push((family_index, queue_index + 1));
         }
     }
+
     pub fn handle(&self) -> vk::Queue {
         self.handle
     }
@@ -236,5 +259,9 @@ impl Queue {
 
     pub fn flags(&self) -> vk::QueueFlags {
         self.flags
+    }
+
+    pub fn is_shared(&self) -> bool {
+        self.is_shared
     }
 }

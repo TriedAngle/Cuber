@@ -1,13 +1,15 @@
 use anyhow::{Context, Result};
 use ash::vk;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::{Adapter, Instance, Queue, QueueRequest, Shader};
+use crate::{Adapter, Instance, Queue, QueueRequest};
 
 pub struct Device {
-    pub(crate) handle: Arc<ash::Device>,
-    pub(crate) adapter: Arc<Adapter>,
-    pub(crate) allocator: Arc<vkm::Allocator>,
+    pub allocator: Arc<vkm::Allocator>,
+    pub handle: Arc<ash::Device>,
+    pub instance: Arc<Instance>,
+    pub adapter: Arc<Adapter>,
 }
 
 impl std::fmt::Debug for Device {
@@ -20,7 +22,7 @@ impl std::fmt::Debug for Device {
 
 impl Device {
     pub fn new(
-        instance: &Instance,
+        instance: Arc<Instance>,
         adapter: Arc<Adapter>,
         queue_requests: &[QueueRequest],
     ) -> Result<(Arc<Self>, Vec<Arc<Queue>>)> {
@@ -46,14 +48,28 @@ impl Device {
         let queue_family_infos =
             Queue::find_queue_families(&instance, &adapter, queue_requests).context("Queues")?;
 
-        let queue_create_infos = queue_family_infos
-            .iter()
-            .map(|info| {
-                vk::DeviceQueueCreateInfo::default()
-                    .queue_family_index(info.family_index)
-                    .queue_priorities(&[1.0])
+        let mut family_queue_counts: HashMap<u32, u32> = HashMap::new();
+        for info in &queue_family_infos {
+            let count = family_queue_counts.entry(info.family_index).or_default();
+            *count = (*count).max(info.queue_index + 1);
+        }
+
+        let queue_families: Vec<(u32, Vec<f32>)> = family_queue_counts
+            .into_iter()
+            .map(|(family_index, count)| {
+                let priorities = vec![1.0; count as usize];
+                (family_index, priorities)
             })
-            .collect::<Vec<_>>();
+            .collect();
+
+        let queue_create_infos: Vec<vk::DeviceQueueCreateInfo> = queue_families
+            .iter()
+            .map(|(family_index, priorities)| {
+                vk::DeviceQueueCreateInfo::default()
+                    .queue_family_index(*family_index)
+                    .queue_priorities(priorities)
+            })
+            .collect();
 
         let device_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
@@ -76,8 +92,12 @@ impl Device {
             ))
         }?;
 
-
-        let new = Self { handle: Arc::new(handle), adapter, allocator: Arc::new(allocator) };
+        let new = Self {
+            handle: Arc::new(handle),
+            instance,
+            adapter,
+            allocator: Arc::new(allocator),
+        };
 
         let new = Arc::new(new);
 
@@ -85,7 +105,6 @@ impl Device {
             .iter()
             .map(|info| Queue::new(new.clone(), info))
             .collect::<Vec<_>>();
-
 
         Ok((new, queues))
     }
@@ -98,15 +117,15 @@ impl Device {
         &self.adapter
     }
 
-    pub fn allocator(&self) -> &vkm::Allocator { 
+    pub fn allocator(&self) -> &vkm::Allocator {
         &self.allocator
     }
 }
 
-impl Drop for Device { 
+impl Drop for Device {
     fn drop(&mut self) {
-        unsafe { 
-            self.handle.destroy_device(None);   
+        unsafe {
+            self.handle.destroy_device(None);
         }
     }
 }

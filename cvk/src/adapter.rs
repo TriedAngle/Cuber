@@ -5,7 +5,7 @@ use crate::Instance;
 
 #[derive(Debug, Clone)]
 pub struct Adapter {
-    handle: vk::PhysicalDevice,
+    pub handle: vk::PhysicalDevice,
     pub properties: vk::PhysicalDeviceProperties,
     pub queue_properties: Arc<[QueueFamilyProperties]>,
     pub features: vk::PhysicalDeviceFeatures,
@@ -13,11 +13,27 @@ pub struct Adapter {
 }
 
 impl Adapter {
-    pub fn new(instance: &Instance, physical_device: vk::PhysicalDevice, formats: &[vk::Format]) -> Self {
-        let properties = unsafe { instance.handle().get_physical_device_properties(physical_device) };
-        let features = unsafe { instance.handle().get_physical_device_features(physical_device) };
+    pub fn new(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        formats: &[vk::Format],
+    ) -> Self {
+        let properties = unsafe {
+            instance
+                .handle()
+                .get_physical_device_properties(physical_device)
+        };
+        let features = unsafe {
+            instance
+                .handle()
+                .get_physical_device_features(physical_device)
+        };
 
-        let queue_properties = unsafe { instance.handle().get_physical_device_queue_family_properties(physical_device) };
+        let queue_properties = unsafe {
+            instance
+                .handle()
+                .get_physical_device_queue_family_properties(physical_device)
+        };
         let format_properties = formats
             .iter()
             .map(|&format| unsafe {
@@ -36,7 +52,6 @@ impl Adapter {
             formats: Arc::from(format_properties),
         }
     }
-
 
     pub fn handle(&self) -> vk::PhysicalDevice {
         self.handle

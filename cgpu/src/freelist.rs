@@ -118,11 +118,11 @@ impl<T: bytemuck::Pod + bytemuck::Zeroable> GPUFreeListBuffer<T> {
         }
 
         let bytes = bytemuck::bytes_of(data);
-        
+
         if let Some(mut view) = self.queue.write_buffer_with(
             &self.buffer.read(),
             index * std::mem::size_of::<T>() as u64,
-        NonZeroU64::new(bytes.len() as u64).unwrap(),
+            NonZeroU64::new(bytes.len() as u64).unwrap(),
         ) {
             view.copy_from_slice(bytes);
         }

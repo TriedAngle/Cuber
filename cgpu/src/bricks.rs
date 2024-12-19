@@ -245,10 +245,13 @@ impl BrickState {
         let offset = brick.get_brick_offset();
         let bits_per_element = brick.get_brick_size();
         let total_size = bits_per_element * 512;
-        self.brickmap.material_bricks().deallocate_size(offset as usize, total_size as usize);
-        self.brick_buffer.deallocate_size(offset as u64, total_size as u64, |_buffer| {
-            self.recreate_bind_group();
-        });
+        self.brickmap
+            .material_bricks()
+            .deallocate_size(offset as usize, total_size as usize);
+        self.brick_buffer
+            .deallocate_size(offset as u64, total_size as u64, |_buffer| {
+                self.recreate_bind_group();
+            });
 
         self.transfer_handle(BrickHandle::empty(), at);
     }
