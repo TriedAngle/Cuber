@@ -123,8 +123,7 @@ impl VulkanApp {
         ];
 
         let adapters = instance.adapters(formats)?;
-        println!("adapters: {:?}", adapters.len());
-        let adapter = adapters[1].clone();
+        let adapter = adapters[0].clone();
         utils::print_queues_pretty(&adapter);
 
         let (device, queues) = Device::new(
