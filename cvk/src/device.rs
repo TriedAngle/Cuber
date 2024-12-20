@@ -41,6 +41,7 @@ impl Device {
             vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
 
         let device_extensions = [
+            ash::khr::swapchain::NAME.as_ptr(),
             ash::khr::timeline_semaphore::NAME.as_ptr(),
             ash::khr::dynamic_rendering::NAME.as_ptr(),
         ];

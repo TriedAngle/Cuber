@@ -6,7 +6,7 @@ mod device;
 mod instance;
 mod queues;
 mod semaphore;
-mod surface;
+mod swapchain;
 mod texture;
 
 pub mod utils;
@@ -15,7 +15,8 @@ pub use adapter::Adapter;
 pub use device::Device;
 pub use instance::Instance;
 pub use queues::{Queue, QueueRequest};
-pub use surface::Surface;
+pub use semaphore::Semaphore;
+pub use swapchain::{FrameSignals, Surface, Swapchain, SwapchainImage};
 
 pub use ash as raw;
 pub use ash::vk::{Format, QueueFlags};

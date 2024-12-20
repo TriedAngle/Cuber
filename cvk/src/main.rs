@@ -3,6 +3,7 @@ extern crate vk_mem as vkm;
 use std::{ops::Deref, sync::Arc};
 
 use anyhow::Result;
+use ash::khr::swapchain;
 use cvk::{raw::vk, utils, Device};
 
 use game::Camera;
@@ -50,7 +51,8 @@ fn fmain(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 "#;
 
 struct Render {
-    surface: cvk::Surface,
+    surface: Arc<cvk::Surface>,
+    swapchain: cvk::Swapchain,
     instance: Arc<cvk::Instance>,
     device: Arc<cvk::Device>,
     compute_queue: Arc<cvk::Queue>,
@@ -87,6 +89,8 @@ impl Render {
         let present_texture =
             device.create_texture(surface.format().format, size.width, size.height);
 
+        let swapchain = device.create_swapchain(surface.clone(), 3, vk::PresentModeKHR::MAILBOX)?;
+
         let new = Self {
             instance,
             surface,
@@ -94,6 +98,7 @@ impl Render {
             compute_queue,
             present_queue,
             transfer_queue,
+            swapchain,
         };
 
         Ok(new)

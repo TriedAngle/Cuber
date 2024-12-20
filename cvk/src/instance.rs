@@ -70,7 +70,7 @@ impl Instance {
         adapter: &Adapter,
         window: &winit::window::Window,
         choose_format: impl Fn(&[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR,
-    ) -> Result<Surface> {
+    ) -> Result<Arc<Surface>> {
         let handle = unsafe {
             ash_window::create_surface(
                 &self.entry,
@@ -82,7 +82,7 @@ impl Instance {
         };
         let instance = ash::khr::surface::Instance::new(&self.entry, &self.handle);
         let surface = Surface::new(handle, instance, adapter, choose_format)?;
-        Ok(surface)
+        Ok(Arc::new(surface))
     }
 
     pub fn adapters(&self, formats: &[vk::Format]) -> Result<Vec<Arc<Adapter>>> {

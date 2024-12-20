@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct Queue {
-    handle: vk::Queue,
+    pub handle: vk::Queue,
     device: Arc<Device>,
-    state: Mutex<()>,
-    flags: vk::QueueFlags,
-    family_index: u32,
-    queue_index: u32,
-    is_shared: bool, // New field to track if this queue is shared
+    pub state: Mutex<()>,
+    pub flags: vk::QueueFlags,
+    pub family_index: u32,
+    pub queue_index: u32,
+    pub is_shared: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -19,7 +19,7 @@ pub struct QueueRequest {
     pub required_flags: vk::QueueFlags,
     pub exclude_flags: vk::QueueFlags,
     pub strict: bool,
-    pub allow_fallback_share: bool, // New field to control fallback sharing
+    pub allow_fallback_share: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +27,7 @@ pub struct QueueFamilyInfo {
     pub flags: vk::QueueFlags,
     pub family_index: u32,
     pub queue_index: u32,
-    pub is_shared: bool, // New field to indicate if this queue will be shared
+    pub is_shared: bool,
 }
 
 impl Queue {
