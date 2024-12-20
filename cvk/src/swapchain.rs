@@ -143,7 +143,8 @@ impl Device {
 impl Swapchain {
     pub fn acquire_next_frame(&mut self, timeout: Option<Duration>) -> (Frame, FrameSignals, bool) {
         let timeout_ns = timeout.map_or(u64::MAX, |d| d.as_nanos() as u64);
-        let semaphore = self.signals[self.current_frame].available;
+        let current_signal = self.current_frame;
+        let semaphore = self.signals[current_signal].available;
 
         let (index, suboptimal) = unsafe {
             self.device_loader
@@ -153,11 +154,12 @@ impl Swapchain {
 
         if suboptimal {
             self.needs_rebuild = suboptimal;
+            log::warn!("Swapchain is suboptimal");
         }
 
         (
             self.frames[index as usize],
-            self.signals[self.current_frame],
+            self.signals[current_signal],
             suboptimal,
         )
     }
@@ -174,18 +176,29 @@ impl Swapchain {
 
         let result = unsafe {
             let _lock = queue.lock();
-            self.device_loader
-                .queue_present(queue.handle, &info)
-                .unwrap()
+            match self.device_loader.queue_present(queue.handle, &info) {
+                Ok(suboptimal) => {
+                    if suboptimal {
+                        self.needs_rebuild = true;
+                    }
+                    true
+                }
+                Err(e) => {
+                    log::error!("Present failed with error: {:?}", e);
+                    self.needs_rebuild = true;
+                    false
+                }
+            }
         };
+
+        self.current_frame = (self.current_frame + 1) % self.frames_in_flight as usize;
 
         if !result {
             self.needs_rebuild = true;
             return false;
         }
 
-        self.current_frame = (self.current_frame + 1) % self.frames_in_flight as usize;
-        return true;
+        true
     }
 }
 

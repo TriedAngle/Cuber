@@ -7,7 +7,7 @@ use std::{
     thread::{self, ThreadId},
 };
 
-use crate::Queue;
+use crate::{Buffer, Queue};
 
 pub struct ThreadCommandPools {
     pub device: Arc<ash::Device>,
@@ -114,6 +114,51 @@ impl CommandRecorder {
                 &[],
                 &[barrier],
             );
+        }
+    }
+
+    pub fn copy_buffer(
+        &mut self,
+        src: &Buffer,
+        dst: &Buffer,
+        src_offset: usize,
+        dst_offset: usize,
+        size: usize,
+    ) {
+        let copy = vk::BufferCopy::default()
+            .size(size as u64)
+            .src_offset(src_offset as u64)
+            .dst_offset(dst_offset as u64);
+
+        unsafe {
+            self.device
+                .cmd_copy_buffer(self.buffer, src.handle, dst.handle, &[copy]);
+        }
+    }
+
+    pub fn copy_buffer_many(
+        &mut self,
+        src: &Buffer,
+        dst: &Buffer,
+        src_offsets: &[usize],
+        dst_offsets: &[usize],
+        sizes: &[usize],
+    ) {
+        let copies = src_offsets
+            .iter()
+            .zip(dst_offsets)
+            .zip(sizes)
+            .map(|((&src, &dst), &size)| {
+                vk::BufferCopy::default()
+                    .size(size as u64)
+                    .src_offset(src as u64)
+                    .dst_offset(dst as u64)
+            })
+            .collect::<Vec<_>>();
+
+        unsafe {
+            self.device
+                .cmd_copy_buffer(self.buffer, src.handle, dst.handle, &copies);
         }
     }
 

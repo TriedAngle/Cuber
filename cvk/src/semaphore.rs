@@ -24,6 +24,27 @@ impl Device {
             device: self.handle.clone(),
         }
     }
+
+    pub fn create_binary_semaphore(&self, signaled: bool) -> Semaphore {
+        let info = vk::SemaphoreCreateInfo::default();
+
+        let handle = unsafe { self.handle.create_semaphore(&info, None).unwrap() };
+
+        if signaled {
+            let signal_info = vk::SemaphoreSignalInfo::default()
+                .semaphore(handle)
+                .value(1);
+
+            unsafe {
+                let _ = self.handle.signal_semaphore(&signal_info);
+            }
+        }
+
+        Semaphore {
+            handle,
+            device: self.handle.clone(),
+        }
+    }
 }
 
 impl Semaphore {

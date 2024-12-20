@@ -10,6 +10,7 @@ pub struct Device {
     pub handle: Arc<ash::Device>,
     pub instance: Arc<Instance>,
     pub adapter: Arc<Adapter>,
+    pub debug_utils: Arc<ash::ext::debug_utils::Device>,
     pub allocator: Arc<vkm::Allocator>,
     pub command_pools: ThreadCommandPools,
 }
@@ -87,6 +88,8 @@ impl Device {
                 .create_device(adapter.handle(), &device_info, None)?
         };
 
+        let debug_utils = ash::ext::debug_utils::Device::new(&instance.handle, &handle);
+
         let allocator = unsafe {
             vkm::Allocator::new(vkm::AllocatorCreateInfo::new(
                 instance.handle(),
@@ -103,6 +106,7 @@ impl Device {
             handle,
             instance,
             adapter,
+            debug_utils: Arc::new(debug_utils),
             command_pools,
             allocator: Arc::new(allocator),
         };
@@ -115,6 +119,43 @@ impl Device {
             .collect::<Vec<_>>();
 
         Ok((new, queues))
+    }
+
+    pub fn set_object_name<T: vk::Handle>(&self, handle: T, name: &str) {
+        let name = std::ffi::CString::new(name).unwrap();
+        let info = vk::DebugUtilsObjectNameInfoEXT::default()
+            .object_handle(handle)
+            .object_name(&name);
+
+        unsafe {
+            self.debug_utils.set_debug_utils_object_name(&info).unwrap();
+        }
+    }
+
+    pub fn set_object_tag<T: vk::Handle>(&self, handle: T, tag_name: u64, tag_data: &[u8]) {
+        let info = vk::DebugUtilsObjectTagInfoEXT::default()
+            .object_handle(handle)
+            .tag_name(tag_name)
+            .tag(tag_data);
+
+        unsafe {
+            self.debug_utils.set_debug_utils_object_tag(&info).unwrap();
+        }
+    }
+
+    pub fn set_object_debug_info<T: vk::Handle + Copy>(
+        &self,
+        handle: T,
+        label: Option<&str>,
+        tag: Option<(u64, &[u8])>,
+    ) {
+        if let Some(name) = label {
+            self.set_object_name(handle, name);
+        }
+
+        if let Some((tag_id, tag_data)) = tag {
+            self.set_object_tag(handle, tag_id, tag_data);
+        }
     }
 
     pub fn handle(&self) -> &ash::Device {
