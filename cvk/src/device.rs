@@ -3,6 +3,7 @@ use ash::vk;
 use std::sync::Arc;
 use std::{collections::HashMap, mem};
 
+use crate::command::ThreadCommandPools;
 use crate::{Adapter, Instance, Queue, QueueRequest};
 
 pub struct Device {
@@ -10,6 +11,7 @@ pub struct Device {
     pub instance: Arc<Instance>,
     pub adapter: Arc<Adapter>,
     pub allocator: Arc<vkm::Allocator>,
+    pub command_pools: ThreadCommandPools,
 }
 
 impl std::fmt::Debug for Device {
@@ -93,10 +95,15 @@ impl Device {
             ))
         }?;
 
+        let handle = Arc::new(handle);
+
+        let command_pools = ThreadCommandPools::new(handle.clone());
+
         let new = Self {
-            handle: Arc::new(handle),
+            handle,
             instance,
             adapter,
+            command_pools,
             allocator: Arc::new(allocator),
         };
 
@@ -126,9 +133,14 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
+            let _ = self.handle.device_wait_idle();
             let allocator = mem::replace(Arc::get_mut(&mut self.allocator).unwrap(), mem::zeroed());
             mem::drop(allocator);
-            let _ = self.handle.device_wait_idle();
+
+            let pools = self.command_pools.pools.lock();
+            for (_, &pool) in pools.iter() {
+                self.handle.destroy_command_pool(pool, None);
+            }
             self.handle.destroy_device(None);
         }
     }

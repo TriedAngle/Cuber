@@ -9,7 +9,7 @@ use cvk::{raw::vk, utils, Device};
 use game::Camera;
 use winit::{
     application::ApplicationHandler,
-    event::DeviceEvent,
+    event::{DeviceEvent, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::KeyCode,
     window::{Window, WindowAttributes},
@@ -103,6 +103,60 @@ impl Render {
 
         Ok(new)
     }
+
+    fn render(&mut self) {
+        let (frame, signals, _suboptimal) = self.swapchain.acquire_next_frame(None);
+
+        let mut recorder = self.present_queue.record();
+
+        recorder.image_barrier(
+            frame.image,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        );
+
+        let color_attachment = vk::RenderingAttachmentInfo::default()
+            .image_view(frame.view)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.2, 0.4, 1.0],
+                },
+            });
+
+        recorder.begin_rendering(&[color_attachment], self.swapchain.extent);
+
+        recorder.end_rendering();
+
+        recorder.image_barrier(
+            frame.image,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags::empty(),
+        );
+
+        let _ = self.present_queue.submit(
+            &[recorder.finish()],
+            &[(
+                signals.available,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            )],
+            &[],
+            &[signals.finished],
+            &[],
+        );
+
+        self.swapchain.present_frame(&self.present_queue, frame);
+    }
 }
 
 struct VulkanApp {
@@ -172,7 +226,7 @@ impl VulkanApp {
             1000.,
         );
 
-        Ok(Self {
+        let new = Self {
             camera,
             instance,
             device,
@@ -181,7 +235,9 @@ impl VulkanApp {
             transfer_queue,
             window: None,
             render: None,
-        })
+        };
+
+        Ok(new)
     }
 }
 
@@ -227,6 +283,11 @@ impl ApplicationHandler for VulkanApp {
         event: winit::event::WindowEvent,
     ) {
         match event {
+            WindowEvent::RedrawRequested => {
+                if let Some(render) = &mut self.render {
+                    render.render();
+                }
+            }
             _ => {}
         }
     }

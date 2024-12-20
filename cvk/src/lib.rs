@@ -2,6 +2,7 @@ extern crate nalgebra as na;
 extern crate vk_mem as vkm;
 
 mod adapter;
+mod command;
 mod device;
 mod instance;
 mod queues;
@@ -16,7 +17,7 @@ pub use device::Device;
 pub use instance::Instance;
 pub use queues::{Queue, QueueRequest};
 pub use semaphore::Semaphore;
-pub use swapchain::{FrameSignals, Surface, Swapchain, SwapchainImage};
+pub use swapchain::{Frame, FrameSignals, Surface, Swapchain};
 
 pub use ash as raw;
 pub use ash::vk::{Format, QueueFlags};

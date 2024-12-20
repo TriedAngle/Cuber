@@ -6,7 +6,7 @@ use ash::vk;
 use crate::{Adapter, Device, Queue};
 
 #[derive(Clone, Copy)]
-pub struct SwapchainImage {
+pub struct Frame {
     pub image: vk::Image,
     pub view: vk::ImageView,
     pub index: u32,
@@ -24,7 +24,7 @@ pub struct Swapchain {
     pub instance_loader: ash::khr::swapchain::Instance,
     pub device_loader: ash::khr::swapchain::Device,
     pub surface: Arc<Surface>,
-    pub frames: Vec<SwapchainImage>,
+    pub frames: Vec<Frame>,
     pub frames_in_flight: u32,
     pub signals: Vec<FrameSignals>,
     pub current_frame: usize,
@@ -57,19 +57,27 @@ impl Device {
         let present_mode = if surface.present_modes.contains(&mode) {
             mode
         } else {
+            log::warn!(
+                "Present mode: {:?} not found, falling back to Mailbox",
+                mode
+            );
             surface
                 .present_modes()
                 .iter()
                 .copied()
                 .find(|&mode| mode == vk::PresentModeKHR::MAILBOX)
                 .or_else(|| {
+                    log::warn!("Present mode: MAILBOX not found, falling back to Immidiate");
                     surface
                         .present_modes()
                         .iter()
                         .copied()
                         .find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE)
                 })
-                .unwrap_or(vk::PresentModeKHR::FIFO)
+                .unwrap_or_else(|| {
+                    log::warn!("Present mode: IMMEDIATE not found, falling back to Fifo");
+                    vk::PresentModeKHR::FIFO
+                })
         };
 
         let format = surface.format;
@@ -96,7 +104,7 @@ impl Device {
                 .get_swapchain_images(handle)?
                 .into_iter()
                 .enumerate()
-                .map(|(index, image)| SwapchainImage::new(self, image, format.format, index as u32))
+                .map(|(index, image)| Frame::new(self, image, format.format, index as u32))
                 .collect::<Vec<_>>()
         };
 
@@ -133,7 +141,7 @@ impl Device {
 }
 
 impl Swapchain {
-    pub fn acquire_next_frame(&mut self, timeout: Option<Duration>) -> (SwapchainImage, bool) {
+    pub fn acquire_next_frame(&mut self, timeout: Option<Duration>) -> (Frame, FrameSignals, bool) {
         let timeout_ns = timeout.map_or(u64::MAX, |d| d.as_nanos() as u64);
         let semaphore = self.signals[self.current_frame].available;
 
@@ -147,10 +155,14 @@ impl Swapchain {
             self.needs_rebuild = suboptimal;
         }
 
-        (self.frames[index as usize], suboptimal)
+        (
+            self.frames[index as usize],
+            self.signals[self.current_frame],
+            suboptimal,
+        )
     }
 
-    pub fn present_frame(&mut self, queue: &Queue, frame: &SwapchainImage) -> bool {
+    pub fn present_frame(&mut self, queue: &Queue, frame: Frame) -> bool {
         let wait_semaphores = [self.signals[self.current_frame].finished];
         let swapchains = [self.handle];
         let image_indices = [frame.index];
@@ -177,7 +189,7 @@ impl Swapchain {
     }
 }
 
-impl SwapchainImage {
+impl Frame {
     pub fn new(device: &Device, image: vk::Image, format: vk::Format, index: u32) -> Self {
         let info = vk::ImageViewCreateInfo::default()
             .image(image)
@@ -270,6 +282,7 @@ impl Surface {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            let _ = self.device.device_wait_idle();
             for image in &self.frames {
                 self.device.destroy_image_view(image.view, None);
             }

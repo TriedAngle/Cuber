@@ -6,7 +6,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct Queue {
     pub handle: vk::Queue,
-    device: Arc<Device>,
+    pub device: Arc<Device>,
     pub state: Mutex<()>,
     pub flags: vk::QueueFlags,
     pub family_index: u32,
