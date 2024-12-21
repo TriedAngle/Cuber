@@ -3,10 +3,10 @@ extern crate vk_mem as vkm;
 use std::{mem, ops::Deref, sync::Arc};
 
 use anyhow::Result;
-use bytemuck::Zeroable;
 use cvk::{raw::vk, utils, Device};
 
 use game::Camera;
+use rand::Rng;
 use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, WindowEvent},
@@ -16,48 +16,102 @@ use winit::{
 };
 
 const COMPUTE_SHADER: &str = r#"
+struct Particle {
+    position: vec2<f32>,
+    velocity: vec2<f32>,
+    color: vec4<f32>,
+}
+
 struct PushConstants {
     window: vec2<u32>,
     mouse: vec2<f32>,
+    delta_time: f32,
 }
+
+@group(0) @binding(0)
+var output_texture: texture_storage_2d<rgba8unorm, read_write>;
+
+@group(0) @binding(1)
+var<storage, read_write> particles: array<Particle>;
 
 var<push_constant> pc: PushConstants;
 
-@group(0) @binding(0)
-var output_texture: texture_storage_2d<rgba8unorm, write>;
+@compute @workgroup_size(16, 16, 1)
+fn clear(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (global_id.x >= pc.window.x || global_id.y >= pc.window.y) {
+        return;
+    }
+    
+    let current = textureLoad(output_texture, vec2<i32>(global_id.xy));
+    
+    let fade_speed = 0.95; 
+    let faded = vec4<f32>(current.rgb * fade_speed, current.a);
+    
+    textureStore(output_texture, vec2<i32>(global_id.xy), faded);
+}
 
-@compute @workgroup_size(16, 16)
+
+@compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let coords = vec2<u32>(global_id.xy);
+    // Update particle
+    if (global_id.x >= 1000u) { // MAX_PARTICLES
+        return;
+    }
     
-    let uv = vec2<f32>(
-        f32(coords.x) / f32(pc.window.x),
-        f32(coords.y) / f32(pc.window.y),
-    );
+    var particle = particles[global_id.x];
     
-    let mouse = vec2<f32>(
-        pc.mouse.x / f32(pc.window.x),
-        pc.mouse.y / f32(pc.window.y),
-    );
+    // Simple physics update
+    particle.position += particle.velocity * pc.delta_time;
     
-    let dist = distance(uv, mouse);
+    // Bounce off screen edges
+    if (particle.position.x <= 0.0 || particle.position.x >= f32(pc.window.x)) {
+        particle.velocity.x = -particle.velocity.x;
+    }
+    if (particle.position.y <= 0.0 || particle.position.y >= f32(pc.window.y)) {
+        particle.velocity.y = -particle.velocity.y;
+    }
     
-    let radius = 0.1;
-    let glow = smoothstep(radius, 0.0, dist);
+    // Mouse attraction with weaker force
+    let mouse_pos = pc.mouse;
+    let to_mouse = mouse_pos - particle.position;
+    let dist = length(to_mouse);
     
-    let checker_size = 32u;
-    let is_white = ((coords.x / checker_size) + (coords.y / checker_size)) % 2u == 0u;
-    let base_color = select(
-        vec4<f32>(1.0, 0.0, 0.0, 1.0),
-        vec4<f32>(1.0, 1.0, 1.0, 1.0),
-        is_white
-    );
+    // Adjusted parameters for smoother interaction
+    let min_dist = 20.0;
+    if (dist > min_dist) {
+        // Reduced force strength significantly
+        let force = normalize(to_mouse) * 800.0 / (dist);
+        particle.velocity += force * pc.delta_time;
+    } else {
+        // Add slight repulsion when very close to prevent clustering
+        let repel = normalize(-to_mouse) * 400.0;
+        particle.velocity += repel * pc.delta_time;
+    }
     
-    let glow_color = vec4<f32>(0.0, 0.5, 1.0, 1.0);
-    let final_color = mix(base_color, glow_color, glow);
+    // Reduced drag for more natural movement
+    particle.velocity *= 0.995;
     
-    textureStore(output_texture, coords, final_color);
-}"#;
+    // Lower max speed to prevent erratic behavior
+    let max_speed = 400.0;
+    let current_speed = length(particle.velocity);
+    if (current_speed > max_speed) {
+        particle.velocity = normalize(particle.velocity) * max_speed;
+    }
+    
+    // Update particle in storage buffer
+    particles[global_id.x] = particle;
+    
+    // Draw to texture
+    let pos = vec2<i32>(particle.position);
+    if (pos.x >= 0 && pos.x < i32(pc.window.x) && 
+        pos.y >= 0 && pos.y < i32(pc.window.y)) {
+        // Blend with existing color for smoother trails
+        let current = textureLoad(output_texture, pos);
+        let blended = max(current, particle.color);  // Additive blending
+        textureStore(output_texture, pos, blended);
+    }
+}
+"#;
 
 const PRSENT_SHADER: &str = r#"
 struct VertexOutput {
@@ -65,8 +119,10 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 }
 
-@group(0) @binding(1) var tex: texture_2d<f32>;
-@group(0) @binding(2) var tex_sampler: sampler;
+@group(0) @binding(2)
+var tex: texture_2d<f32>;
+@group(0) @binding(3)
+var tex_sampler: sampler;
 
 @vertex
 fn vmain(@builtin(vertex_index) vert_idx: u32) -> VertexOutput {
@@ -75,19 +131,16 @@ fn vmain(@builtin(vertex_index) vert_idx: u32) -> VertexOutput {
         vec2<f32>(-1.0,  1.0),  // top-left
         vec2<f32>( 1.0, -1.0),  // bottom-right
         
-        // Second triangle (CCW)
         vec2<f32>(-1.0,  1.0),  // top-left
         vec2<f32>( 1.0,  1.0),  // top-right
         vec2<f32>( 1.0, -1.0)   // bottom-right
     );
     
     var uvs = array<vec2<f32>, 6>(
-        // First triangle
         vec2<f32>(0.0, 1.0),  // bottom-left
         vec2<f32>(0.0, 0.0),  // top-left
         vec2<f32>(1.0, 1.0),  // bottom-right
         
-        // Second triangle
         vec2<f32>(0.0, 0.0),  // top-left
         vec2<f32>(1.0, 0.0),  // top-right
         vec2<f32>(1.0, 1.0)   // bottom-right
@@ -110,7 +163,28 @@ fn fmain(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 struct PushConstants {
     window: [u32; 2],
     mouse: [f32; 2],
+    dt: f32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Particle {
+    position: [f32; 2],
+    velocity: [f32; 2],
+    color: [f32; 4],
+}
+
+impl Default for Particle {
+    fn default() -> Self {
+        Self {
+            position: [0.0, 0.0],
+            velocity: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+const PARTICLE_COUNT: usize = 256;
 
 struct Render {
     surface: Arc<cvk::Surface>,
@@ -120,15 +194,17 @@ struct Render {
     render_queue: Arc<cvk::Queue>,
     transfer_queue: Arc<cvk::Queue>,
     compute_pipeline: cvk::ComputePipeline,
+    clear_pipeline: cvk::ComputePipeline,
     present_pipeline: cvk::RenderPipeline,
     descriptor_layout: cvk::DescriptorSetLayout,
     descriptor_pool: Arc<cvk::DescriptorPool>,
     descriptor_set: cvk::DescriptorSet,
     present_texture: cvk::Texture,
+    pc: PushConstants,
+    particle_buffer: cvk::Buffer,
     compute_complete: cvk::Semaphore,
     instance: Arc<cvk::Instance>,
     device: Arc<cvk::Device>,
-    pc: PushConstants,
 }
 
 impl Render {
@@ -150,13 +226,40 @@ impl Render {
                 .unwrap_or(formats[0])
         })?;
 
-        println!("formats: {:?}", surface.formats());
-        println!("caps: {:?}", surface.capabilities());
-
         assert!(surface.is_compatible(&device.adapter(), &render_queue));
 
-        let compute_shader = device.create_shader(COMPUTE_SHADER)?;
-        let present_shader = device.create_shader(PRSENT_SHADER)?;
+        let mut particles = vec![Particle::default(); PARTICLE_COUNT];
+
+        let rng = &mut rand::thread_rng();
+
+        for particle in &mut particles {
+            particle.position = [
+                rng.gen_range(0.0..size.width as f32),
+                rng.gen_range(0.0..size.height as f32),
+            ];
+            particle.velocity = [rng.gen_range(-30.0..30.0), rng.gen_range(-30.0..30.0)];
+            particle.color = [
+                rng.gen_range(0.5..1.0),
+                rng.gen_range(0.5..1.0),
+                rng.gen_range(0.5..1.0),
+                1.0,
+            ];
+        }
+
+        let particle_buffer = device.create_buffer(&cvk::BufferInfo {
+            size: (std::mem::size_of::<Particle>() * PARTICLE_COUNT) as u64,
+            usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            sharing: vk::SharingMode::EXCLUSIVE,
+            usage_locality: vkm::MemoryUsage::AutoPreferDevice,
+            allocation_locality: vk::MemoryPropertyFlags::HOST_VISIBLE
+                | vk::MemoryPropertyFlags::HOST_COHERENT
+                | vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            host_access: Some(vkm::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE),
+            label: Some("Particle Buffer"),
+            ..Default::default()
+        });
+
+        particle_buffer.upload(bytemuck::cast_slice(&particles), 0);
 
         let layout = device.create_descriptor_set_layout(&cvk::DescriptorSetLayoutInfo {
             flags: vk::DescriptorSetLayoutCreateFlags::empty(),
@@ -171,20 +274,26 @@ impl Render {
                 },
                 cvk::DescriptorBinding {
                     binding: 1,
+                    ty: cvk::DescriptorType::StorageBuffer,
+                    count: 1,
+                    stages: vk::ShaderStageFlags::COMPUTE,
+                    flags: None,
+                },
+                cvk::DescriptorBinding {
+                    binding: 2,
                     ty: cvk::DescriptorType::SampledImage,
                     count: 1,
                     stages: vk::ShaderStageFlags::FRAGMENT,
                     flags: None,
                 },
                 cvk::DescriptorBinding {
-                    binding: 2,
+                    binding: 3,
                     ty: cvk::DescriptorType::Sampler,
                     count: 1,
                     stages: vk::ShaderStageFlags::FRAGMENT,
                     flags: None,
                 },
             ],
-
             ..Default::default()
         });
 
@@ -219,19 +328,37 @@ impl Render {
                 image_view: present_texture.view,
                 image_layout: vk::ImageLayout::GENERAL,
             },
-            cvk::DescriptorWrite::SampledImage {
+            cvk::DescriptorWrite::StorageBuffer {
                 binding: 1,
+                buffer: &particle_buffer,
+                offset: 0,
+                range: vk::WHOLE_SIZE,
+            },
+            cvk::DescriptorWrite::SampledImage {
+                binding: 2,
                 image_view: present_texture.view,
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 2,
+                binding: 3,
                 sampler: present_texture.sampler.unwrap(),
             },
         ]);
 
+        let compute_shader = device.create_shader(COMPUTE_SHADER)?;
+        let present_shader = device.create_shader(PRSENT_SHADER)?;
+
         let compute_pipeline = device.create_compute_pipeline(&cvk::ComputePipelineInfo {
             shader: compute_shader.entry("main"),
+            descriptor_layouts: &[&layout],
+            push_constant_size: Some(mem::size_of::<PushConstants>() as u32),
+            cache: None,
+            label: Some("Compute Pipeline"),
+            tag: None,
+        });
+
+        let clear_pipeline = device.create_compute_pipeline(&cvk::ComputePipelineInfo {
+            shader: compute_shader.entry("clear"),
             descriptor_layouts: &[&layout],
             push_constant_size: Some(mem::size_of::<PushConstants>() as u32),
             cache: None,
@@ -262,6 +389,7 @@ impl Render {
         let pc = PushConstants {
             window: [size.width, size.height],
             mouse: [0.; 2],
+            dt: 0.,
         };
 
         let new = Self {
@@ -275,6 +403,7 @@ impl Render {
             swapchain,
 
             compute_pipeline,
+            clear_pipeline,
             present_pipeline,
             descriptor_layout: layout,
             descriptor_pool: pool,
@@ -282,6 +411,7 @@ impl Render {
             present_texture,
             compute_complete,
             pc,
+            particle_buffer,
         };
 
         Ok(new)
@@ -294,19 +424,20 @@ impl Render {
 
         recorder.image_transition(&self.present_texture, cvk::ImageTransition::General);
 
+        let particle_groups = (PARTICLE_COUNT + 255) / 256;
         recorder.bind_pipeline(&self.compute_pipeline);
-
         recorder.bind_descriptor_set(&self.descriptor_set, 0, &[]);
-
         recorder.push_constants(self.pc);
+        recorder.dispatch(particle_groups as u32, 1, 1);
 
         let width = (self.swapchain.extent.width + 15) / 16;
         let height = (self.swapchain.extent.height + 15) / 16;
-
+        recorder.bind_pipeline(&self.clear_pipeline);
+        recorder.bind_descriptor_set(&self.descriptor_set, 0, &[]);
+        recorder.push_constants(self.pc);
         recorder.dispatch(width, height, 1);
 
         recorder.image_transition(&self.present_texture, cvk::ImageTransition::ShaderRead);
-
         recorder.image_transition(&frame, cvk::ImageTransition::ColorAttachment);
 
         let color_attachment = vk::RenderingAttachmentInfo::default()
@@ -459,7 +590,22 @@ impl ApplicationHandler for VulkanApp {
         self.render = Some(render);
     }
 
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {}
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        // Update delta time based on event cause
+        if let Some(render) = &mut self.render {
+            match cause {
+                winit::event::StartCause::ResumeTimeReached {
+                    requested_resume, ..
+                } => {
+                    render.pc.dt = requested_resume.elapsed().as_secs_f32();
+                }
+                winit::event::StartCause::Poll => {
+                    render.pc.dt = 1.0 / 60.0;
+                }
+                _ => {}
+            }
+        }
+    }
 
     fn device_event(
         &mut self,

@@ -55,7 +55,7 @@ pub struct CommandRecorder {
 }
 
 #[derive(Clone, Copy)]
-struct PipelineBinding {
+pub struct PipelineBinding {
     handle: vk::Pipeline,
     layout: vk::PipelineLayout,
     binding: vk::PipelineBindPoint,

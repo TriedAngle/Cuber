@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ash::vk::{self, Sampler};
+use ash::vk;
 use vkm::Alloc;
 
 use crate::Device;
