@@ -51,6 +51,15 @@ pub struct CommandRecorder {
     pub buffer: vk::CommandBuffer,
     pub device: Arc<ash::Device>,
     pub recording: bool,
+    pub pipeline: Option<PipelineBinding>,
+}
+
+#[derive(Clone, Copy)]
+struct PipelineBinding {
+    handle: vk::Pipeline,
+    layout: vk::PipelineLayout,
+    binding: vk::PipelineBindPoint,
+    flags: vk::ShaderStageFlags,
 }
 
 impl CommandRecorder {
@@ -175,18 +184,6 @@ impl CommandRecorder {
         );
     }
 
-    pub fn push_constants<T: bytemuck::Pod>(&mut self, pipeline: &impl Pipeline, pc: T) {
-        unsafe {
-            self.device.cmd_push_constants(
-                self.buffer,
-                pipeline.layout(),
-                pipeline.flags(),
-                0,
-                bytemuck::cast_slice(&[pc]),
-            );
-        }
-    }
-
     pub fn copy_buffer(
         &mut self,
         src: &Buffer,
@@ -233,24 +230,52 @@ impl CommandRecorder {
     }
 
     pub fn bind_pipeline(&mut self, pipeline: &impl Pipeline) {
+        let pipeline_binding = PipelineBinding {
+            handle: pipeline.handle(),
+            layout: pipeline.layout(),
+            binding: pipeline.bind_point(),
+            flags: pipeline.flags(),
+        };
+
+        self.pipeline = Some(pipeline_binding);
+
         unsafe {
-            self.device
-                .cmd_bind_pipeline(self.buffer, pipeline.bind_point(), pipeline.handle());
+            self.device.cmd_bind_pipeline(
+                self.buffer,
+                pipeline_binding.binding,
+                pipeline_binding.handle,
+            );
         }
     }
 
-    pub fn bind_descriptor_set(
-        &self,
-        pipeline: &impl Pipeline,
-        set: &DescriptorSet,
-        index: u32,
-        offsets: &[u32],
-    ) {
+    pub fn push_constants<T: bytemuck::Pod>(&mut self, pc: T) {
+        let Some(pipeline) = &self.pipeline else {
+            log::error!("Calling Push Constants without a bound pipeline");
+            return;
+        };
+
+        unsafe {
+            self.device.cmd_push_constants(
+                self.buffer,
+                pipeline.layout,
+                pipeline.flags,
+                0,
+                bytemuck::cast_slice(&[pc]),
+            );
+        }
+    }
+
+    pub fn bind_descriptor_set(&self, set: &DescriptorSet, index: u32, offsets: &[u32]) {
+        let Some(pipeline) = &self.pipeline else {
+            log::error!("Calling Push Constants without a bound pipeline");
+            return;
+        };
+
         unsafe {
             self.device.cmd_bind_descriptor_sets(
                 self.buffer,
-                pipeline.bind_point(),
-                pipeline.layout(),
+                pipeline.binding,
+                pipeline.layout,
                 index,
                 &[set.handle],
                 offsets,
@@ -347,6 +372,7 @@ impl Queue {
             buffer,
             device: self.device.handle.clone(),
             recording: true,
+            pipeline: None,
         }
     }
 

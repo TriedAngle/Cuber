@@ -296,9 +296,9 @@ impl Render {
 
         recorder.bind_pipeline(&self.compute_pipeline);
 
-        recorder.bind_descriptor_set(&self.compute_pipeline, &self.descriptor_set, 0, &[]);
+        recorder.bind_descriptor_set(&self.descriptor_set, 0, &[]);
 
-        recorder.push_constants(&self.compute_pipeline, self.pc);
+        recorder.push_constants(self.pc);
 
         let width = (self.swapchain.extent.width + 15) / 16;
         let height = (self.swapchain.extent.height + 15) / 16;
@@ -324,7 +324,7 @@ impl Render {
 
         recorder.bind_pipeline(&self.present_pipeline);
 
-        recorder.bind_descriptor_set(&self.present_pipeline, &self.descriptor_set, 0, &[]);
+        recorder.bind_descriptor_set(&self.descriptor_set, 0, &[]);
 
         recorder.viewport(vk::Viewport {
             x: 0.0,
