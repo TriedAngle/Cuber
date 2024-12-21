@@ -14,7 +14,6 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-// WGSL shader that will be converted to SPIR-V
 const COMPUTE_SHADER: &str = r#"
 @group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
 
@@ -22,7 +21,6 @@ const COMPUTE_SHADER: &str = r#"
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let coords = vec2<u32>(global_id.xy);
     
-    // Create a checkerboard pattern - this will make it very obvious if it works
     let checker_size = 32u;
     let is_white = ((coords.x / checker_size) + (coords.y / checker_size)) % 2u == 0u;
     
@@ -39,32 +37,48 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 const PRSENT_SHADER: &str = r#"
 struct VertexOutput {
     @builtin(position) pos: vec4<f32>,
-    @location(0) color: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 }
+
+@group(0) @binding(1) var tex: texture_2d<f32>;
+@group(0) @binding(2) var tex_sampler: sampler;
 
 @vertex
 fn vmain(@builtin(vertex_index) vert_idx: u32) -> VertexOutput {
-    var positions = array<vec2<f32>, 3>(
-    vec2<f32>( 0.0, -0.5),   // top center (changed from 0.5 to -0.5)
-    vec2<f32>(-0.5,  0.5),   // bottom left (changed from -0.5 to 0.5)
-    vec2<f32>( 0.5,  0.5)    // bottom right (changed from -0.5 to 0.5)
+    var positions = array<vec2<f32>, 6>(
+        // First triangle (CCW)
+        vec2<f32>(-1.0, -1.0),  // bottom-left
+        vec2<f32>(-1.0,  1.0),  // top-left
+        vec2<f32>( 1.0, -1.0),  // bottom-right
+        
+        // Second triangle (CCW)
+        vec2<f32>(-1.0,  1.0),  // top-left
+        vec2<f32>( 1.0,  1.0),  // top-right
+        vec2<f32>( 1.0, -1.0)   // bottom-right
     );
     
-    var colors = array<vec4<f32>, 3>(
-        vec4<f32>(1.0, 0.0, 0.0, 1.0),  // red
-        vec4<f32>(0.0, 1.0, 0.0, 1.0),  // green
-        vec4<f32>(0.0, 0.0, 1.0, 1.0)   // blue
+    // UVs correspond to the positions
+    var uvs = array<vec2<f32>, 6>(
+        // First triangle
+        vec2<f32>(0.0, 1.0),  // bottom-left
+        vec2<f32>(0.0, 0.0),  // top-left
+        vec2<f32>(1.0, 1.0),  // bottom-right
+        
+        // Second triangle
+        vec2<f32>(0.0, 0.0),  // top-left
+        vec2<f32>(1.0, 0.0),  // top-right
+        vec2<f32>(1.0, 1.0)   // bottom-right
     );
 
     var output: VertexOutput;
     output.pos = vec4<f32>(positions[vert_idx], 0.0, 1.0);
-    output.color = colors[vert_idx];
+    output.uv = uvs[vert_idx];
     return output;
 }
 
 @fragment
-fn fmain(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
-    return color;
+fn fmain(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    return textureSample(tex, tex_sampler, uv);
 }
 "#;
 
@@ -73,7 +87,7 @@ struct Render {
     window: Arc<Window>,
     swapchain: cvk::Swapchain,
     compute_queue: Arc<cvk::Queue>,
-    present_queue: Arc<cvk::Queue>,
+    render_queue: Arc<cvk::Queue>,
     transfer_queue: Arc<cvk::Queue>,
     compute_pipeline: cvk::ComputePipeline,
     present_pipeline: cvk::RenderPipeline,
@@ -91,7 +105,7 @@ impl Render {
         instance: Arc<cvk::Instance>,
         device: Arc<cvk::Device>,
         compute_queue: Arc<cvk::Queue>,
-        present_queue: Arc<cvk::Queue>,
+        render_queue: Arc<cvk::Queue>,
         transfer_queue: Arc<cvk::Queue>,
         window: Arc<Window>,
     ) -> Result<Self> {
@@ -108,7 +122,7 @@ impl Render {
         println!("formats: {:?}", surface.formats());
         println!("caps: {:?}", surface.capabilities());
 
-        assert!(surface.is_compatible(&device.adapter(), &present_queue));
+        assert!(surface.is_compatible(&device.adapter(), &render_queue));
 
         let compute_shader = device.create_shader(COMPUTE_SHADER)?;
         let present_shader = device.create_shader(PRSENT_SHADER)?;
@@ -163,16 +177,7 @@ impl Render {
             allocation_locality: vk::MemoryPropertyFlags::DEVICE_LOCAL,
             aspect_mask: vk::ImageAspectFlags::COLOR,
             layout: vk::ImageLayout::UNDEFINED,
-            sampler: Some(cvk::SamplerInfo {
-                mag: vk::Filter::NEAREST,
-                min: vk::Filter::NEAREST,
-                mipmap: vk::SamplerMipmapMode::NEAREST,
-                address_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                address_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                address_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                label: Some("Debug Sampler"),
-                ..Default::default()
-            }),
+            sampler: Some(cvk::SamplerInfo::default()),
             label: Some("Debug Present Texture"),
             ..Default::default()
         });
@@ -229,7 +234,7 @@ impl Render {
             window,
             device,
             compute_queue,
-            present_queue,
+            render_queue,
             transfer_queue,
             swapchain,
 
@@ -247,19 +252,23 @@ impl Render {
 
     fn render(&mut self) {
         let (frame, signals, _suboptimal) = self.swapchain.acquire_next_frame(None);
-        println!("Acquired frame {}", frame.index);
 
-        let mut recorder = self.present_queue.record();
+        let mut recorder = self.render_queue.record();
 
-        recorder.image_barrier(
-            frame.image,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            vk::AccessFlags::empty(),
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-        );
+        recorder.image_transition(&self.present_texture, cvk::ImageTransition::General);
+
+        recorder.bind_pipeline(&self.compute_pipeline);
+
+        recorder.bind_descriptor_set(&self.compute_pipeline, &self.descriptor_set, 0, &[]);
+
+        let width = (self.swapchain.extent.width + 15) / 16;
+        let height = (self.swapchain.extent.height + 15) / 16;
+
+        recorder.dispatch(width, height, 1);
+
+        recorder.image_transition(&self.present_texture, cvk::ImageTransition::ShaderRead);
+
+        recorder.image_transition(&frame, cvk::ImageTransition::ColorAttachment);
 
         let color_attachment = vk::RenderingAttachmentInfo::default()
             .image_view(frame.view)
@@ -268,226 +277,48 @@ impl Render {
             .store_op(vk::AttachmentStoreOp::STORE)
             .clear_value(vk::ClearValue {
                 color: vk::ClearColorValue {
-                    float32: [0.1, 0.2, 0.6, 1.0],
+                    float32: [0.0, 0.0, 0.0, 1.0],
                 },
             });
 
         recorder.begin_rendering(&[color_attachment], self.swapchain.extent);
 
-        unsafe {
-            self.device.handle.cmd_bind_pipeline(
-                recorder.buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.present_pipeline.handle,
-            );
+        recorder.bind_pipeline(&self.present_pipeline);
 
-            let viewport = vk::Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: self.swapchain.extent.width as f32,
-                height: self.swapchain.extent.height as f32,
-                min_depth: 0.0,
-                max_depth: 1.0,
-            };
+        recorder.bind_descriptor_set(&self.present_pipeline, &self.descriptor_set, 0, &[]);
 
-            let scissor = vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: self.swapchain.extent,
-            };
+        recorder.viewport(vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: self.swapchain.extent.width as f32,
+            height: self.swapchain.extent.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        });
 
-            self.device
-                .handle
-                .cmd_set_viewport(recorder.buffer, 0, &[viewport]);
-            self.device
-                .handle
-                .cmd_set_scissor(recorder.buffer, 0, &[scissor]);
+        recorder.scissor(vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: self.swapchain.extent,
+        });
 
-            self.device.handle.cmd_draw(recorder.buffer, 3, 1, 0, 0);
-        }
+        recorder.draw(0..6, 0..1);
 
         recorder.end_rendering();
 
-        recorder.image_barrier(
-            frame.image,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            vk::AccessFlags::empty(),
-        );
+        recorder.image_transition(&frame, cvk::ImageTransition::Present);
 
         let command_buffer = recorder.finish();
 
-        self.present_queue
-            .submit(
-                &[command_buffer],
-                &[(
-                    signals.available,
-                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                )],
-                &[],
-                &[signals.finished],
-                &[],
-            )
-            .unwrap();
+        let _ = self.render_queue.submit(
+            &[command_buffer],
+            &[(signals.available, vk::PipelineStageFlags::TOP_OF_PIPE)],
+            &[],
+            &[signals.finished],
+            &[],
+        );
 
-        self.swapchain.present_frame(&self.present_queue, frame);
+        self.swapchain.present_frame(&self.render_queue, frame);
         self.window.request_redraw();
-        // let (frame, signals, _suboptimal) = self.swapchain.acquire_next_frame(None);
-
-        // let mut compute_recorder = self.compute_queue.record();
-
-        // compute_recorder.image_barrier(
-        //     self.present_texture.image,
-        //     vk::ImageLayout::UNDEFINED,
-        //     vk::ImageLayout::GENERAL,
-        //     vk::PipelineStageFlags::TOP_OF_PIPE,
-        //     vk::PipelineStageFlags::COMPUTE_SHADER,
-        //     vk::AccessFlags::empty(),
-        //     vk::AccessFlags::SHADER_WRITE,
-        // );
-        // unsafe {
-        //     self.device.handle.cmd_bind_pipeline(
-        //         compute_recorder.buffer,
-        //         vk::PipelineBindPoint::COMPUTE,
-        //         self.compute_pipeline.handle,
-        //     );
-
-        //     self.device.handle.cmd_bind_descriptor_sets(
-        //         compute_recorder.buffer,
-        //         vk::PipelineBindPoint::COMPUTE,
-        //         self.compute_pipeline.layout,
-        //         0,
-        //         &[self.descriptor_set.handle],
-        //         &[],
-        //     );
-
-        //     self.device.handle.cmd_dispatch(
-        //         compute_recorder.buffer,
-        //         (self.swapchain.extent.width + 15) / 16,
-        //         (self.swapchain.extent.height + 15) / 16,
-        //         1,
-        //     );
-        // }
-
-        // compute_recorder.image_barrier(
-        //     self.present_texture.image,
-        //     vk::ImageLayout::GENERAL,
-        //     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        //     vk::PipelineStageFlags::COMPUTE_SHADER,
-        //     vk::PipelineStageFlags::FRAGMENT_SHADER,
-        //     vk::AccessFlags::SHADER_WRITE,
-        //     vk::AccessFlags::SHADER_READ,
-        // );
-
-        // let compute_buffer = compute_recorder.finish();
-
-        // let mut present_recorder = self.present_queue.record();
-
-        // present_recorder.image_barrier(
-        //     frame.image,
-        //     vk::ImageLayout::UNDEFINED,
-        //     vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        //     vk::PipelineStageFlags::TOP_OF_PIPE,
-        //     vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        //     vk::AccessFlags::empty(),
-        //     vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-        // );
-
-        // let color_attachment = vk::RenderingAttachmentInfo::default()
-        //     .image_view(frame.view)
-        //     .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        //     .load_op(vk::AttachmentLoadOp::CLEAR)
-        //     .store_op(vk::AttachmentStoreOp::STORE)
-        //     .clear_value(vk::ClearValue {
-        //         color: vk::ClearColorValue {
-        //             float32: [0.0, 0.0, 0.0, 1.0],
-        //         },
-        //     });
-
-        // present_recorder.begin_rendering(&[color_attachment], self.swapchain.extent);
-
-        // unsafe {
-        //     self.device.handle.cmd_bind_pipeline(
-        //         present_recorder.buffer,
-        //         vk::PipelineBindPoint::GRAPHICS,
-        //         self.present_pipeline.handle,
-        //     );
-
-        //     self.device.handle.cmd_bind_descriptor_sets(
-        //         present_recorder.buffer,
-        //         vk::PipelineBindPoint::GRAPHICS,
-        //         self.present_pipeline.layout,
-        //         0,
-        //         &[self.descriptor_set.handle],
-        //         &[],
-        //     );
-
-        //     let viewport = vk::Viewport {
-        //         x: 0.0,
-        //         y: 0.0,
-        //         width: self.swapchain.extent.width as f32,
-        //         height: self.swapchain.extent.height as f32,
-        //         min_depth: 0.0,
-        //         max_depth: 1.0,
-        //     };
-
-        //     let scissor = vk::Rect2D {
-        //         offset: vk::Offset2D { x: 0, y: 0 },
-        //         extent: self.swapchain.extent,
-        //     };
-
-        //     self.device
-        //         .handle
-        //         .cmd_set_viewport(present_recorder.buffer, 0, &[viewport]);
-        //     self.device
-        //         .handle
-        //         .cmd_set_scissor(present_recorder.buffer, 0, &[scissor]);
-        //     self.device
-        //         .handle
-        //         .cmd_draw(present_recorder.buffer, 4, 1, 0, 0);
-        // }
-
-        // present_recorder.end_rendering();
-
-        // present_recorder.image_barrier(
-        //     frame.image,
-        //     vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        //     vk::ImageLayout::PRESENT_SRC_KHR,
-        //     vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        //     vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-        //     vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-        //     vk::AccessFlags::empty(),
-        // );
-
-        // let present_buffer = present_recorder.finish();
-
-        // self.compute_queue
-        //     .submit(
-        //         &[compute_buffer],
-        //         &[(signals.available, vk::PipelineStageFlags::TOP_OF_PIPE)],
-        //         &[],
-        //         &[self.compute_complete.handle],
-        //         &[],
-        //     )
-        //     .unwrap();
-
-        // self.present_queue
-        //     .submit(
-        //         &[present_buffer],
-        //         &[(
-        //             self.compute_complete.handle,
-        //             vk::PipelineStageFlags::FRAGMENT_SHADER
-        //                 | vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        //         )],
-        //         &[],
-        //         &[signals.finished],
-        //         &[],
-        //     )
-        //     .unwrap();
-
-        // self.swapchain.present_frame(&self.present_queue, frame);
     }
 }
 
@@ -496,7 +327,7 @@ struct VulkanApp {
     instance: Arc<cvk::Instance>,
     device: Arc<cvk::Device>,
     compute_queue: Arc<cvk::Queue>,
-    present_queue: Arc<cvk::Queue>,
+    render_queue: Arc<cvk::Queue>,
     transfer_queue: Arc<cvk::Queue>,
     window: Option<Arc<Window>>,
     render: Option<Render>,
@@ -515,8 +346,7 @@ impl VulkanApp {
         ];
 
         let adapters = instance.adapters(formats)?;
-        println!("adapters: {:?}", adapters.len());
-        let adapter = adapters[1].clone();
+        let adapter = adapters[0].clone();
         utils::print_queues_pretty(&adapter);
 
         let (device, queues) = Device::new(
@@ -531,8 +361,8 @@ impl VulkanApp {
                 },
                 cvk::QueueRequest {
                     required_flags: cvk::QueueFlags::GRAPHICS | cvk::QueueFlags::TRANSFER,
-                    exclude_flags: cvk::QueueFlags::COMPUTE,
-                    strict: true,
+                    exclude_flags: cvk::QueueFlags::empty(),
+                    strict: false,
                     allow_fallback_share: true,
                 },
                 cvk::QueueRequest {
@@ -545,7 +375,7 @@ impl VulkanApp {
         )?;
 
         let compute_queue = queues[0].clone();
-        let present_queue = queues[1].clone();
+        let render_queue = queues[1].clone();
         let transfer_queue = queues[2].clone();
 
         let camera = Camera::new(
@@ -564,7 +394,7 @@ impl VulkanApp {
             instance,
             device,
             compute_queue,
-            present_queue,
+            render_queue,
             transfer_queue,
             window: None,
             render: None,
@@ -581,7 +411,7 @@ impl ApplicationHandler for VulkanApp {
             self.instance.clone(),
             self.device.clone(),
             self.compute_queue.clone(),
-            self.present_queue.clone(),
+            self.render_queue.clone(),
             self.transfer_queue.clone(),
             window.clone(),
         )

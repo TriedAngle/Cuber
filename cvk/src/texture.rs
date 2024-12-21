@@ -150,6 +150,118 @@ impl Device {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct Frame {
+    pub image: vk::Image,
+    pub view: vk::ImageView,
+    pub index: u32,
+}
+
+pub trait Image {
+    fn handle(&self) -> vk::Image;
+}
+
+impl Image for Texture {
+    fn handle(&self) -> vk::Image {
+        self.image
+    }
+}
+
+impl Image for Frame {
+    fn handle(&self) -> vk::Image {
+        self.image
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ImageTransition {
+    /// Transition from undefined to general layout
+    General,
+    /// Transition to shader read-only optimal layout
+    ShaderRead,
+    /// Transition to color attachment optimal layout
+    ColorAttachment,
+    /// Transition to transfer dst optimal layout
+    TransferDst,
+    /// Transition to present src layout
+    Present,
+    /// Custom transition with specified layouts
+    Custom {
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        src_stage: vk::PipelineStageFlags,
+        dst_stage: vk::PipelineStageFlags,
+        src_access: vk::AccessFlags,
+        dst_access: vk::AccessFlags,
+    },
+}
+
+impl ImageTransition {
+    pub fn get_barrier_info(
+        &self,
+    ) -> (
+        vk::ImageLayout,
+        vk::ImageLayout,
+        vk::PipelineStageFlags,
+        vk::PipelineStageFlags,
+        vk::AccessFlags,
+        vk::AccessFlags,
+    ) {
+        match *self {
+            ImageTransition::General => (
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::GENERAL,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::SHADER_WRITE,
+            ),
+            ImageTransition::ShaderRead => (
+                vk::ImageLayout::GENERAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::AccessFlags::SHADER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+            ),
+            ImageTransition::ColorAttachment => (
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            ),
+            ImageTransition::TransferDst => (
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+            ),
+            ImageTransition::Present => (
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags::empty(),
+            ),
+            ImageTransition::Custom {
+                old_layout,
+                new_layout,
+                src_stage,
+                dst_stage,
+                src_access,
+                dst_access,
+            } => (
+                old_layout, new_layout, src_stage, dst_stage, src_access, dst_access,
+            ),
+        }
+    }
+}
+
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {

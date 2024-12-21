@@ -3,11 +3,15 @@ use ash::vk;
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
+    ops,
     sync::Arc,
     thread::{self, ThreadId},
 };
 
-use crate::{Buffer, Queue};
+use crate::{
+    Buffer, ComputePipeline, DescriptorSet, Image, ImageTransition, Pipeline, Queue,
+    RenderPipeline, Texture,
+};
 
 pub struct ThreadCommandPools {
     pub device: Arc<ash::Device>,
@@ -79,7 +83,7 @@ impl CommandRecorder {
 
     pub fn image_barrier(
         &mut self,
-        image: vk::Image,
+        image: &impl Image,
         old: vk::ImageLayout,
         new: vk::ImageLayout,
         src_stage: vk::PipelineStageFlags,
@@ -87,6 +91,7 @@ impl CommandRecorder {
         src_access: vk::AccessFlags,
         dst_access: vk::AccessFlags,
     ) {
+        let image = image.handle();
         let barrier = vk::ImageMemoryBarrier::default()
             .old_layout(old)
             .new_layout(new)
@@ -115,6 +120,62 @@ impl CommandRecorder {
                 &[barrier],
             );
         }
+    }
+
+    pub fn image_transition_subresource(
+        &mut self,
+        image: &impl Image,
+        transition: ImageTransition,
+        aspect_mask: vk::ImageAspectFlags,
+        base_mip_level: u32,
+        level_count: u32,
+        base_array_layer: u32,
+        layer_count: u32,
+    ) {
+        let (old_layout, new_layout, src_stage, dst_stage, src_access, dst_access) =
+            transition.get_barrier_info();
+
+        let image = image.handle();
+        let barrier = vk::ImageMemoryBarrier::default()
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(aspect_mask)
+                    .base_mip_level(base_mip_level)
+                    .level_count(level_count)
+                    .base_array_layer(base_array_layer)
+                    .layer_count(layer_count),
+            )
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access);
+
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                self.buffer,
+                src_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            );
+        }
+    }
+
+    pub fn image_transition(&mut self, image: &impl Image, transition: ImageTransition) {
+        self.image_transition_subresource(
+            image,
+            transition,
+            vk::ImageAspectFlags::COLOR,
+            0,
+            1,
+            0,
+            1,
+        );
     }
 
     pub fn copy_buffer(
@@ -159,6 +220,62 @@ impl CommandRecorder {
         unsafe {
             self.device
                 .cmd_copy_buffer(self.buffer, src.handle, dst.handle, &copies);
+        }
+    }
+
+    pub fn bind_pipeline(&mut self, pipeline: &impl Pipeline) {
+        unsafe {
+            self.device
+                .cmd_bind_pipeline(self.buffer, pipeline.bind_point(), pipeline.handle());
+        }
+    }
+
+    pub fn bind_descriptor_set(
+        &self,
+        pipeline: &impl Pipeline,
+        set: &DescriptorSet,
+        index: u32,
+        offsets: &[u32],
+    ) {
+        unsafe {
+            self.device.cmd_bind_descriptor_sets(
+                self.buffer,
+                pipeline.bind_point(),
+                pipeline.layout(),
+                index,
+                &[set.handle],
+                offsets,
+            );
+        }
+    }
+
+    pub fn viewport(&mut self, viewport: vk::Viewport) {
+        unsafe {
+            self.device.cmd_set_viewport(self.buffer, 0, &[viewport]);
+        }
+    }
+
+    pub fn scissor(&mut self, scissor: vk::Rect2D) {
+        unsafe {
+            self.device.cmd_set_scissor(self.buffer, 0, &[scissor]);
+        }
+    }
+
+    pub fn draw(&mut self, vertex: ops::Range<u32>, instance: ops::Range<u32>) {
+        unsafe {
+            self.device.cmd_draw(
+                self.buffer,
+                vertex.len() as u32,
+                instance.len() as u32,
+                vertex.start,
+                instance.start,
+            );
+        }
+    }
+
+    pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {
+        unsafe {
+            self.device.cmd_dispatch(self.buffer, x, y, z);
         }
     }
 

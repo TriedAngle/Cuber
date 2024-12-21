@@ -3,14 +3,7 @@ use std::{sync::Arc, time::Duration, u64};
 
 use ash::vk;
 
-use crate::{Adapter, Device, Queue};
-
-#[derive(Clone, Copy)]
-pub struct Frame {
-    pub image: vk::Image,
-    pub view: vk::ImageView,
-    pub index: u32,
-}
+use crate::{Adapter, Device, Frame, Queue};
 
 #[derive(Clone, Copy)]
 pub struct FrameSignals {

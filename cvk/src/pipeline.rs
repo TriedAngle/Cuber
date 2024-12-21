@@ -28,6 +28,15 @@ pub struct RenderPipelineInfo<'a> {
     pub tag: Option<(u64, &'a [u8])>,
 }
 
+pub trait Pipeline {
+    const BIND_POINT: vk::PipelineBindPoint;
+    fn handle(&self) -> vk::Pipeline;
+    fn layout(&self) -> vk::PipelineLayout;
+    fn bind_point(&self) -> vk::PipelineBindPoint {
+        Self::BIND_POINT
+    }
+}
+
 pub struct ComputePipeline {
     pub handle: vk::Pipeline,
     pub layout: vk::PipelineLayout,
@@ -41,6 +50,26 @@ pub struct RenderPipeline {
     pub vertex_shader: vk::ShaderModule,
     pub fragment_shader: vk::ShaderModule,
     device: Arc<ash::Device>,
+}
+
+impl Pipeline for ComputePipeline {
+    const BIND_POINT: vk::PipelineBindPoint = vk::PipelineBindPoint::COMPUTE;
+    fn handle(&self) -> vk::Pipeline {
+        self.handle
+    }
+    fn layout(&self) -> vk::PipelineLayout {
+        self.layout
+    }
+}
+
+impl Pipeline for RenderPipeline {
+    const BIND_POINT: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
+    fn handle(&self) -> vk::Pipeline {
+        self.handle
+    }
+    fn layout(&self) -> vk::PipelineLayout {
+        self.layout
+    }
 }
 
 impl Device {

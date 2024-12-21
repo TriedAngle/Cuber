@@ -20,12 +20,13 @@ pub use device::Device;
 pub use instance::Instance;
 
 pub use buffer::{Buffer, BufferInfo};
+pub use command::CommandRecorder;
 pub use descriptor::*;
 pub use pipeline::*;
 pub use queues::{Queue, QueueRequest};
 pub use semaphore::Semaphore;
-pub use swapchain::{Frame, FrameSignals, Surface, Swapchain};
-pub use texture::{SamplerInfo, Texture, TextureInfo};
+pub use swapchain::{FrameSignals, Surface, Swapchain};
+pub use texture::{Frame, Image, ImageTransition, SamplerInfo, Texture, TextureInfo};
 
 pub use ash as raw;
 use ash::vk;
