@@ -30,10 +30,15 @@ pub struct RenderPipelineInfo<'a> {
 
 pub trait Pipeline {
     const BIND_POINT: vk::PipelineBindPoint;
+    const SHADER_STAGE_FLAGS: vk::ShaderStageFlags;
+
     fn handle(&self) -> vk::Pipeline;
     fn layout(&self) -> vk::PipelineLayout;
     fn bind_point(&self) -> vk::PipelineBindPoint {
         Self::BIND_POINT
+    }
+    fn flags(&self) -> vk::ShaderStageFlags {
+        Self::SHADER_STAGE_FLAGS
     }
 }
 
@@ -54,6 +59,7 @@ pub struct RenderPipeline {
 
 impl Pipeline for ComputePipeline {
     const BIND_POINT: vk::PipelineBindPoint = vk::PipelineBindPoint::COMPUTE;
+    const SHADER_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::COMPUTE;
     fn handle(&self) -> vk::Pipeline {
         self.handle
     }
@@ -64,6 +70,10 @@ impl Pipeline for ComputePipeline {
 
 impl Pipeline for RenderPipeline {
     const BIND_POINT: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
+    // this is so silly
+    const SHADER_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::from_raw(
+        vk::ShaderStageFlags::VERTEX.as_raw() | vk::ShaderStageFlags::FRAGMENT.as_raw(),
+    );
     fn handle(&self) -> vk::Pipeline {
         self.handle
     }

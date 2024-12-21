@@ -6,6 +6,7 @@ mod buffer;
 mod command;
 mod descriptor;
 mod device;
+mod egui;
 mod instance;
 mod pipeline;
 mod queues;

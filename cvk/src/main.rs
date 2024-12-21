@@ -1,8 +1,9 @@
 extern crate nalgebra as na;
 extern crate vk_mem as vkm;
-use std::{ops::Deref, sync::Arc};
+use std::{mem, ops::Deref, sync::Arc};
 
 use anyhow::Result;
+use bytemuck::Zeroable;
 use cvk::{raw::vk, utils, Device};
 
 use game::Camera;
@@ -15,24 +16,48 @@ use winit::{
 };
 
 const COMPUTE_SHADER: &str = r#"
-@group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
+struct PushConstants {
+    window: vec2<u32>,
+    mouse: vec2<f32>,
+}
+
+var<push_constant> pc: PushConstants;
+
+@group(0) @binding(0)
+var output_texture: texture_storage_2d<rgba8unorm, write>;
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let coords = vec2<u32>(global_id.xy);
     
+    let uv = vec2<f32>(
+        f32(coords.x) / f32(pc.window.x),
+        f32(coords.y) / f32(pc.window.y),
+    );
+    
+    let mouse = vec2<f32>(
+        pc.mouse.x / f32(pc.window.x),
+        pc.mouse.y / f32(pc.window.y),
+    );
+    
+    let dist = distance(uv, mouse);
+    
+    let radius = 0.1;
+    let glow = smoothstep(radius, 0.0, dist);
+    
     let checker_size = 32u;
     let is_white = ((coords.x / checker_size) + (coords.y / checker_size)) % 2u == 0u;
-    
-    let color = select(
-        vec4<f32>(1.0, 0.0, 0.0, 1.0),  // red
-        vec4<f32>(1.0, 1.0, 1.0, 1.0),  // white
+    let base_color = select(
+        vec4<f32>(1.0, 0.0, 0.0, 1.0),
+        vec4<f32>(1.0, 1.0, 1.0, 1.0),
         is_white
     );
     
-    textureStore(output_texture, coords, color);
-}
-"#;
+    let glow_color = vec4<f32>(0.0, 0.5, 1.0, 1.0);
+    let final_color = mix(base_color, glow_color, glow);
+    
+    textureStore(output_texture, coords, final_color);
+}"#;
 
 const PRSENT_SHADER: &str = r#"
 struct VertexOutput {
@@ -46,7 +71,6 @@ struct VertexOutput {
 @vertex
 fn vmain(@builtin(vertex_index) vert_idx: u32) -> VertexOutput {
     var positions = array<vec2<f32>, 6>(
-        // First triangle (CCW)
         vec2<f32>(-1.0, -1.0),  // bottom-left
         vec2<f32>(-1.0,  1.0),  // top-left
         vec2<f32>( 1.0, -1.0),  // bottom-right
@@ -57,7 +81,6 @@ fn vmain(@builtin(vertex_index) vert_idx: u32) -> VertexOutput {
         vec2<f32>( 1.0, -1.0)   // bottom-right
     );
     
-    // UVs correspond to the positions
     var uvs = array<vec2<f32>, 6>(
         // First triangle
         vec2<f32>(0.0, 1.0),  // bottom-left
@@ -82,6 +105,13 @@ fn fmain(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 }
 "#;
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct PushConstants {
+    window: [u32; 2],
+    mouse: [f32; 2],
+}
+
 struct Render {
     surface: Arc<cvk::Surface>,
     window: Arc<Window>,
@@ -98,6 +128,7 @@ struct Render {
     compute_complete: cvk::Semaphore,
     instance: Arc<cvk::Instance>,
     device: Arc<cvk::Device>,
+    pc: PushConstants,
 }
 
 impl Render {
@@ -202,7 +233,7 @@ impl Render {
         let compute_pipeline = device.create_compute_pipeline(&cvk::ComputePipelineInfo {
             shader: compute_shader.entry("main"),
             descriptor_layouts: &[&layout],
-            push_constant_size: None,
+            push_constant_size: Some(mem::size_of::<PushConstants>() as u32),
             cache: None,
             label: Some("Compute Pipeline"),
             tag: None,
@@ -228,6 +259,11 @@ impl Render {
 
         let compute_complete = device.create_binary_semaphore(false);
 
+        let pc = PushConstants {
+            window: [size.width, size.height],
+            mouse: [0.; 2],
+        };
+
         let new = Self {
             instance,
             surface,
@@ -245,6 +281,7 @@ impl Render {
             descriptor_set,
             present_texture,
             compute_complete,
+            pc,
         };
 
         Ok(new)
@@ -260,6 +297,8 @@ impl Render {
         recorder.bind_pipeline(&self.compute_pipeline);
 
         recorder.bind_descriptor_set(&self.compute_pipeline, &self.descriptor_set, 0, &[]);
+
+        recorder.push_constants(&self.compute_pipeline, self.pc);
 
         let width = (self.swapchain.extent.width + 15) / 16;
         let height = (self.swapchain.extent.height + 15) / 16;
@@ -448,6 +487,12 @@ impl ApplicationHandler for VulkanApp {
             WindowEvent::RedrawRequested => {
                 if let Some(render) = &mut self.render {
                     render.render()
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(render) = &mut self.render {
+                    let height = render.swapchain.extent.height as f32;
+                    render.pc.mouse = [position.x as f32, height - position.y as f32];
                 }
             }
             _ => {}

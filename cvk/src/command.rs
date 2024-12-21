@@ -8,10 +8,7 @@ use std::{
     thread::{self, ThreadId},
 };
 
-use crate::{
-    Buffer, ComputePipeline, DescriptorSet, Image, ImageTransition, Pipeline, Queue,
-    RenderPipeline, Texture,
-};
+use crate::{Buffer, DescriptorSet, Image, ImageTransition, Pipeline, Queue};
 
 pub struct ThreadCommandPools {
     pub device: Arc<ash::Device>,
@@ -176,6 +173,18 @@ impl CommandRecorder {
             0,
             1,
         );
+    }
+
+    pub fn push_constants<T: bytemuck::Pod>(&mut self, pipeline: &impl Pipeline, pc: T) {
+        unsafe {
+            self.device.cmd_push_constants(
+                self.buffer,
+                pipeline.layout(),
+                pipeline.flags(),
+                0,
+                bytemuck::cast_slice(&[pc]),
+            );
+        }
     }
 
     pub fn copy_buffer(
