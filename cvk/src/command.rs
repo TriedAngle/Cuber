@@ -479,9 +479,7 @@ impl Drop for CommandRecorder {
         }
         unsafe {
             let _ = self.device.device_wait_idle();
-            let _ = self
-                .device
-                .reset_command_buffer(self.buffer, vk::CommandBufferResetFlags::empty());
+            self.device.free_command_buffers(self.pool, &[self.buffer]);
         }
     }
 }
