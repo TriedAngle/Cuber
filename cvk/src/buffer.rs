@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, ffi, mem, ptr, sync::Arc};
+use std::{cell::UnsafeCell, ptr, sync::Arc};
 
 use crate::Device;
 use ash::vk;

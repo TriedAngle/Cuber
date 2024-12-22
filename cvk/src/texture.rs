@@ -9,9 +9,17 @@ pub struct Texture {
     pub image: vk::Image,
     pub view: vk::ImageView,
     pub sampler: Option<vk::Sampler>,
+    pub details: TextureDetails,
     allocation: vkm::Allocation,
     device: Arc<ash::Device>,
     allocator: Arc<vk_mem::Allocator>,
+}
+
+pub struct TextureDetails {
+    pub format: vk::Format,
+    pub width: u32,
+    pub height: u32,
+    pub layers: u32,
 }
 
 pub struct SamplerInfo<'a> {
@@ -21,6 +29,10 @@ pub struct SamplerInfo<'a> {
     pub address_u: vk::SamplerAddressMode,
     pub address_v: vk::SamplerAddressMode,
     pub address_w: vk::SamplerAddressMode,
+    pub anisotropy: Option<f32>,
+    pub compare: Option<vk::CompareOp>,
+    pub min_lod: f32,
+    pub max_lod: f32,
     pub label: Option<&'a str>,
     pub tag: Option<(u64, &'a [u8])>,
 }
@@ -34,6 +46,10 @@ impl Default for SamplerInfo<'_> {
             address_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
             address_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
             address_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            anisotropy: None,
+            compare: None,
+            min_lod: 0.0,
+            max_lod: 0.0,
             label: None,
             tag: None,
         }
@@ -44,12 +60,14 @@ pub struct TextureInfo<'a> {
     pub format: vk::Format,
     pub width: u32,
     pub height: u32,
+    pub layers: u32,
     pub usage: vk::ImageUsageFlags,
     pub sharing: vk::SharingMode,
     pub usage_locality: vkm::MemoryUsage,
     pub allocation_locality: vk::MemoryPropertyFlags,
     pub aspect_mask: vk::ImageAspectFlags,
     pub layout: vk::ImageLayout,
+    pub view_type: vk::ImageViewType,
     pub sampler: Option<SamplerInfo<'a>>,
     pub label: Option<&'a str>,
     pub tag: Option<(u64, &'a [u8])>,
@@ -61,12 +79,14 @@ impl Default for TextureInfo<'_> {
             format: vk::Format::UNDEFINED,
             width: 0,
             height: 0,
+            layers: 1,
             usage: vk::ImageUsageFlags::empty(),
             sharing: vk::SharingMode::EXCLUSIVE,
             usage_locality: vkm::MemoryUsage::Auto,
             allocation_locality: vk::MemoryPropertyFlags::empty(),
             aspect_mask: vk::ImageAspectFlags::empty(),
             layout: vk::ImageLayout::UNDEFINED,
+            view_type: vk::ImageViewType::TYPE_2D,
             sampler: None,
             label: None,
             tag: None,
@@ -86,7 +106,7 @@ impl Device {
                 depth: 1,
             })
             .mip_levels(1)
-            .array_layers(1)
+            .array_layers(info.layers)
             .samples(vk::SampleCountFlags::TYPE_1)
             .usage(info.usage)
             .sharing_mode(info.sharing)
@@ -108,7 +128,7 @@ impl Device {
 
         let view_info = vk::ImageViewCreateInfo::default()
             .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
+            .view_type(info.view_type)
             .format(info.format)
             .subresource_range(
                 vk::ImageSubresourceRange::default()
@@ -122,13 +142,24 @@ impl Device {
         let view = unsafe { self.handle.create_image_view(&view_info, None).unwrap() };
 
         let sampler = if let Some(info) = &info.sampler {
-            let sampler_create_info = vk::SamplerCreateInfo::default()
+            let mut sampler_create_info = vk::SamplerCreateInfo::default()
                 .mag_filter(info.mag)
                 .min_filter(info.min)
                 .mipmap_mode(info.mipmap)
                 .address_mode_u(info.address_u)
                 .address_mode_v(info.address_v)
-                .address_mode_w(info.address_w);
+                .address_mode_w(info.address_w)
+                .min_lod(info.min_lod)
+                .max_lod(info.max_lod);
+
+            if let Some(anisotropy) = info.anisotropy {
+                sampler_create_info.anisotropy_enable = 1;
+                sampler_create_info.max_anisotropy = anisotropy;
+            }
+
+            if let Some(compare) = info.compare {
+                sampler_create_info.compare_op(compare);
+            }
 
             let sampler =
                 unsafe { self.handle.create_sampler(&sampler_create_info, None) }.unwrap();
@@ -139,10 +170,18 @@ impl Device {
             None
         };
 
+        let details = TextureDetails {
+            format: info.format,
+            width: info.width,
+            height: info.height,
+            layers: info.layers,
+        };
+
         Texture {
             image,
             view,
             sampler,
+            details,
             allocation,
             device: self.handle.clone(),
             allocator,

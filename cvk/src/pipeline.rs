@@ -1,4 +1,5 @@
 use ash::vk;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::{DescriptorSetLayout, Device, ShaderFunction};
@@ -20,6 +21,7 @@ pub struct RenderPipelineInfo<'a> {
     pub descriptor_layouts: &'a [&'a DescriptorSetLayout],
     pub push_constant_size: Option<u32>,
     pub blend_states: Option<&'a [vk::PipelineColorBlendAttachmentState]>,
+    pub vertex_input_state: Option<vk::PipelineVertexInputStateCreateInfo<'a>>,
     pub topology: vk::PrimitiveTopology,
     pub polygon: vk::PolygonMode,
     pub cull: vk::CullModeFlags,
@@ -180,7 +182,9 @@ impl Device {
                 .name(&fragment_stage_name),
         ];
 
-        let vertex_input = vk::PipelineVertexInputStateCreateInfo::default();
+        let vertex_input = info
+            .vertex_input_state
+            .unwrap_or_else(|| vk::PipelineVertexInputStateCreateInfo::default());
 
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(info.topology)
@@ -251,6 +255,144 @@ impl Device {
             fragment_shader,
             device: self.handle.clone(),
         }
+    }
+}
+
+// In a new file vertex.rs:
+
+pub trait VertexAttribute {
+    fn format() -> vk::Format;
+    fn size() -> u32;
+}
+
+impl VertexAttribute for [f32; 2] {
+    fn format() -> vk::Format {
+        vk::Format::R32G32_SFLOAT
+    }
+    fn size() -> u32 {
+        8
+    }
+}
+
+impl VertexAttribute for [f32; 3] {
+    fn format() -> vk::Format {
+        vk::Format::R32G32B32_SFLOAT
+    }
+    fn size() -> u32 {
+        12
+    }
+}
+
+impl VertexAttribute for [f32; 4] {
+    fn format() -> vk::Format {
+        vk::Format::R32G32B32A32_SFLOAT
+    }
+    fn size() -> u32 {
+        16
+    }
+}
+
+impl VertexAttribute for [u8; 4] {
+    fn format() -> vk::Format {
+        vk::Format::R8G8B8A8_UNORM
+    }
+    fn size() -> u32 {
+        4
+    }
+}
+
+#[derive(Default)]
+pub struct VertexAttributeBuilder {
+    attributes: Vec<vk::VertexInputAttributeDescription>,
+    current_offset: u32,
+}
+
+impl VertexAttributeBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add<T: VertexAttribute>(mut self, location: u32, binding: u32) -> Self {
+        self.attributes.push(
+            vk::VertexInputAttributeDescription::default()
+                .location(location)
+                .binding(binding)
+                .format(T::format())
+                .offset(self.current_offset),
+        );
+        self.current_offset += T::size();
+        self
+    }
+
+    pub fn build(self) -> (Vec<vk::VertexInputAttributeDescription>, u32) {
+        (self.attributes, self.current_offset)
+    }
+}
+
+pub struct VertexFormat<V> {
+    bindings: Vec<vk::VertexInputBindingDescription>,
+    attributes: Vec<vk::VertexInputAttributeDescription>,
+    _phantom: PhantomData<V>,
+}
+
+impl<V> VertexFormat<V> {
+    pub fn new(binding: u32, input_rate: vk::VertexInputRate) -> Self {
+        Self {
+            bindings: vec![vk::VertexInputBindingDescription::default()
+                .binding(binding)
+                .stride(0) // Will be set when attributes are added
+                .input_rate(input_rate)],
+            attributes: Vec::new(),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn with_attributes<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(VertexAttributeBuilder) -> VertexAttributeBuilder,
+    {
+        let builder = VertexAttributeBuilder::new();
+        let (attributes, stride) = f(builder).build();
+        self.attributes = attributes;
+        self.bindings[0].stride = stride;
+        self
+    }
+
+    // Instead of create_info, provide the raw Vulkan components that the pipeline needs
+    pub fn get_vertex_input_state(&self) -> vk::PipelineVertexInputStateCreateInfo {
+        vk::PipelineVertexInputStateCreateInfo::default()
+            .vertex_binding_descriptions(&self.bindings)
+            .vertex_attribute_descriptions(&self.attributes)
+    }
+
+    // Helper method to get just the binding descriptions
+    pub fn get_bindings(&self) -> &[vk::VertexInputBindingDescription] {
+        &self.bindings
+    }
+
+    // Helper method to get just the attribute descriptions
+    pub fn get_attributes(&self) -> &[vk::VertexInputAttributeDescription] {
+        &self.attributes
+    }
+}
+
+// Example vertex types using the new abstractions
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex2D {
+    pub position: [f32; 2],
+    pub uv: [f32; 2],
+    pub color: [f32; 4],
+}
+
+impl Vertex2D {
+    pub fn format() -> VertexFormat<Self> {
+        VertexFormat::new(0, vk::VertexInputRate::VERTEX).with_attributes(|builder| {
+            builder
+                .add::<[f32; 2]>(0, 0) // position
+                .add::<[f32; 2]>(1, 0) // uv
+                .add::<[f32; 4]>(2, 0) // color
+        })
     }
 }
 

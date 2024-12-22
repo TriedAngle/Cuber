@@ -67,6 +67,18 @@ pub struct DescriptorPoolInfo<'a> {
     pub tag: Option<(u64, &'a [u8])>,
 }
 
+impl Default for DescriptorPoolInfo<'_> {
+    fn default() -> Self {
+        Self {
+            max_sets: 0,
+            layouts: &[],
+            flags: vk::DescriptorPoolCreateFlags::empty(),
+            label: None,
+            tag: None,
+        }
+    }
+}
+
 pub struct DescriptorPool {
     pub handle: vk::DescriptorPool,
     device: Arc<ash::Device>,

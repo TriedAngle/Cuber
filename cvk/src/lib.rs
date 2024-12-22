@@ -6,7 +6,6 @@ mod buffer;
 mod command;
 mod descriptor;
 mod device;
-mod egui;
 mod instance;
 mod pipeline;
 mod queues;
@@ -14,6 +13,7 @@ mod semaphore;
 mod swapchain;
 mod texture;
 
+pub mod egui;
 pub mod utils;
 
 pub use adapter::Adapter;

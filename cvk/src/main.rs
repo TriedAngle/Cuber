@@ -1,9 +1,9 @@
 extern crate nalgebra as na;
 extern crate vk_mem as vkm;
-use std::{mem, ops::Deref, sync::Arc};
+use std::{mem, sync::Arc};
 
 use anyhow::Result;
-use cvk::{raw::vk, utils, Device};
+use cvk::{egui::EguiIntegration, raw::vk, utils, Device};
 
 use game::Camera;
 use rand::Rng;
@@ -54,13 +54,12 @@ fn clear(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Update particle
-    if (global_id.x >= 1000u) { // MAX_PARTICLES
-        return;
-    }
+    // if (global_id.x >= 4096u) { // MAX_PARTICLES
+    //    return;
+    // }
     
     var particle = particles[global_id.x];
     
-    // Simple physics update
     particle.position += particle.velocity * pc.delta_time;
     
     // Bounce off screen edges
@@ -71,41 +70,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         particle.velocity.y = -particle.velocity.y;
     }
     
-    // Mouse attraction with weaker force
     let mouse_pos = pc.mouse;
     let to_mouse = mouse_pos - particle.position;
     let dist = length(to_mouse);
     
-    // Adjusted parameters for smoother interaction
-    let min_dist = 20.0;
+    let min_dist = -2.0;
     if (dist > min_dist) {
-        // Reduced force strength significantly
         let force = normalize(to_mouse) * 800.0 / (dist);
         particle.velocity += force * pc.delta_time;
     } else {
-        // Add slight repulsion when very close to prevent clustering
         let repel = normalize(-to_mouse) * 400.0;
         particle.velocity += repel * pc.delta_time;
     }
     
-    // Reduced drag for more natural movement
     particle.velocity *= 0.995;
     
-    // Lower max speed to prevent erratic behavior
     let max_speed = 400.0;
     let current_speed = length(particle.velocity);
     if (current_speed > max_speed) {
         particle.velocity = normalize(particle.velocity) * max_speed;
     }
     
-    // Update particle in storage buffer
     particles[global_id.x] = particle;
     
-    // Draw to texture
     let pos = vec2<i32>(particle.position);
     if (pos.x >= 0 && pos.x < i32(pc.window.x) && 
         pos.y >= 0 && pos.y < i32(pc.window.y)) {
-        // Blend with existing color for smoother trails
         let current = textureLoad(output_texture, pos);
         let blended = max(current, particle.color);  // Additive blending
         textureStore(output_texture, pos, blended);
@@ -184,15 +174,15 @@ impl Default for Particle {
     }
 }
 
-const PARTICLE_COUNT: usize = 256;
+const PARTICLE_COUNT: usize = 32000;
 
 struct Render {
-    surface: Arc<cvk::Surface>,
     window: Arc<Window>,
     swapchain: cvk::Swapchain,
     compute_queue: Arc<cvk::Queue>,
     render_queue: Arc<cvk::Queue>,
     transfer_queue: Arc<cvk::Queue>,
+    egui: EguiIntegration,
     compute_pipeline: cvk::ComputePipeline,
     clear_pipeline: cvk::ComputePipeline,
     present_pipeline: cvk::RenderPipeline,
@@ -374,6 +364,7 @@ impl Render {
             descriptor_layouts: &[&layout],
             push_constant_size: None,
             blend_states: None,
+            vertex_input_state: None,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
             polygon: vk::PolygonMode::FILL,
             cull: vk::CullModeFlags::BACK,
@@ -392,15 +383,23 @@ impl Render {
             dt: 0.,
         };
 
+        let egui = EguiIntegration::new(
+            device.clone(),
+            &window,
+            surface.format().format,
+            swapchain.frames_in_flight,
+            &render_queue,
+        );
+
         let new = Self {
             instance,
-            surface,
             window,
             device,
             compute_queue,
             render_queue,
             transfer_queue,
             swapchain,
+            egui,
 
             compute_pipeline,
             clear_pipeline,
@@ -422,7 +421,17 @@ impl Render {
 
         let mut recorder = self.render_queue.record();
 
-        recorder.image_transition(&self.present_texture, cvk::ImageTransition::General);
+        recorder.image_transition(
+            &self.present_texture,
+            cvk::ImageTransition::Custom {
+                old_layout: vk::ImageLayout::UNDEFINED,
+                new_layout: vk::ImageLayout::GENERAL,
+                src_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+                dst_stage: vk::PipelineStageFlags::COMPUTE_SHADER,
+                src_access: vk::AccessFlags::SHADER_READ,
+                dst_access: vk::AccessFlags::SHADER_WRITE | vk::AccessFlags::SHADER_READ,
+            },
+        );
 
         let particle_groups = (PARTICLE_COUNT + 255) / 256;
         recorder.bind_pipeline(&self.compute_pipeline);
@@ -437,8 +446,29 @@ impl Render {
         recorder.push_constants(self.pc);
         recorder.dispatch(width, height, 1);
 
-        recorder.image_transition(&self.present_texture, cvk::ImageTransition::ShaderRead);
-        recorder.image_transition(&frame, cvk::ImageTransition::ColorAttachment);
+        recorder.image_transition(
+            &self.present_texture,
+            cvk::ImageTransition::Custom {
+                old_layout: vk::ImageLayout::GENERAL,
+                new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                src_stage: vk::PipelineStageFlags::COMPUTE_SHADER,
+                dst_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+                src_access: vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                dst_access: vk::AccessFlags::SHADER_READ,
+            },
+        );
+
+        recorder.image_transition(
+            &frame,
+            cvk::ImageTransition::Custom {
+                old_layout: vk::ImageLayout::UNDEFINED,
+                new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                src_stage: vk::PipelineStageFlags::TOP_OF_PIPE,
+                dst_stage: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access: vk::AccessFlags::empty(),
+                dst_access: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            },
+        );
 
         let color_attachment = vk::RenderingAttachmentInfo::default()
             .image_view(frame.view)
@@ -451,11 +481,11 @@ impl Render {
                 },
             });
 
-        recorder.begin_rendering(&[color_attachment], self.swapchain.extent);
-
         recorder.bind_pipeline(&self.present_pipeline);
 
         recorder.bind_descriptor_set(&self.descriptor_set, 0, &[]);
+
+        recorder.begin_rendering(&[color_attachment], self.swapchain.extent);
 
         recorder.viewport(vk::Viewport {
             x: 0.0,
@@ -475,13 +505,48 @@ impl Render {
 
         recorder.end_rendering();
 
-        recorder.image_transition(&frame, cvk::ImageTransition::Present);
-
-        let command_buffer = recorder.finish();
-
+        let compute_present_semaphore = self.device.create_binary_semaphore(false);
         let _ = self.render_queue.submit(
-            &[command_buffer],
+            &[recorder.finish()],
             &[(signals.available, vk::PipelineStageFlags::TOP_OF_PIPE)],
+            &[],
+            &[compute_present_semaphore.handle],
+            &[],
+        );
+
+        let mut egui_recorder = self.render_queue.record();
+
+        self.egui.begin_frame(&self.window, frame);
+        egui::Window::new("Debug")
+            .resizable([true, true])
+            .show(&self.egui.ctx, |ui| {
+                ui.label("Hello from egui!");
+            });
+        let egui_output = self.egui.end_frame(&self.window);
+
+        self.egui
+            .update_textures(&mut egui_recorder, &egui_output.textures_delta, frame);
+
+        self.egui
+            .render(&mut egui_recorder, egui_output.shapes, frame);
+
+        egui_recorder.image_transition(
+            &frame,
+            cvk::ImageTransition::Custom {
+                old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                src_stage: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage: vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                src_access: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access: vk::AccessFlags::empty(),
+            },
+        );
+        let _ = self.render_queue.submit(
+            &[egui_recorder.finish()],
+            &[(
+                compute_present_semaphore.handle,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+            )],
             &[],
             &[signals.finished],
             &[],
@@ -591,7 +656,6 @@ impl ApplicationHandler for VulkanApp {
     }
 
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
-        // Update delta time based on event cause
         if let Some(render) = &mut self.render {
             match cause {
                 winit::event::StartCause::ResumeTimeReached {
@@ -613,6 +677,10 @@ impl ApplicationHandler for VulkanApp {
         _device_id: winit::event::DeviceId,
         event: winit::event::DeviceEvent,
     ) {
+        if let Some(render) = &mut self.render {
+            render.egui.handle_device_events(&event);
+        }
+
         match event {
             DeviceEvent::Key(key) => {
                 if key.physical_key == KeyCode::Escape && key.state.is_pressed() {
@@ -629,6 +697,10 @@ impl ApplicationHandler for VulkanApp {
         _window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
+        if let Some(render) = &mut self.render {
+            render.egui.handle_window_events(&render.window, &event);
+        }
+
         match event {
             WindowEvent::RedrawRequested => {
                 if let Some(render) = &mut self.render {
@@ -641,6 +713,9 @@ impl ApplicationHandler for VulkanApp {
                     render.pc.mouse = [position.x as f32, height - position.y as f32];
                 }
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                log::debug!("WindowEvent: Scale Factor Change: {:?}", scale_factor)
+            }
             _ => {}
         }
     }
@@ -648,6 +723,7 @@ impl ApplicationHandler for VulkanApp {
 
 pub fn main() {
     env_logger::builder()
+        .filter_module("naga", log::LevelFilter::Warn)
         .filter_level(log::LevelFilter::Debug)
         .init();
 

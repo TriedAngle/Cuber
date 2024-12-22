@@ -265,6 +265,20 @@ impl CommandRecorder {
         }
     }
 
+    pub fn bind_vertex(&mut self, vertex: &Buffer, binding: u32) {
+        unsafe {
+            self.device
+                .cmd_bind_vertex_buffers(self.buffer, binding, &[vertex.handle], &[0]);
+        }
+    }
+
+    pub fn bind_index(&mut self, index: &Buffer, ty: vk::IndexType) {
+        unsafe {
+            self.device
+                .cmd_bind_index_buffer(self.buffer, index.handle, 0, ty);
+        }
+    }
+
     pub fn bind_descriptor_set(&self, set: &DescriptorSet, index: u32, offsets: &[u32]) {
         let Some(pipeline) = &self.pipeline else {
             log::error!("Calling Push Constants without a bound pipeline");
@@ -302,6 +316,24 @@ impl CommandRecorder {
                 vertex.len() as u32,
                 instance.len() as u32,
                 vertex.start,
+                instance.start,
+            );
+        }
+    }
+
+    pub fn draw_indexed(
+        &mut self,
+        indices: ops::Range<u32>,
+        instance: ops::Range<u32>,
+        vertex_offset: i32,
+    ) {
+        unsafe {
+            self.device.cmd_draw_indexed(
+                self.buffer,
+                indices.len() as u32,
+                instance.len() as u32,
+                indices.start,
+                vertex_offset,
                 instance.start,
             );
         }
@@ -433,6 +465,10 @@ impl Queue {
         }
 
         Ok(())
+    }
+
+    pub fn submit_express(&self, command_buffers: &[vk::CommandBuffer]) -> Result<()> {
+        self.submit(command_buffers, &[], &[], &[], &[])
     }
 }
 
