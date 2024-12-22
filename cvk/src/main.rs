@@ -3,7 +3,7 @@ extern crate vk_mem as vkm;
 use std::{mem, sync::Arc};
 
 use anyhow::Result;
-use cvk::{egui::EguiIntegration, raw::vk, utils, Device};
+use cvk::{egui::EguiState, raw::vk, utils, Device};
 
 use game::Camera;
 use rand::Rng;
@@ -53,11 +53,6 @@ fn clear(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 @compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    // Update particle
-    // if (global_id.x >= 4096u) { // MAX_PARTICLES
-    //    return;
-    // }
-    
     var particle = particles[global_id.x];
     
     particle.position += particle.velocity * pc.delta_time;
@@ -182,7 +177,7 @@ struct Render {
     compute_queue: Arc<cvk::Queue>,
     render_queue: Arc<cvk::Queue>,
     transfer_queue: Arc<cvk::Queue>,
-    egui: EguiIntegration,
+    egui: EguiState,
     compute_pipeline: cvk::ComputePipeline,
     clear_pipeline: cvk::ComputePipeline,
     present_pipeline: cvk::RenderPipeline,
@@ -195,6 +190,7 @@ struct Render {
     compute_complete: cvk::Semaphore,
     instance: Arc<cvk::Instance>,
     device: Arc<cvk::Device>,
+    editor_text: String,
 }
 
 impl Render {
@@ -208,9 +204,13 @@ impl Render {
     ) -> Result<Self> {
         let size = window.inner_size();
         let surface = instance.create_surface(&device.adapter(), &window, |formats| {
+            log::debug!("available formats: {:?}", formats);
             formats
                 .iter()
-                .find(|f| f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+                .find(|f| {
+                    f.format == vk::Format::R8G8B8A8_UNORM
+                        && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                })
                 .map(|f| *f)
                 .inspect(|f| log::debug!("using {:?}", f))
                 .unwrap_or(formats[0])
@@ -317,21 +317,25 @@ impl Render {
                 binding: 0,
                 image_view: present_texture.view,
                 image_layout: vk::ImageLayout::GENERAL,
+                array_element: None,
             },
             cvk::DescriptorWrite::StorageBuffer {
                 binding: 1,
                 buffer: &particle_buffer,
                 offset: 0,
                 range: vk::WHOLE_SIZE,
+                array_element: None,
             },
             cvk::DescriptorWrite::SampledImage {
                 binding: 2,
                 image_view: present_texture.view,
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                array_element: None,
             },
             cvk::DescriptorWrite::Sampler {
                 binding: 3,
-                sampler: present_texture.sampler.unwrap(),
+                sampler: present_texture.sampler(),
+                array_element: None,
             },
         ]);
 
@@ -375,6 +379,7 @@ impl Render {
 
         let swapchain = device.create_swapchain(surface.clone(), 3, vk::PresentModeKHR::MAILBOX)?;
 
+        log::debug!("sc format: {:?}", swapchain.surface.format());
         let compute_complete = device.create_binary_semaphore(false);
 
         let pc = PushConstants {
@@ -383,12 +388,18 @@ impl Render {
             dt: 0.,
         };
 
-        let egui = EguiIntegration::new(
+        let scale_factor = window.scale_factor();
+        let fonts = egui::FontDefinitions::default();
+        let style = egui::Style::default();
+
+        let egui = EguiState::new(
             device.clone(),
             &window,
             surface.format().format,
             swapchain.frames_in_flight,
-            &render_queue,
+            scale_factor,
+            fonts,
+            style,
         );
 
         let new = Self {
@@ -400,7 +411,6 @@ impl Render {
             transfer_queue,
             swapchain,
             egui,
-
             compute_pipeline,
             clear_pipeline,
             present_pipeline,
@@ -411,6 +421,7 @@ impl Render {
             compute_complete,
             pc,
             particle_buffer,
+            editor_text: String::new(),
         };
 
         Ok(new)
@@ -518,14 +529,29 @@ impl Render {
 
         self.egui.begin_frame(&self.window, frame);
         egui::Window::new("Debug")
-            .resizable([true, true])
+            .resizable(true)
             .show(&self.egui.ctx, |ui| {
                 ui.label("Hello from egui!");
             });
+
+        egui::Window::new("egui stuff")
+            .resizable(true)
+            .show(&self.egui.ctx, |ui| {
+                ui.label("This is window 1");
+                if ui.button("Click me!").clicked() {
+                    println!("Button clicked!");
+                }
+                ui.text_edit_multiline(&mut self.editor_text);
+            });
+
         let egui_output = self.egui.end_frame(&self.window);
 
-        self.egui
-            .update_textures(&mut egui_recorder, &egui_output.textures_delta, frame);
+        self.egui.update_textures(
+            &mut egui_recorder,
+            &egui_output.textures_delta,
+            frame,
+            &self.render_queue,
+        );
 
         self.egui
             .render(&mut egui_recorder, egui_output.shapes, frame);
@@ -698,7 +724,7 @@ impl ApplicationHandler for VulkanApp {
         event: winit::event::WindowEvent,
     ) {
         if let Some(render) = &mut self.render {
-            render.egui.handle_window_events(&render.window, &event);
+            let _consoom = render.egui.handle_window_events(&render.window, &event);
         }
 
         match event {

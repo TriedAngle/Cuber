@@ -1,5 +1,8 @@
-use crate::Adapter;
+use crate::{
+    Adapter, Buffer, BufferInfo, CommandRecorder, Device, ImageTransition, Queue, Texture,
+};
 use ash::vk;
+use rand::Rng;
 
 pub fn print_queues_pretty(adapter: &Adapter) {
     println!("Queue Families:");
@@ -36,4 +39,102 @@ pub fn print_queues_pretty(adapter: &Adapter) {
             queue_family.min_image_transfer_granularity
         );
     }
+}
+
+pub fn fill_texture_squares(
+    device: &Device,
+    recorder: &mut CommandRecorder,
+    texture: &Texture,
+    size: i32,
+    width: u32,
+    height: u32,
+) -> Buffer {
+    let square_size = size;
+    let squares_x = (width as i32 + square_size - 1) / square_size;
+    let squares_y = (height as i32 + square_size - 1) / square_size;
+    let mut rng = rand::thread_rng();
+
+    let mut color_data = vec![0u8; (width * height * 4) as usize];
+
+    for sy in 0..squares_y {
+        for sx in 0..squares_x {
+            let r = rng.gen::<u8>();
+            let g = rng.gen::<u8>();
+            let b = rng.gen::<u8>();
+            let a = 255; // Full opacity
+
+            for y in 0..square_size {
+                let py = sy * square_size + y;
+                if py >= height as i32 {
+                    continue;
+                }
+
+                for x in 0..square_size {
+                    let px = sx * square_size + x;
+                    if px >= width as i32 {
+                        continue;
+                    }
+
+                    let idx = ((py * width as i32 + px) * 4) as usize;
+                    color_data[idx] = r;
+                    color_data[idx + 1] = g;
+                    color_data[idx + 2] = b;
+                    color_data[idx + 3] = a;
+                }
+            }
+        }
+    }
+
+    let staging_buffer = device.create_buffer(&BufferInfo {
+        size: color_data.len() as u64,
+        usage: vk::BufferUsageFlags::TRANSFER_SRC,
+        sharing: vk::SharingMode::EXCLUSIVE,
+        usage_locality: vkm::MemoryUsage::AutoPreferHost,
+        allocation_locality: vk::MemoryPropertyFlags::HOST_VISIBLE
+            | vk::MemoryPropertyFlags::HOST_COHERENT,
+        host_access: Some(vkm::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE),
+        label: Some("Random Squares Texture Upload Buffer"),
+        ..Default::default()
+    });
+
+    staging_buffer.upload(&color_data, 0);
+
+    recorder.image_transition(
+        texture,
+        ImageTransition::Custom {
+            old_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            src_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+            dst_stage: vk::PipelineStageFlags::TRANSFER,
+            src_access: vk::AccessFlags::SHADER_WRITE,
+            dst_access: vk::AccessFlags::TRANSFER_WRITE,
+        },
+    );
+
+    unsafe {
+        device.handle.cmd_copy_buffer_to_image(
+            recorder.buffer,
+            staging_buffer.handle,
+            texture.image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[vk::BufferImageCopy {
+                buffer_offset: 0,
+                buffer_row_length: 0,
+                buffer_image_height: 0,
+                image_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+                image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+                image_extent: vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                },
+            }],
+        );
+    }
+    staging_buffer
 }

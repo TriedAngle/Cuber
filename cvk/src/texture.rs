@@ -5,10 +5,16 @@ use vkm::Alloc;
 
 use crate::Device;
 
+#[derive(Clone)]
+pub struct Sampler {
+    pub handle: vk::Sampler,
+    device: Arc<ash::Device>,
+}
+
 pub struct Texture {
     pub image: vk::Image,
     pub view: vk::ImageView,
-    pub sampler: Option<vk::Sampler>,
+    pub sampler: Option<Sampler>,
     pub details: TextureDetails,
     allocation: vkm::Allocation,
     device: Arc<ash::Device>,
@@ -17,6 +23,7 @@ pub struct Texture {
 
 pub struct TextureDetails {
     pub format: vk::Format,
+    pub layout: vk::ImageLayout,
     pub width: u32,
     pub height: u32,
     pub layers: u32,
@@ -142,29 +149,7 @@ impl Device {
         let view = unsafe { self.handle.create_image_view(&view_info, None).unwrap() };
 
         let sampler = if let Some(info) = &info.sampler {
-            let mut sampler_create_info = vk::SamplerCreateInfo::default()
-                .mag_filter(info.mag)
-                .min_filter(info.min)
-                .mipmap_mode(info.mipmap)
-                .address_mode_u(info.address_u)
-                .address_mode_v(info.address_v)
-                .address_mode_w(info.address_w)
-                .min_lod(info.min_lod)
-                .max_lod(info.max_lod);
-
-            if let Some(anisotropy) = info.anisotropy {
-                sampler_create_info.anisotropy_enable = 1;
-                sampler_create_info.max_anisotropy = anisotropy;
-            }
-
-            if let Some(compare) = info.compare {
-                sampler_create_info.compare_op(compare);
-            }
-
-            let sampler =
-                unsafe { self.handle.create_sampler(&sampler_create_info, None) }.unwrap();
-            self.set_object_debug_info(sampler, info.label, info.tag);
-
+            let sampler = self.create_sampler(info);
             Some(sampler)
         } else {
             None
@@ -175,6 +160,7 @@ impl Device {
             width: info.width,
             height: info.height,
             layers: info.layers,
+            layout: info.layout,
         };
 
         Texture {
@@ -185,6 +171,35 @@ impl Device {
             allocation,
             device: self.handle.clone(),
             allocator,
+        }
+    }
+
+    pub fn create_sampler(&self, info: &SamplerInfo<'_>) -> Sampler {
+        let mut create_info = vk::SamplerCreateInfo::default()
+            .mag_filter(info.mag)
+            .min_filter(info.min)
+            .mipmap_mode(info.mipmap)
+            .address_mode_u(info.address_u)
+            .address_mode_v(info.address_v)
+            .address_mode_w(info.address_w)
+            .min_lod(info.min_lod)
+            .max_lod(info.max_lod);
+
+        if let Some(anisotropy) = info.anisotropy {
+            create_info.anisotropy_enable = 1;
+            create_info.max_anisotropy = anisotropy;
+        }
+
+        if let Some(compare) = info.compare {
+            create_info = create_info.compare_op(compare);
+        }
+
+        let handle = unsafe { self.handle.create_sampler(&create_info, None) }.unwrap();
+        self.set_object_debug_info(handle, info.label, info.tag);
+
+        Sampler {
+            handle,
+            device: self.handle.clone(),
         }
     }
 }
@@ -301,13 +316,32 @@ impl ImageTransition {
     }
 }
 
+impl Texture {
+    pub fn sampler(&self) -> &Sampler {
+        let ptr = if let Some(sampler) = &self.sampler {
+            sampler as *const Sampler
+        } else {
+            std::ptr::null()
+        };
+
+        let sampler = unsafe { ptr.as_ref().unwrap() };
+        sampler
+    }
+}
+
+impl Drop for Sampler {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_sampler(self.handle, None);
+        }
+    }
+}
+
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_image_view(self.view, None);
-            if let Some(sampler) = self.sampler {
-                self.device.destroy_sampler(sampler, None);
-            }
+
             self.allocator
                 .destroy_image(self.image, &mut self.allocation);
         }

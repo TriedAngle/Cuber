@@ -43,6 +43,12 @@ impl Device {
         let mut dynamic_rendering_features =
             vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
 
+        let mut descriptor_indexing_features =
+            vk::PhysicalDeviceDescriptorIndexingFeatures::default()
+                .descriptor_binding_partially_bound(true)
+                .descriptor_binding_sampled_image_update_after_bind(true)
+                .runtime_descriptor_array(true);
+
         let device_extensions = [
             ash::khr::swapchain::NAME.as_ptr(),
             ash::khr::timeline_semaphore::NAME.as_ptr(),
@@ -80,7 +86,8 @@ impl Device {
             .enabled_extension_names(&device_extensions)
             .push_next(&mut pdev_features2)
             .push_next(&mut timeline_semaphore_features)
-            .push_next(&mut dynamic_rendering_features);
+            .push_next(&mut dynamic_rendering_features)
+            .push_next(&mut descriptor_indexing_features);
 
         let handle = unsafe {
             instance

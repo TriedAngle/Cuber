@@ -27,7 +27,7 @@ pub use pipeline::*;
 pub use queues::{Queue, QueueRequest};
 pub use semaphore::Semaphore;
 pub use swapchain::{FrameSignals, Surface, Swapchain};
-pub use texture::{Frame, Image, ImageTransition, SamplerInfo, Texture, TextureInfo};
+pub use texture::{Frame, Image, ImageTransition, Sampler, SamplerInfo, Texture, TextureInfo};
 
 pub use ash as raw;
 use ash::vk;

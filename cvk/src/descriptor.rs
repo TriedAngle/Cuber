@@ -1,7 +1,7 @@
 use ash::vk;
 use std::sync::Arc;
 
-use crate::{Buffer, Device};
+use crate::{Buffer, Device, Sampler};
 
 #[derive(Clone, Copy, Debug)]
 pub enum DescriptorType {
@@ -90,26 +90,31 @@ pub enum DescriptorWrite<'a> {
         buffer: &'a Buffer,
         offset: vk::DeviceSize,
         range: vk::DeviceSize,
+        array_element: Option<u32>,
     },
     StorageImage {
         binding: u32,
         image_view: vk::ImageView,
         image_layout: vk::ImageLayout,
+        array_element: Option<u32>,
     },
     SampledImage {
         binding: u32,
         image_view: vk::ImageView,
         image_layout: vk::ImageLayout,
+        array_element: Option<u32>,
     },
     Sampler {
         binding: u32,
-        sampler: vk::Sampler,
+        sampler: &'a Sampler,
+        array_element: Option<u32>,
     },
     CombinedImageSampler {
         binding: u32,
         image_view: vk::ImageView,
         image_layout: vk::ImageLayout,
-        sampler: vk::Sampler,
+        sampler: &'a Sampler,
+        array_element: Option<u32>,
     },
 }
 
@@ -139,15 +144,32 @@ impl Device {
         let binding_flags = info
             .bindings
             .iter()
-            .map(|binding| binding.flags.unwrap_or_default())
+            .map(|binding| {
+                if let Some(flags) = binding.flags {
+                    flags
+                } else if binding.count > 1 {
+                    vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                        | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
+                } else {
+                    vk::DescriptorBindingFlags::empty()
+                }
+            })
             .collect::<Vec<_>>();
 
         let mut binding_flags_create_info =
             vk::DescriptorSetLayoutBindingFlagsCreateInfo::default().binding_flags(&binding_flags);
 
+        let mut create_flags = info.flags;
+        if binding_flags
+            .iter()
+            .any(|&f| f.contains(vk::DescriptorBindingFlags::UPDATE_AFTER_BIND))
+        {
+            create_flags |= vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL;
+        }
+
         let create_info = vk::DescriptorSetLayoutCreateInfo::default()
             .bindings(&vk_bindings)
-            .flags(info.flags)
+            .flags(create_flags)
             .push_next(&mut binding_flags_create_info);
 
         let handle = unsafe {
@@ -232,7 +254,6 @@ impl DescriptorSet {
         let mut buffer_infos = Vec::with_capacity(writes.len());
         let mut image_infos = Vec::with_capacity(writes.len());
 
-        // First collect all descriptor infos
         for write in writes {
             match write {
                 DescriptorWrite::StorageBuffer {
@@ -240,6 +261,7 @@ impl DescriptorSet {
                     buffer,
                     offset,
                     range,
+                    array_element,
                 } => {
                     buffer_infos.push((
                         *binding,
@@ -248,12 +270,14 @@ impl DescriptorSet {
                             .buffer(buffer.handle)
                             .offset(*offset)
                             .range(*range),
+                        array_element.unwrap_or(0),
                     ));
                 }
                 DescriptorWrite::StorageImage {
                     binding,
                     image_view,
                     image_layout,
+                    array_element,
                 } => {
                     image_infos.push((
                         *binding,
@@ -261,12 +285,14 @@ impl DescriptorSet {
                         vk::DescriptorImageInfo::default()
                             .image_view(*image_view)
                             .image_layout(*image_layout),
+                        array_element.unwrap_or(0),
                     ));
                 }
                 DescriptorWrite::SampledImage {
                     binding,
                     image_view,
                     image_layout,
+                    array_element,
                 } => {
                     image_infos.push((
                         *binding,
@@ -274,13 +300,19 @@ impl DescriptorSet {
                         vk::DescriptorImageInfo::default()
                             .image_view(*image_view)
                             .image_layout(*image_layout),
+                        array_element.unwrap_or(0),
                     ));
                 }
-                DescriptorWrite::Sampler { binding, sampler } => {
+                DescriptorWrite::Sampler {
+                    binding,
+                    sampler,
+                    array_element,
+                } => {
                     image_infos.push((
                         *binding,
                         vk::DescriptorType::SAMPLER,
-                        vk::DescriptorImageInfo::default().sampler(*sampler),
+                        vk::DescriptorImageInfo::default().sampler(sampler.handle),
+                        array_element.unwrap_or(0),
                     ));
                 }
                 DescriptorWrite::CombinedImageSampler {
@@ -288,6 +320,7 @@ impl DescriptorSet {
                     image_view,
                     image_layout,
                     sampler,
+                    array_element,
                 } => {
                     image_infos.push((
                         *binding,
@@ -295,29 +328,32 @@ impl DescriptorSet {
                         vk::DescriptorImageInfo::default()
                             .image_view(*image_view)
                             .image_layout(*image_layout)
-                            .sampler(*sampler),
+                            .sampler(sampler.handle),
+                        array_element.unwrap_or(0),
                     ));
                 }
             }
         }
 
         // Create descriptor writes for buffers
-        for (binding, descriptor_type, buffer_info) in &buffer_infos {
+        for (binding, descriptor_type, buffer_info, array_element) in &buffer_infos {
             vk_writes.push(
                 vk::WriteDescriptorSet::default()
                     .dst_set(self.handle)
                     .dst_binding(*binding)
+                    .dst_array_element(*array_element)
                     .descriptor_type(*descriptor_type)
                     .buffer_info(std::slice::from_ref(buffer_info)),
             );
         }
 
         // Create descriptor writes for images
-        for (binding, descriptor_type, image_info) in &image_infos {
+        for (binding, descriptor_type, image_info, array_element) in &image_infos {
             vk_writes.push(
                 vk::WriteDescriptorSet::default()
                     .dst_set(self.handle)
                     .dst_binding(*binding)
+                    .dst_array_element(*array_element)
                     .descriptor_type(*descriptor_type)
                     .image_info(std::slice::from_ref(image_info)),
             );
