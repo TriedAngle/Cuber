@@ -120,8 +120,8 @@ pub enum DescriptorWrite<'a> {
 
 pub struct DescriptorSet {
     pub handle: vk::DescriptorSet,
+    pub pool: Arc<DescriptorPool>,
     device: Arc<ash::Device>,
-    pool: Arc<DescriptorPool>,
 }
 
 impl Device {

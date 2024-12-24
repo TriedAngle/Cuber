@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use crate::{Adapter, Buffer, BufferInfo, CommandRecorder, Device, Image, ImageTransition};
 use ash::vk;
 use rand::Rng;

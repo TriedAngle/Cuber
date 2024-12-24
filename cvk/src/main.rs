@@ -171,6 +171,7 @@ impl Default for Particle {
 
 const PARTICLE_COUNT: usize = 32000;
 
+#[allow(unused)]
 struct Render {
     window: Arc<Window>,
     swapchain: cvk::Swapchain,
@@ -542,6 +543,7 @@ impl Render {
     }
 }
 
+#[allow(unused)]
 struct VulkanApp {
     camera: Camera,
     instance: Arc<cvk::Instance>,

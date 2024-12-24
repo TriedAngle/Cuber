@@ -46,9 +46,9 @@ pub struct Allocation {
 }
 
 pub struct Shader {
-    module: naga::Module,
-    info: naga::valid::ModuleInfo,
-    source: String,
+    pub module: naga::Module,
+    pub info: naga::valid::ModuleInfo,
+    pub source: String,
 }
 
 impl Shader {
