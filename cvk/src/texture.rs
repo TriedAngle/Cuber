@@ -1,4 +1,4 @@
-use std::{ops, sync::Arc};
+use std::{cell::UnsafeCell, ops, sync::Arc};
 
 use ash::vk;
 use vkm::Alloc;
@@ -15,29 +15,17 @@ pub struct Image {
     pub handle: vk::Image,
     pub view: vk::ImageView,
     pub sampler: Option<Sampler>,
-    pub details: ImageDetails,
+    pub details: UnsafeCell<ImageDetails>,
     pub device: Arc<ash::Device>,
     pub allocation: Option<Allocation>,
-}
-
-impl Image {
-    /// cloned images don't own resources, only handles and can be destroyed !
-    pub unsafe fn unsafe_clone(&self) -> Self {
-        Self {
-            handle: self.handle,
-            view: self.view,
-            sampler: None,
-            details: self.details,
-            device: self.device.clone(),
-            allocation: None,
-        }
-    }
 }
 
 #[derive(Default, Clone, Copy)]
 pub struct ImageDetails {
     pub format: vk::Format,
     pub layout: vk::ImageLayout,
+    pub stage: vk::PipelineStageFlags,
+    pub access: vk::AccessFlags,
     pub width: u32,
     pub height: u32,
     pub layers: u32,
@@ -227,6 +215,8 @@ impl Device {
             format: info.format,
             width: info.width,
             height: info.height,
+            stage: vk::PipelineStageFlags::TOP_OF_PIPE,
+            access: vk::AccessFlags::empty(),
             layers: info.layers,
             layout: info.layout,
         };
@@ -240,7 +230,7 @@ impl Device {
             handle,
             view,
             sampler,
-            details,
+            details: UnsafeCell::new(details),
             device: self.handle.clone(),
             allocation,
         }
@@ -297,89 +287,57 @@ impl Device {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ImageTransition {
-    /// Transition from undefined to general layout
     General,
-    /// Transition to shader read-only optimal layout
-    ShaderRead,
-    /// Transition to color attachment optimal layout
+    Compute,
+    FragmentRead,
     ColorAttachment,
-    /// Transition to transfer dst optimal layout
     TransferDst,
-    /// Transition to present src layout
     Present,
-    /// Custom transition with specified layouts
     Custom {
-        old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
-        src_stage: vk::PipelineStageFlags,
         dst_stage: vk::PipelineStageFlags,
-        src_access: vk::AccessFlags,
         dst_access: vk::AccessFlags,
     },
 }
 
 impl ImageTransition {
-    pub fn get_barrier_info(
-        &self,
-    ) -> (
-        vk::ImageLayout,
-        vk::ImageLayout,
-        vk::PipelineStageFlags,
-        vk::PipelineStageFlags,
-        vk::AccessFlags,
-        vk::AccessFlags,
-    ) {
+    pub fn get_barrier_info(&self) -> (vk::ImageLayout, vk::PipelineStageFlags, vk::AccessFlags) {
         match *self {
             ImageTransition::General => (
-                vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::GENERAL,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
                 vk::PipelineStageFlags::ALL_COMMANDS,
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::SHADER_WRITE,
+                vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
             ),
-            ImageTransition::ShaderRead => (
+            ImageTransition::Compute => (
                 vk::ImageLayout::GENERAL,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+            ),
+            ImageTransition::FragmentRead => (
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::AccessFlags::SHADER_WRITE,
                 vk::AccessFlags::SHADER_READ,
             ),
             ImageTransition::ColorAttachment => (
-                vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags::empty(),
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
             ),
             ImageTransition::TransferDst => (
-                vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
                 vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::empty(),
                 vk::AccessFlags::TRANSFER_WRITE,
             ),
             ImageTransition::Present => (
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::AccessFlags::empty(),
             ),
             ImageTransition::Custom {
-                old_layout,
                 new_layout,
-                src_stage,
                 dst_stage,
-                src_access,
                 dst_access,
-            } => (
-                old_layout, new_layout, src_stage, dst_stage, src_access, dst_access,
-            ),
+            } => (new_layout, dst_stage, dst_access),
         }
     }
 }
@@ -394,6 +352,32 @@ impl Image {
 
         let sampler = unsafe { ptr.as_ref().unwrap() };
         sampler
+    }
+
+    pub fn details(&self) -> ImageDetails {
+        unsafe { *self.details.get() }
+    }
+
+    pub fn transition(&self) -> (vk::ImageLayout, vk::PipelineStageFlags, vk::AccessFlags) {
+        let details = self.details();
+        let layout = details.layout;
+        let stage = details.stage;
+        let access = details.access;
+        (layout, stage, access)
+    }
+
+    pub fn update_transition(
+        &self,
+        layout: vk::ImageLayout,
+        stage: vk::PipelineStageFlags,
+        access: vk::AccessFlags,
+    ) {
+        let details = self.details.get();
+        unsafe {
+            (*details).layout = layout;
+            (*details).stage = stage;
+            (*details).access = access;
+        }
     }
 }
 

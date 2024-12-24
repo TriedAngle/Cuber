@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use crate::{Adapter, Buffer, BufferInfo, CommandRecorder, Device, Image, ImageTransition};
 use ash::vk;
 use rand::Rng;
@@ -45,8 +47,8 @@ pub fn fill_texture_squares(
     image: &Image,
     size: i32,
 ) -> Buffer {
-    let width = image.details.width;
-    let height = image.details.height;
+    let width = image.details().width;
+    let height = image.details().height;
     let square_size = size;
     let squares_x = (width as i32 + square_size - 1) / square_size;
     let squares_y = (height as i32 + square_size - 1) / square_size;
@@ -100,11 +102,11 @@ pub fn fill_texture_squares(
     recorder.image_transition(
         image,
         ImageTransition::Custom {
-            old_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            // old_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            src_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+            // src_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
             dst_stage: vk::PipelineStageFlags::TRANSFER,
-            src_access: vk::AccessFlags::SHADER_WRITE,
+            // src_access: vk::AccessFlags::SHADER_WRITE,
             dst_access: vk::AccessFlags::TRANSFER_WRITE,
         },
     );

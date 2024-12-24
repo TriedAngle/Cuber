@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::{sync::Arc, time::Duration, u64};
+use std::{cell::UnsafeCell, rc::Rc, sync::Arc, time::Duration, u64};
 
 use ash::vk;
 
@@ -8,18 +8,10 @@ use crate::{
     Adapter, Device, Image, Queue,
 };
 
+#[derive(Clone)]
 pub struct Frame {
-    pub image: Image,
+    pub image: Rc<Image>,
     pub index: u32,
-}
-
-impl Clone for Frame {
-    fn clone(&self) -> Self {
-        Self {
-            image: unsafe { self.image.unsafe_clone() },
-            index: self.index,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -240,6 +232,8 @@ impl Frame {
         let details = ImageDetails {
             format,
             layout: vk::ImageLayout::UNDEFINED,
+            stage: vk::PipelineStageFlags::TOP_OF_PIPE,
+            access: vk::AccessFlags::empty(),
             width: extent.width,
             height: extent.height,
             layers: 1,
@@ -250,11 +244,14 @@ impl Frame {
             view,
             sampler: None,
             device: device.handle.clone(),
-            details,
+            details: UnsafeCell::new(details),
             allocation: None,
         };
 
-        Self { image, index }
+        Self {
+            image: Rc::new(image),
+            index,
+        }
     }
 }
 

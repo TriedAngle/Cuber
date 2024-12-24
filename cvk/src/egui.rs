@@ -134,7 +134,7 @@ impl EguiTextures {
         if self
             .textures
             .get(&id)
-            .map(|(texture, _)| [texture.details.width, texture.details.height])
+            .map(|(texture, _)| [texture.details().width, texture.details().height])
             != Some(size)
         {
             if !self.textures.contains_key(&id) {
@@ -181,17 +181,7 @@ impl EguiTextures {
 
         staging_buffer.upload(&pixels, 0);
 
-        recorder.image_transition(
-            texture,
-            ImageTransition::Custom {
-                old_layout: vk::ImageLayout::UNDEFINED,
-                new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                src_stage: vk::PipelineStageFlags::TOP_OF_PIPE,
-                dst_stage: vk::PipelineStageFlags::TRANSFER,
-                src_access: vk::AccessFlags::empty(),
-                dst_access: vk::AccessFlags::TRANSFER_WRITE,
-            },
-        );
+        recorder.image_transition(texture, ImageTransition::TransferDst);
 
         let mut region = vk::BufferImageCopy::default()
             .buffer_offset(0)
@@ -223,17 +213,7 @@ impl EguiTextures {
             &[region],
         );
 
-        recorder.image_transition(
-            texture,
-            ImageTransition::Custom {
-                old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                src_stage: vk::PipelineStageFlags::TRANSFER,
-                dst_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
-                src_access: vk::AccessFlags::TRANSFER_WRITE,
-                dst_access: vk::AccessFlags::SHADER_READ,
-            },
-        );
+        recorder.image_transition(texture, ImageTransition::FragmentRead);
 
         self.descriptor.write(&[DescriptorWrite::SampledImage {
             binding: 0,

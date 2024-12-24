@@ -440,17 +440,7 @@ impl Render {
 
         let mut recorder = self.render_queue.record();
 
-        recorder.image_transition(
-            &self.present_texture,
-            cvk::ImageTransition::Custom {
-                old_layout: vk::ImageLayout::UNDEFINED,
-                new_layout: vk::ImageLayout::GENERAL,
-                src_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
-                dst_stage: vk::PipelineStageFlags::COMPUTE_SHADER,
-                src_access: vk::AccessFlags::SHADER_READ,
-                dst_access: vk::AccessFlags::SHADER_WRITE | vk::AccessFlags::SHADER_READ,
-            },
-        );
+        recorder.image_transition(&self.present_texture, cvk::ImageTransition::Compute);
 
         let particle_groups = (PARTICLE_COUNT + 255) / 256;
         recorder.bind_pipeline(&self.compute_pipeline);
@@ -465,29 +455,7 @@ impl Render {
         recorder.push_constants(self.pc);
         recorder.dispatch(width, height, 1);
 
-        recorder.image_transition(
-            &self.present_texture,
-            cvk::ImageTransition::Custom {
-                old_layout: vk::ImageLayout::GENERAL,
-                new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                src_stage: vk::PipelineStageFlags::COMPUTE_SHADER,
-                dst_stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
-                src_access: vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
-                dst_access: vk::AccessFlags::SHADER_READ,
-            },
-        );
-
-        recorder.image_transition(
-            &frame.image,
-            cvk::ImageTransition::Custom {
-                old_layout: vk::ImageLayout::UNDEFINED,
-                new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                src_stage: vk::PipelineStageFlags::TOP_OF_PIPE,
-                dst_stage: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access: vk::AccessFlags::empty(),
-                dst_access: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            },
-        );
+        recorder.image_transition(&self.present_texture, cvk::ImageTransition::FragmentRead);
 
         let color_attachment = vk::RenderingAttachmentInfo::default()
             .image_view(frame.image.view)
@@ -556,17 +524,7 @@ impl Render {
         self.egui
             .render(&mut egui_recorder, egui_output, &self.render_queue, &frame);
 
-        egui_recorder.image_transition(
-            &frame.image,
-            cvk::ImageTransition::Custom {
-                old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                src_stage: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage: vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                src_access: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dst_access: vk::AccessFlags::empty(),
-            },
-        );
+        egui_recorder.image_transition(&frame.image, cvk::ImageTransition::Present);
 
         let _ = self.render_queue.submit(
             &[egui_recorder.finish()],

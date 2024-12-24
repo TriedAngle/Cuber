@@ -258,16 +258,15 @@ impl CommandRecorder {
         base_array_layer: u32,
         layer_count: u32,
     ) {
-        let (old_layout, new_layout, src_stage, dst_stage, src_access, dst_access) =
-            transition.get_barrier_info();
+        let (old_layout, src_stage, src_access) = image.transition();
+        let (new_layout, dst_stage, dst_access) = transition.get_barrier_info();
 
-        let image = image.handle;
         let barrier = vk::ImageMemoryBarrier::default()
             .old_layout(old_layout)
             .new_layout(new_layout)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(image)
+            .image(image.handle)
             .subresource_range(
                 vk::ImageSubresourceRange::default()
                     .aspect_mask(aspect_mask)
@@ -278,6 +277,8 @@ impl CommandRecorder {
             )
             .src_access_mask(src_access)
             .dst_access_mask(dst_access);
+
+        image.update_transition(new_layout, dst_stage, dst_access);
 
         unsafe {
             self.device.cmd_pipeline_barrier(
