@@ -3,7 +3,7 @@ extern crate vk_mem as vkm;
 use std::{mem, sync::Arc};
 
 use anyhow::Result;
-use cvk::{egui::EguiState, raw::vk, utils, Device};
+use cvk::{egui::EguiState, raw::vk, utils, Device, ImageViewInfo};
 
 use game::Camera;
 use rand::Rng;
@@ -184,7 +184,7 @@ struct Render {
     descriptor_layout: cvk::DescriptorSetLayout,
     descriptor_pool: Arc<cvk::DescriptorPool>,
     descriptor_set: cvk::DescriptorSet,
-    present_texture: cvk::Texture,
+    present_texture: cvk::Image,
     pc: PushConstants,
     particle_buffer: cvk::Buffer,
     compute_complete: cvk::Semaphore,
@@ -300,7 +300,7 @@ impl Render {
 
         let descriptor_set = device.create_descriptor_set(pool.clone(), &layout);
 
-        let present_texture = device.create_texture(&cvk::TextureInfo {
+        let present_texture = device.create_texture(&cvk::ImageInfo {
             format: surface.format().format,
             width: size.width,
             height: size.height,
@@ -308,7 +308,10 @@ impl Render {
             sharing: vk::SharingMode::EXCLUSIVE,
             usage_locality: vkm::MemoryUsage::AutoPreferDevice,
             allocation_locality: vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            aspect_mask: vk::ImageAspectFlags::COLOR,
+            view: ImageViewInfo {
+                aspect: vk::ImageAspectFlags::COLOR,
+                ..Default::default()
+            },
             layout: vk::ImageLayout::UNDEFINED,
             sampler: Some(cvk::SamplerInfo::default()),
             label: Some("Debug Present Texture"),
@@ -475,7 +478,7 @@ impl Render {
         );
 
         recorder.image_transition(
-            &frame,
+            &frame.image,
             cvk::ImageTransition::Custom {
                 old_layout: vk::ImageLayout::UNDEFINED,
                 new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -487,7 +490,7 @@ impl Render {
         );
 
         let color_attachment = vk::RenderingAttachmentInfo::default()
-            .image_view(frame.view)
+            .image_view(frame.image.view)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE)
@@ -551,10 +554,10 @@ impl Render {
         let egui_output = self.egui.end_frame(&self.window);
 
         self.egui
-            .render(&mut egui_recorder, egui_output, &self.render_queue, frame);
+            .render(&mut egui_recorder, egui_output, &self.render_queue, &frame);
 
         egui_recorder.image_transition(
-            &frame,
+            &frame.image,
             cvk::ImageTransition::Custom {
                 old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 new_layout: vk::ImageLayout::PRESENT_SRC_KHR,

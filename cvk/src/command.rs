@@ -2,7 +2,6 @@ use anyhow::Result;
 use ash::vk;
 use parking_lot::Mutex;
 use std::{
-    borrow::BorrowMut,
     cell::RefCell,
     collections::HashMap,
     ops,
@@ -11,7 +10,7 @@ use std::{
     thread::{self, ThreadId},
 };
 
-use crate::{Buffer, DescriptorSet, Device, Image, ImageTransition, Pipeline, Queue, Texture};
+use crate::{Buffer, DescriptorSet, Device, Image, ImageTransition, Pipeline, Queue};
 
 #[derive(Debug, Clone)]
 pub struct CommandBuffer {
@@ -210,7 +209,7 @@ impl CommandRecorder {
 
     pub fn image_barrier(
         &mut self,
-        image: &impl Image,
+        image: &Image,
         old: vk::ImageLayout,
         new: vk::ImageLayout,
         src_stage: vk::PipelineStageFlags,
@@ -218,7 +217,7 @@ impl CommandRecorder {
         src_access: vk::AccessFlags,
         dst_access: vk::AccessFlags,
     ) {
-        let image = image.handle();
+        let image = image.handle;
         let barrier = vk::ImageMemoryBarrier::default()
             .old_layout(old)
             .new_layout(new)
@@ -251,7 +250,7 @@ impl CommandRecorder {
 
     pub fn image_transition_subresource(
         &mut self,
-        image: &impl Image,
+        image: &Image,
         transition: ImageTransition,
         aspect_mask: vk::ImageAspectFlags,
         base_mip_level: u32,
@@ -262,7 +261,7 @@ impl CommandRecorder {
         let (old_layout, new_layout, src_stage, dst_stage, src_access, dst_access) =
             transition.get_barrier_info();
 
-        let image = image.handle();
+        let image = image.handle;
         let barrier = vk::ImageMemoryBarrier::default()
             .old_layout(old_layout)
             .new_layout(new_layout)
@@ -293,7 +292,7 @@ impl CommandRecorder {
         }
     }
 
-    pub fn image_transition(&mut self, image: &impl Image, transition: ImageTransition) {
+    pub fn image_transition(&mut self, image: &Image, transition: ImageTransition) {
         self.image_transition_subresource(
             image,
             transition,
@@ -353,7 +352,7 @@ impl CommandRecorder {
     pub fn copy_buffer_image(
         &mut self,
         src: &Buffer,
-        dst: &Texture,
+        dst: &Image,
         layout: vk::ImageLayout,
         regions: &[vk::BufferImageCopy],
     ) {
@@ -361,7 +360,7 @@ impl CommandRecorder {
             self.device.cmd_copy_buffer_to_image(
                 self.buffer.handle,
                 src.handle,
-                dst.image,
+                dst.handle,
                 layout,
                 regions,
             );

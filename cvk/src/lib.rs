@@ -16,6 +16,8 @@ mod texture;
 pub mod egui;
 pub mod utils;
 
+use std::sync::Arc;
+
 pub use adapter::Adapter;
 pub use device::Device;
 pub use instance::Instance;
@@ -26,8 +28,10 @@ pub use descriptor::*;
 pub use pipeline::*;
 pub use queues::{Queue, QueueRequest};
 pub use semaphore::Semaphore;
-pub use swapchain::{FrameSignals, Surface, Swapchain};
-pub use texture::{Frame, Image, ImageTransition, Sampler, SamplerInfo, Texture, TextureInfo};
+pub use swapchain::{Frame, FrameSignals, Surface, Swapchain};
+pub use texture::{
+    CustomImageViewInfo, Image, ImageInfo, ImageTransition, ImageViewInfo, Sampler, SamplerInfo,
+};
 
 pub use ash as raw;
 use ash::vk;
@@ -35,6 +39,11 @@ pub use ash::vk::{Format, QueueFlags};
 
 use anyhow::Result;
 use naga::back::spv;
+
+pub struct Allocation {
+    handle: vkm::Allocation,
+    allocator: Arc<vkm::Allocator>,
+}
 
 pub struct Shader {
     module: naga::Module,

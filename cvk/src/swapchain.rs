@@ -1,13 +1,26 @@
 use anyhow::Result;
-use std::{
-    sync::{atomic::Ordering, Arc},
-    time::Duration,
-    u64,
-};
+use std::{sync::Arc, time::Duration, u64};
 
 use ash::vk;
 
-use crate::{semaphore, Adapter, Device, Frame, Queue};
+use crate::{
+    texture::{CustomImageViewInfo, ImageDetails},
+    Adapter, Device, Image, Queue,
+};
+
+pub struct Frame {
+    pub image: Image,
+    pub index: u32,
+}
+
+impl Clone for Frame {
+    fn clone(&self) -> Self {
+        Self {
+            image: unsafe { self.image.unsafe_clone() },
+            index: self.index,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct FrameSignals {
@@ -101,7 +114,15 @@ impl Device {
                 .get_swapchain_images(handle)?
                 .into_iter()
                 .enumerate()
-                .map(|(index, image)| Frame::new(self, image, format.format, index as u32))
+                .map(|(index, image)| {
+                    Frame::new(
+                        self,
+                        image,
+                        format.format,
+                        index as u32,
+                        capabilities.current_extent,
+                    )
+                })
                 .collect::<Vec<_>>()
         };
 
@@ -155,7 +176,7 @@ impl Swapchain {
         }
 
         (
-            self.frames[index as usize],
+            self.frames[index as usize].clone(),
             self.signals[current_signal],
             suboptimal,
         )
@@ -200,28 +221,40 @@ impl Swapchain {
 }
 
 impl Frame {
-    pub fn new(device: &Device, image: vk::Image, format: vk::Format, index: u32) -> Self {
-        let info = vk::ImageViewCreateInfo::default()
-            .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(format)
-            .components(vk::ComponentMapping {
-                r: vk::ComponentSwizzle::IDENTITY,
-                g: vk::ComponentSwizzle::IDENTITY,
-                b: vk::ComponentSwizzle::IDENTITY,
-                a: vk::ComponentSwizzle::IDENTITY,
-            })
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            });
+    pub fn new(
+        device: &Device,
+        image: vk::Image,
+        format: vk::Format,
+        index: u32,
+        extent: vk::Extent2D,
+    ) -> Self {
+        let info = CustomImageViewInfo {
+            image,
+            format,
+            aspect: vk::ImageAspectFlags::COLOR,
+            ..Default::default()
+        };
 
-        let view = unsafe { device.handle.create_image_view(&info, None).unwrap() };
+        let view = device.create_image_view(&info);
 
-        Self { image, view, index }
+        let details = ImageDetails {
+            format,
+            layout: vk::ImageLayout::UNDEFINED,
+            width: extent.width,
+            height: extent.height,
+            layers: 1,
+        };
+
+        let image = Image {
+            handle: image,
+            view,
+            sampler: None,
+            device: device.handle.clone(),
+            details,
+            allocation: None,
+        };
+
+        Self { image, index }
     }
 }
 
@@ -293,8 +326,8 @@ impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
-            for image in &self.frames {
-                self.device.destroy_image_view(image.view, None);
+            for frame in &self.frames {
+                self.device.destroy_image_view(frame.image.view, None);
             }
             for signal in &self.signals {
                 self.device.destroy_semaphore(signal.available, None);

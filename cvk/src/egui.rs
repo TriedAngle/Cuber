@@ -5,8 +5,8 @@ use winit::dpi::PhysicalSize;
 
 use crate::{
     Buffer, CommandRecorder, DescriptorBinding, DescriptorSet, DescriptorSetLayout, DescriptorType,
-    DescriptorWrite, Device, Frame, ImageTransition, Queue, RenderPipeline, Sampler, SamplerInfo,
-    Texture, TextureInfo,
+    DescriptorWrite, Device, Frame, Image, ImageInfo, ImageTransition, ImageViewInfo, Queue,
+    RenderPipeline, Sampler, SamplerInfo,
 };
 
 #[repr(C)]
@@ -23,7 +23,7 @@ pub struct FrameResources {
 }
 
 pub struct EguiTextures {
-    pub textures: HashMap<egui::TextureId, (Texture, u32)>,
+    pub textures: HashMap<egui::TextureId, (Image, u32)>,
     pub descriptor: DescriptorSet,
     pub descriptor_layout: DescriptorSetLayout,
     pub sampler: Sampler,
@@ -99,8 +99,8 @@ impl EguiTextures {
         }
     }
 
-    fn create_texture(&self, size: [u32; 2]) -> Texture {
-        self.device.create_texture(&TextureInfo {
+    fn create_texture(&self, size: [u32; 2]) -> Image {
+        self.device.create_texture(&ImageInfo {
             format: vk::Format::R8G8B8A8_UNORM,
             width: size[0],
             height: size[1],
@@ -109,9 +109,11 @@ impl EguiTextures {
             sharing: vk::SharingMode::EXCLUSIVE,
             usage_locality: vkm::MemoryUsage::AutoPreferDevice,
             allocation_locality: vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            aspect_mask: vk::ImageAspectFlags::COLOR,
+            view: ImageViewInfo {
+                aspect: vk::ImageAspectFlags::COLOR,
+                ..Default::default()
+            },
             layout: vk::ImageLayout::UNDEFINED,
-            view_type: vk::ImageViewType::TYPE_2D,
             sampler: None,
             label: Some("Egui Texture"),
             ..Default::default()
@@ -385,7 +387,7 @@ impl EguiState {
         recorder: &mut CommandRecorder,
         output: egui::FullOutput,
         queue: &Queue,
-        frame: Frame,
+        frame: &Frame,
     ) {
         let egui::FullOutput {
             textures_delta,
@@ -419,7 +421,7 @@ impl EguiState {
         frame_resources.index_buffer.upload(&index_buffer_writer, 0);
 
         let color_attachment = vk::RenderingAttachmentInfo::default()
-            .image_view(frame.view)
+            .image_view(frame.image.view)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::LOAD)
             .store_op(vk::AttachmentStoreOp::STORE);

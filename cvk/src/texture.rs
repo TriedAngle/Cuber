@@ -1,27 +1,41 @@
-use std::sync::Arc;
+use std::{ops, sync::Arc};
 
 use ash::vk;
 use vkm::Alloc;
 
-use crate::Device;
+use crate::{Allocation, Device};
 
 #[derive(Clone)]
 pub struct Sampler {
     pub handle: vk::Sampler,
-    device: Arc<ash::Device>,
+    pub device: Arc<ash::Device>,
 }
 
-pub struct Texture {
-    pub image: vk::Image,
+pub struct Image {
+    pub handle: vk::Image,
     pub view: vk::ImageView,
     pub sampler: Option<Sampler>,
-    pub details: TextureDetails,
-    allocation: vkm::Allocation,
-    device: Arc<ash::Device>,
-    allocator: Arc<vk_mem::Allocator>,
+    pub details: ImageDetails,
+    pub device: Arc<ash::Device>,
+    pub allocation: Option<Allocation>,
 }
 
-pub struct TextureDetails {
+impl Image {
+    /// cloned images don't own resources, only handles and can be destroyed !
+    pub unsafe fn unsafe_clone(&self) -> Self {
+        Self {
+            handle: self.handle,
+            view: self.view,
+            sampler: None,
+            details: self.details,
+            device: self.device.clone(),
+            allocation: None,
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct ImageDetails {
     pub format: vk::Format,
     pub layout: vk::ImageLayout,
     pub width: u32,
@@ -40,6 +54,32 @@ pub struct SamplerInfo<'a> {
     pub compare: Option<vk::CompareOp>,
     pub min_lod: f32,
     pub max_lod: f32,
+    pub label: Option<&'a str>,
+    pub tag: Option<(u64, &'a [u8])>,
+}
+
+pub struct ImageViewInfo<'a> {
+    pub ty: vk::ImageViewType,
+    pub aspect: vk::ImageAspectFlags,
+    pub swizzle: vk::ComponentMapping,
+    pub mips: ops::Range<u32>,
+    pub layers: ops::Range<u32>,
+    pub label: Option<&'a str>,
+    pub tag: Option<(u64, &'a [u8])>,
+}
+
+pub struct ImageInfo<'a> {
+    pub format: vk::Format,
+    pub width: u32,
+    pub height: u32,
+    pub layers: u32,
+    pub usage: vk::ImageUsageFlags,
+    pub sharing: vk::SharingMode,
+    pub usage_locality: vkm::MemoryUsage,
+    pub allocation_locality: vk::MemoryPropertyFlags,
+    pub layout: vk::ImageLayout,
+    pub view: ImageViewInfo<'a>,
+    pub sampler: Option<SamplerInfo<'a>>,
     pub label: Option<&'a str>,
     pub tag: Option<(u64, &'a [u8])>,
 }
@@ -63,24 +103,21 @@ impl Default for SamplerInfo<'_> {
     }
 }
 
-pub struct TextureInfo<'a> {
-    pub format: vk::Format,
-    pub width: u32,
-    pub height: u32,
-    pub layers: u32,
-    pub usage: vk::ImageUsageFlags,
-    pub sharing: vk::SharingMode,
-    pub usage_locality: vkm::MemoryUsage,
-    pub allocation_locality: vk::MemoryPropertyFlags,
-    pub aspect_mask: vk::ImageAspectFlags,
-    pub layout: vk::ImageLayout,
-    pub view_type: vk::ImageViewType,
-    pub sampler: Option<SamplerInfo<'a>>,
-    pub label: Option<&'a str>,
-    pub tag: Option<(u64, &'a [u8])>,
+impl Default for ImageViewInfo<'_> {
+    fn default() -> Self {
+        Self {
+            ty: vk::ImageViewType::TYPE_2D,
+            aspect: vk::ImageAspectFlags::empty(),
+            swizzle: vk::ComponentMapping::default(),
+            mips: 0..1,
+            layers: 0..1,
+            label: None,
+            tag: None,
+        }
+    }
 }
 
-impl Default for TextureInfo<'_> {
+impl Default for ImageInfo<'_> {
     fn default() -> Self {
         Self {
             format: vk::Format::UNDEFINED,
@@ -91,9 +128,8 @@ impl Default for TextureInfo<'_> {
             sharing: vk::SharingMode::EXCLUSIVE,
             usage_locality: vkm::MemoryUsage::Auto,
             allocation_locality: vk::MemoryPropertyFlags::empty(),
-            aspect_mask: vk::ImageAspectFlags::empty(),
             layout: vk::ImageLayout::UNDEFINED,
-            view_type: vk::ImageViewType::TYPE_2D,
+            view: ImageViewInfo::default(),
             sampler: None,
             label: None,
             tag: None,
@@ -101,8 +137,52 @@ impl Default for TextureInfo<'_> {
     }
 }
 
+pub struct CustomImageViewInfo<'a> {
+    pub image: vk::Image,
+    pub format: vk::Format,
+    pub ty: vk::ImageViewType,
+    pub aspect: vk::ImageAspectFlags,
+    pub swizzle: vk::ComponentMapping,
+    pub mips: ops::Range<u32>,
+    pub layers: ops::Range<u32>,
+    pub label: Option<&'a str>,
+    pub tag: Option<(u64, &'a [u8])>,
+}
+
+impl Default for CustomImageViewInfo<'_> {
+    fn default() -> Self {
+        Self {
+            image: vk::Image::null(),
+            format: vk::Format::UNDEFINED,
+            ty: vk::ImageViewType::TYPE_2D,
+            aspect: vk::ImageAspectFlags::empty(),
+            swizzle: vk::ComponentMapping::default(),
+            mips: 0..1,
+            layers: 0..1,
+            label: None,
+            tag: None,
+        }
+    }
+}
+
+impl<'a> CustomImageViewInfo<'a> {
+    pub fn new(image: vk::Image, format: vk::Format, info: &'a ImageViewInfo<'a>) -> Self {
+        Self {
+            image,
+            format,
+            ty: info.ty,
+            aspect: info.aspect,
+            swizzle: info.swizzle,
+            mips: info.mips.clone(),
+            layers: info.layers.clone(),
+            label: info.label,
+            tag: info.tag,
+        }
+    }
+}
+
 impl Device {
-    pub fn create_texture(&self, info: &TextureInfo<'_>) -> Texture {
+    pub fn create_texture(&self, info: &ImageInfo<'_>) -> Image {
         let allocator = self.allocator.clone();
         let texture_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -125,28 +205,16 @@ impl Device {
             ..Default::default()
         };
 
-        let (image, allocation) = unsafe {
+        let (handle, allocation) = unsafe {
             allocator
                 .create_image(&texture_info, &allocation_create_info)
                 .unwrap()
         };
 
-        self.set_object_debug_info(image, info.label, info.tag);
+        self.set_object_debug_info(handle, info.label, info.tag);
 
-        let view_info = vk::ImageViewCreateInfo::default()
-            .image(image)
-            .view_type(info.view_type)
-            .format(info.format)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(info.aspect_mask)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1),
-            );
-
-        let view = unsafe { self.handle.create_image_view(&view_info, None).unwrap() };
+        let view_info = CustomImageViewInfo::new(handle, info.format, &info.view);
+        let view = self.create_image_view(&view_info);
 
         let sampler = if let Some(info) = &info.sampler {
             let sampler = self.create_sampler(info);
@@ -155,7 +223,7 @@ impl Device {
             None
         };
 
-        let details = TextureDetails {
+        let details = ImageDetails {
             format: info.format,
             width: info.width,
             height: info.height,
@@ -163,15 +231,38 @@ impl Device {
             layout: info.layout,
         };
 
-        Texture {
-            image,
+        let allocation = Some(Allocation {
+            handle: allocation,
+            allocator: allocator.clone(),
+        });
+
+        Image {
+            handle,
             view,
             sampler,
             details,
-            allocation,
             device: self.handle.clone(),
-            allocator,
+            allocation,
         }
+    }
+
+    pub fn create_image_view(&self, info: &CustomImageViewInfo<'_>) -> vk::ImageView {
+        let view_info = vk::ImageViewCreateInfo::default()
+            .image(info.image)
+            .view_type(info.ty)
+            .format(info.format)
+            .components(info.swizzle)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(info.aspect)
+                    .base_mip_level(info.mips.start)
+                    .level_count(info.mips.len() as u32)
+                    .base_array_layer(info.layers.start)
+                    .layer_count(info.layers.len() as u32),
+            );
+
+        let handle = unsafe { self.handle.create_image_view(&view_info, None).unwrap() };
+        handle
     }
 
     pub fn create_sampler(&self, info: &SamplerInfo<'_>) -> Sampler {
@@ -201,29 +292,6 @@ impl Device {
             handle,
             device: self.handle.clone(),
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Frame {
-    pub image: vk::Image,
-    pub view: vk::ImageView,
-    pub index: u32,
-}
-
-pub trait Image {
-    fn handle(&self) -> vk::Image;
-}
-
-impl Image for Texture {
-    fn handle(&self) -> vk::Image {
-        self.image
-    }
-}
-
-impl Image for Frame {
-    fn handle(&self) -> vk::Image {
-        self.image
     }
 }
 
@@ -316,7 +384,7 @@ impl ImageTransition {
     }
 }
 
-impl Texture {
+impl Image {
     pub fn sampler(&self) -> &Sampler {
         let ptr = if let Some(sampler) = &self.sampler {
             sampler as *const Sampler
@@ -337,13 +405,15 @@ impl Drop for Sampler {
     }
 }
 
-impl Drop for Texture {
+impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_image_view(self.view, None);
-
-            self.allocator
-                .destroy_image(self.image, &mut self.allocation);
+            if let Some(allocation) = &mut self.allocation {
+                self.device.destroy_image_view(self.view, None);
+                allocation
+                    .allocator
+                    .destroy_image(self.handle, &mut allocation.handle);
+            }
         }
     }
 }
