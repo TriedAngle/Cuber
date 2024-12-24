@@ -2,6 +2,7 @@ use anyhow::Result;
 use ash::vk;
 use parking_lot::Mutex;
 use std::{
+    borrow::BorrowMut,
     cell::RefCell,
     collections::HashMap,
     ops,
@@ -27,6 +28,8 @@ pub struct DroppedCommandBuffer {
 #[derive(Debug)]
 pub struct ThreadCommandPool {
     pub handle: vk::CommandPool,
+    device: Arc<Device>,
+    pub ready: RefCell<Vec<CommandBuffer>>,
     pub retired: RefCell<Vec<DroppedCommandBuffer>>,
 }
 
@@ -68,6 +71,8 @@ impl CommandPools {
 
         let pool = Rc::new(ThreadCommandPool {
             handle,
+            device: self.device.clone(),
+            ready: RefCell::new(Vec::new()),
             retired: RefCell::new(Vec::new()),
         });
 
@@ -80,9 +85,9 @@ impl CommandPools {
         let mut pools = self.pools.lock();
 
         for (_t, pool) in pools.iter_mut() {
+            let mut retired = pool.retired.borrow_mut();
             let freeable = {
                 let mut freeable = Vec::new();
-                let mut retired = pool.retired.borrow_mut();
                 retired.retain(|b| {
                     if b.submission <= completed_index {
                         freeable.push(b.handle);
@@ -95,10 +100,27 @@ impl CommandPools {
             };
 
             if !freeable.is_empty() {
-                unsafe {
-                    self.device
-                        .handle
-                        .free_command_buffers(pool.handle, &freeable);
+                let mut ready = pool.ready.borrow_mut();
+                if ready.len() < 10 {
+                    let new_ready_buffers = freeable.into_iter().map(|b| {
+                        unsafe {
+                            let _ = self.device.handle.reset_command_buffer(
+                                b,
+                                vk::CommandBufferResetFlags::RELEASE_RESOURCES,
+                            );
+                        }
+                        CommandBuffer {
+                            handle: b,
+                            submission: Rc::new(RefCell::new(0)),
+                        }
+                    });
+                    ready.extend(new_ready_buffers);
+                } else {
+                    unsafe {
+                        self.device
+                            .handle
+                            .free_command_buffers(pool.handle, &freeable);
+                    }
                 }
             }
         }
@@ -109,6 +131,47 @@ impl ThreadCommandPool {
     pub fn retire_buffer(&self, buffer: DroppedCommandBuffer) {
         let mut retired = self.retired.borrow_mut();
         retired.push(buffer);
+    }
+
+    pub fn get_buffer(&self) -> CommandBuffer {
+        if let Some(buffer) = self.ready.borrow_mut().pop() {
+            unsafe {
+                self.device
+                    .handle
+                    .begin_command_buffer(
+                        buffer.handle,
+                        &vk::CommandBufferBeginInfo::default()
+                            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                    )
+                    .unwrap();
+            }
+            return buffer;
+        }
+        let info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(self.handle)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+
+        let buffer_handle =
+            unsafe { self.device.handle.allocate_command_buffers(&info).unwrap()[0] };
+
+        unsafe {
+            self.device
+                .handle
+                .begin_command_buffer(
+                    buffer_handle,
+                    &vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                )
+                .unwrap();
+        }
+
+        let buffer = CommandBuffer {
+            handle: buffer_handle,
+            submission: Rc::new(RefCell::new(0)),
+        };
+
+        buffer
     }
 }
 
@@ -463,29 +526,7 @@ impl Queue {
     pub fn record(&self) -> CommandRecorder {
         let pool = self.pools.get_pool(&self);
 
-        let info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(pool.handle)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-
-        let buffer_handle =
-            unsafe { self.device.handle.allocate_command_buffers(&info).unwrap()[0] };
-
-        unsafe {
-            self.device
-                .handle
-                .begin_command_buffer(
-                    buffer_handle,
-                    &vk::CommandBufferBeginInfo::default()
-                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-                )
-                .unwrap();
-        }
-
-        let buffer = CommandBuffer {
-            handle: buffer_handle,
-            submission: Rc::new(RefCell::new(0)),
-        };
+        let buffer = pool.get_buffer();
 
         CommandRecorder {
             pool,
@@ -594,11 +635,19 @@ impl Drop for CommandRecorder {
 impl Drop for CommandPools {
     fn drop(&mut self) {
         for (_t, pool) in self.pools.get_mut() {
+            let ready = pool.ready.borrow_mut();
             let retired = pool.retired.borrow_mut();
-            let free = retired.iter().map(|b| b.handle).collect::<Vec<_>>();
+
+            let free_retired = retired.iter().map(|b| b.handle).collect::<Vec<_>>();
+            let free_ready = ready.iter().map(|b| b.handle).collect::<Vec<_>>();
             unsafe {
                 let _ = self.device.handle.device_wait_idle();
-                self.device.handle.free_command_buffers(pool.handle, &free);
+                self.device
+                    .handle
+                    .free_command_buffers(pool.handle, &free_retired);
+                self.device
+                    .handle
+                    .free_command_buffers(pool.handle, &free_ready);
                 self.device.handle.destroy_command_pool(pool.handle, None);
             }
         }
