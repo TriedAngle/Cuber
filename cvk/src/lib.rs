@@ -21,7 +21,7 @@ pub use device::Device;
 pub use instance::Instance;
 
 pub use buffer::{Buffer, BufferInfo};
-pub use command::CommandRecorder;
+pub use command::{CommandBuffer, CommandPools, CommandRecorder, ThreadCommandPool};
 pub use descriptor::*;
 pub use pipeline::*;
 pub use queues::{Queue, QueueRequest};

@@ -113,7 +113,7 @@ pub fn fill_texture_squares(
 
     unsafe {
         device.handle.cmd_copy_buffer_to_image(
-            recorder.buffer,
+            recorder.buffer.handle,
             staging_buffer.handle,
             texture.image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,

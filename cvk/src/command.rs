@@ -2,56 +2,114 @@ use anyhow::Result;
 use ash::vk;
 use parking_lot::Mutex;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     ops,
-    sync::Arc,
+    rc::Rc,
+    sync::{atomic::Ordering, Arc},
     thread::{self, ThreadId},
 };
 
-use crate::{Buffer, DescriptorSet, Image, ImageTransition, Pipeline, Queue};
+use crate::{Buffer, DescriptorSet, Device, Image, ImageTransition, Pipeline, Queue, Texture};
 
-pub struct ThreadCommandPools {
-    pub device: Arc<ash::Device>,
-    pub pools: Mutex<HashMap<(ThreadId, u32), vk::CommandPool>>,
+#[derive(Debug, Clone)]
+pub struct CommandBuffer {
+    pub handle: vk::CommandBuffer,
+    pub submission: Rc<RefCell<u64>>,
 }
 
-impl ThreadCommandPools {
-    pub fn new(device: Arc<ash::Device>) -> Self {
+#[derive(Debug, Clone, Copy)]
+pub struct DroppedCommandBuffer {
+    pub handle: vk::CommandBuffer,
+    pub submission: u64,
+}
+
+#[derive(Debug)]
+pub struct ThreadCommandPool {
+    pub handle: vk::CommandPool,
+    pub retired: RefCell<Vec<DroppedCommandBuffer>>,
+}
+
+#[derive(Debug)]
+pub struct CommandPools {
+    pub device: Arc<Device>,
+    pub pools: Mutex<HashMap<ThreadId, Rc<ThreadCommandPool>>>,
+}
+
+pub struct CommandRecorder {
+    pub pool: Rc<ThreadCommandPool>,
+    pub buffer: CommandBuffer,
+    pub device: Arc<ash::Device>,
+    pub recording: bool,
+    pub pipeline: Option<PipelineBinding>,
+}
+
+impl CommandPools {
+    pub fn new(device: Arc<Device>) -> Self {
         Self {
             device,
             pools: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn get_pool(&self, queue: &Queue) -> vk::CommandPool {
+    pub fn get_pool(&self, queue: &Queue) -> Rc<ThreadCommandPool> {
         let thread_id = thread::current().id();
         let mut pools = self.pools.lock();
 
-        if let Some(&pool) = pools.get(&(thread_id, queue.family_index)) {
-            return pool;
+        if let Some(pool) = pools.get(&thread_id) {
+            return pool.clone();
         }
 
         let info = vk::CommandPoolCreateInfo::default()
             .queue_family_index(queue.family_index)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
 
-        let pool = unsafe { self.device.create_command_pool(&info, None).unwrap() };
+        let handle = unsafe { self.device.handle.create_command_pool(&info, None).unwrap() };
 
-        pools.insert((thread_id, queue.family_index), pool);
+        let pool = Rc::new(ThreadCommandPool {
+            handle,
+            retired: RefCell::new(Vec::new()),
+        });
+
+        pools.insert(thread_id, pool.clone());
 
         pool
     }
+
+    pub fn try_cleanup(&self, completed_index: u64) {
+        let mut pools = self.pools.lock();
+
+        for (_t, pool) in pools.iter_mut() {
+            let freeable = {
+                let mut freeable = Vec::new();
+                let mut retired = pool.retired.borrow_mut();
+                retired.retain(|b| {
+                    if b.submission <= completed_index {
+                        freeable.push(b.handle);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                freeable
+            };
+
+            if !freeable.is_empty() {
+                unsafe {
+                    self.device
+                        .handle
+                        .free_command_buffers(pool.handle, &freeable);
+                }
+            }
+        }
+    }
 }
 
-// TODO: investigate if multiple buffers actually has a usecase?
-// why not just create more recorders?
-// what are secondary?
-pub struct CommandRecorder {
-    pub pool: vk::CommandPool,
-    pub buffer: vk::CommandBuffer,
-    pub device: Arc<ash::Device>,
-    pub recording: bool,
-    pub pipeline: Option<PipelineBinding>,
+impl ThreadCommandPool {
+    pub fn retire_buffer(&self, buffer: DroppedCommandBuffer) {
+        let mut retired = self.retired.borrow_mut();
+        retired.push(buffer);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -77,13 +135,13 @@ impl CommandRecorder {
             .color_attachments(attachments);
 
         unsafe {
-            self.device.cmd_begin_rendering(self.buffer, &info);
+            self.device.cmd_begin_rendering(self.buffer.handle, &info);
         }
     }
 
     pub fn end_rendering(&mut self) {
         unsafe {
-            self.device.cmd_end_rendering(self.buffer);
+            self.device.cmd_end_rendering(self.buffer.handle);
         }
     }
 
@@ -117,7 +175,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device.cmd_pipeline_barrier(
-                self.buffer,
+                self.buffer.handle,
                 src_stage,
                 dst_stage,
                 vk::DependencyFlags::empty(),
@@ -161,7 +219,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device.cmd_pipeline_barrier(
-                self.buffer,
+                self.buffer.handle,
                 src_stage,
                 dst_stage,
                 vk::DependencyFlags::empty(),
@@ -199,7 +257,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device
-                .cmd_copy_buffer(self.buffer, src.handle, dst.handle, &[copy]);
+                .cmd_copy_buffer(self.buffer.handle, src.handle, dst.handle, &[copy]);
         }
     }
 
@@ -225,7 +283,25 @@ impl CommandRecorder {
 
         unsafe {
             self.device
-                .cmd_copy_buffer(self.buffer, src.handle, dst.handle, &copies);
+                .cmd_copy_buffer(self.buffer.handle, src.handle, dst.handle, &copies);
+        }
+    }
+
+    pub fn copy_buffer_image(
+        &mut self,
+        src: &Buffer,
+        dst: &Texture,
+        layout: vk::ImageLayout,
+        regions: &[vk::BufferImageCopy],
+    ) {
+        unsafe {
+            self.device.cmd_copy_buffer_to_image(
+                self.buffer.handle,
+                src.handle,
+                dst.image,
+                layout,
+                regions,
+            );
         }
     }
 
@@ -241,7 +317,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device.cmd_bind_pipeline(
-                self.buffer,
+                self.buffer.handle,
                 pipeline_binding.binding,
                 pipeline_binding.handle,
             );
@@ -256,7 +332,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device.cmd_push_constants(
-                self.buffer,
+                self.buffer.handle,
                 pipeline.layout,
                 pipeline.flags,
                 0,
@@ -267,15 +343,19 @@ impl CommandRecorder {
 
     pub fn bind_vertex(&mut self, vertex: &Buffer, binding: u32) {
         unsafe {
-            self.device
-                .cmd_bind_vertex_buffers(self.buffer, binding, &[vertex.handle], &[0]);
+            self.device.cmd_bind_vertex_buffers(
+                self.buffer.handle,
+                binding,
+                &[vertex.handle],
+                &[0],
+            );
         }
     }
 
     pub fn bind_index(&mut self, index: &Buffer, ty: vk::IndexType) {
         unsafe {
             self.device
-                .cmd_bind_index_buffer(self.buffer, index.handle, 0, ty);
+                .cmd_bind_index_buffer(self.buffer.handle, index.handle, 0, ty);
         }
     }
 
@@ -287,7 +367,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device.cmd_bind_descriptor_sets(
-                self.buffer,
+                self.buffer.handle,
                 pipeline.binding,
                 pipeline.layout,
                 index,
@@ -299,20 +379,22 @@ impl CommandRecorder {
 
     pub fn viewport(&mut self, viewport: vk::Viewport) {
         unsafe {
-            self.device.cmd_set_viewport(self.buffer, 0, &[viewport]);
+            self.device
+                .cmd_set_viewport(self.buffer.handle, 0, &[viewport]);
         }
     }
 
     pub fn scissor(&mut self, scissor: vk::Rect2D) {
         unsafe {
-            self.device.cmd_set_scissor(self.buffer, 0, &[scissor]);
+            self.device
+                .cmd_set_scissor(self.buffer.handle, 0, &[scissor]);
         }
     }
 
     pub fn draw(&mut self, vertex: ops::Range<u32>, instance: ops::Range<u32>) {
         unsafe {
             self.device.cmd_draw(
-                self.buffer,
+                self.buffer.handle,
                 vertex.len() as u32,
                 instance.len() as u32,
                 vertex.start,
@@ -329,7 +411,7 @@ impl CommandRecorder {
     ) {
         unsafe {
             self.device.cmd_draw_indexed(
-                self.buffer,
+                self.buffer.handle,
                 indices.len() as u32,
                 instance.len() as u32,
                 indices.start,
@@ -341,16 +423,16 @@ impl CommandRecorder {
 
     pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {
         unsafe {
-            self.device.cmd_dispatch(self.buffer, x, y, z);
+            self.device.cmd_dispatch(self.buffer.handle, x, y, z);
         }
     }
 
-    pub fn finish(&mut self) -> vk::CommandBuffer {
+    pub fn finish(&mut self) -> CommandBuffer {
         unsafe {
-            self.device.end_command_buffer(self.buffer).unwrap();
+            self.device.end_command_buffer(self.buffer.handle).unwrap();
             self.recording = false;
         }
-        self.buffer
+        self.buffer.clone()
     }
 
     pub fn reset(&mut self) {
@@ -360,7 +442,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device
-                .reset_command_buffer(self.buffer, vk::CommandBufferResetFlags::empty())
+                .reset_command_buffer(self.buffer.handle, vk::CommandBufferResetFlags::empty())
                 .unwrap();
         }
 
@@ -369,7 +451,7 @@ impl CommandRecorder {
 
         unsafe {
             self.device
-                .begin_command_buffer(self.buffer, &info)
+                .begin_command_buffer(self.buffer.handle, &info)
                 .unwrap();
         }
 
@@ -379,25 +461,31 @@ impl CommandRecorder {
 
 impl Queue {
     pub fn record(&self) -> CommandRecorder {
-        let pool = self.device.command_pools.get_pool(&self);
+        let pool = self.pools.get_pool(&self);
 
         let info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(pool)
+            .command_pool(pool.handle)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(1);
 
-        let buffer = unsafe { self.device.handle.allocate_command_buffers(&info).unwrap()[0] };
+        let buffer_handle =
+            unsafe { self.device.handle.allocate_command_buffers(&info).unwrap()[0] };
 
         unsafe {
             self.device
                 .handle
                 .begin_command_buffer(
-                    buffer,
+                    buffer_handle,
                     &vk::CommandBufferBeginInfo::default()
                         .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                 )
                 .unwrap();
         }
+
+        let buffer = CommandBuffer {
+            handle: buffer_handle,
+            submission: Rc::new(RefCell::new(0)),
+        };
 
         CommandRecorder {
             pool,
@@ -410,13 +498,29 @@ impl Queue {
 
     pub fn submit(
         &self,
-        command_buffers: &[vk::CommandBuffer],
+        command_buffers: &[CommandBuffer],
         wait_binary: &[(vk::Semaphore, vk::PipelineStageFlags)],
         wait_timeline: &[(vk::Semaphore, u64, vk::PipelineStageFlags)],
         signal_binary: &[vk::Semaphore],
         signal_timeline: &[(vk::Semaphore, u64)],
-    ) -> Result<()> {
-        // Combine all semaphores
+    ) -> Result<u64> {
+        let submission_index = self.submission_counter.fetch_add(1, Ordering::Relaxed);
+
+        let timeline = self.timeline.get();
+
+        self.pools.try_cleanup(timeline);
+
+        let submit_buffers = command_buffers
+            .iter()
+            .map(|b| {
+                *RefCell::borrow_mut(&b.submission) = submission_index;
+                b.handle
+            })
+            .collect::<Vec<_>>();
+
+        let mut signal_timeline = signal_timeline.to_vec();
+        signal_timeline.push((self.timeline.handle, submission_index));
+
         let mut wait_semaphores = Vec::with_capacity(wait_binary.len() + wait_timeline.len());
         let mut wait_stages = Vec::with_capacity(wait_binary.len() + wait_timeline.len());
         let mut wait_values = Vec::with_capacity(wait_timeline.len());
@@ -441,7 +545,7 @@ impl Queue {
             signal_values.push(0);
         }
 
-        for &(sem, value) in signal_timeline {
+        for &(sem, value) in &signal_timeline {
             signal_semaphores.push(sem);
             signal_values.push(value);
         }
@@ -453,7 +557,7 @@ impl Queue {
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(command_buffers)
+            .command_buffers(&submit_buffers)
             .signal_semaphores(&signal_semaphores)
             .push_next(&mut timeline_info);
 
@@ -464,10 +568,10 @@ impl Queue {
                 .queue_submit(self.handle, &[submit_info], vk::Fence::null())?;
         }
 
-        Ok(())
+        Ok(submission_index)
     }
 
-    pub fn submit_express(&self, command_buffers: &[vk::CommandBuffer]) -> Result<()> {
+    pub fn submit_express(&self, command_buffers: &[CommandBuffer]) -> Result<u64> {
         self.submit(command_buffers, &[], &[], &[], &[])
     }
 }
@@ -475,11 +579,28 @@ impl Queue {
 impl Drop for CommandRecorder {
     fn drop(&mut self) {
         if self.recording {
-            let _ = unsafe { self.device.end_command_buffer(self.buffer) };
+            log::error!("Dropping RecordingRecorder Buffer");
+            let _ = unsafe { self.device.end_command_buffer(self.buffer.handle) };
         }
-        unsafe {
-            let _ = self.device.device_wait_idle();
-            self.device.free_command_buffers(self.pool, &[self.buffer]);
+        let dropped = DroppedCommandBuffer {
+            handle: self.buffer.handle,
+            submission: *RefCell::borrow(&self.buffer.submission),
+        };
+
+        self.pool.retire_buffer(dropped);
+    }
+}
+
+impl Drop for CommandPools {
+    fn drop(&mut self) {
+        for (_t, pool) in self.pools.get_mut() {
+            let retired = pool.retired.borrow_mut();
+            let free = retired.iter().map(|b| b.handle).collect::<Vec<_>>();
+            unsafe {
+                let _ = self.device.handle.device_wait_idle();
+                self.device.handle.free_command_buffers(pool.handle, &free);
+                self.device.handle.destroy_command_pool(pool.handle, None);
+            }
         }
     }
 }

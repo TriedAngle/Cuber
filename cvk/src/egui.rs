@@ -20,7 +20,6 @@ struct EguiPushConstants {
 pub struct FrameResources {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
-    pub staging: Vec<Buffer>,
 }
 
 pub struct EguiTextures {
@@ -124,9 +123,7 @@ impl EguiTextures {
         id: egui::TextureId,
         image_delta: &egui::epaint::ImageDelta,
         recorder: &mut CommandRecorder,
-        frame_resource: &mut FrameResources,
-        queue: &Queue,
-    ) {
+    ) -> Option<Buffer> {
         let size = [
             image_delta.image.width() as u32,
             image_delta.image.height() as u32,
@@ -141,7 +138,7 @@ impl EguiTextures {
             if !self.textures.contains_key(&id) {
                 if self.next_binding >= self.max_textures {
                     log::error!("Maximum number of textures reached");
-                    return;
+                    return None;
                 }
                 self.next_binding += 1;
             }
@@ -217,15 +214,12 @@ impl EguiTextures {
             });
         }
 
-        unsafe {
-            self.device.handle.cmd_copy_buffer_to_image(
-                recorder.buffer,
-                staging_buffer.handle,
-                texture.image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[region],
-            );
-        }
+        recorder.copy_buffer_image(
+            &staging_buffer,
+            &texture,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[region],
+        );
 
         recorder.image_transition(
             texture,
@@ -246,7 +240,7 @@ impl EguiTextures {
             array_element: Some(*binding_index),
         }]);
 
-        frame_resource.staging.push(staging_buffer);
+        Some(staging_buffer)
     }
 
     pub fn get_binding_index(&self, id: &egui::TextureId) -> Option<u32> {
@@ -269,6 +263,7 @@ pub struct EguiState {
     pub textures: EguiTextures,
     pub size: PhysicalSize<u32>,
     pub scale_factor: f64,
+    pub staging_buffers: Vec<(Buffer, u64)>,
 }
 
 impl EguiState {
@@ -361,6 +356,7 @@ impl EguiState {
             textures,
             scale_factor,
             size,
+            staging_buffers: Vec::new(),
         }
     }
 
@@ -368,14 +364,15 @@ impl EguiState {
         &mut self,
         recorder: &mut CommandRecorder,
         textures_delta: &egui::TexturesDelta,
-        frame: Frame,
         queue: &Queue,
     ) {
-        let frame_resource = &mut self.frame_resources[frame.index as usize];
+        let current_index = queue.current_index();
 
         for (id, image_delta) in &textures_delta.set {
-            self.textures
-                .update_texture(*id, image_delta, recorder, frame_resource, queue);
+            let staging = self.textures.update_texture(*id, image_delta, recorder);
+            if let Some(staging) = staging {
+                self.staging_buffers.push((staging, current_index));
+            }
         }
 
         for &_id in &textures_delta.free {
@@ -386,9 +383,21 @@ impl EguiState {
     pub fn render(
         &mut self,
         recorder: &mut CommandRecorder,
-        shapes: Vec<egui::epaint::ClippedShape>,
+        output: egui::FullOutput,
+        queue: &Queue,
         frame: Frame,
     ) {
+        let egui::FullOutput {
+            textures_delta,
+            shapes,
+            ..
+        } = output;
+        self.update_textures(recorder, &textures_delta, queue);
+
+        let timeline = queue.current_timeline();
+        self.staging_buffers
+            .retain(|(_, submission)| *submission > timeline);
+
         let frame_resources = &self.frame_resources[frame.index as usize];
         let scale = self.ctx.pixels_per_point();
 
@@ -521,8 +530,7 @@ impl EguiState {
         }
     }
 
-    pub fn begin_frame(&mut self, window: &winit::window::Window, frame: Frame) {
-        self.frame_resources[frame.index as usize].staging.clear();
+    pub fn begin_frame(&mut self, window: &winit::window::Window) {
         let raw_input = self.state.take_egui_input(window);
         self.ctx.begin_pass(raw_input);
     }
@@ -564,7 +572,6 @@ impl EguiState {
         FrameResources {
             vertex_buffer,
             index_buffer,
-            staging: Vec::new(),
         }
     }
 }

@@ -1,7 +1,7 @@
-use crate::{Adapter, Device, Instance};
+use crate::{Adapter, CommandPools, Device, Instance, Semaphore};
 use ash::vk;
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
 
 #[derive(Debug)]
 pub struct Queue {
@@ -12,6 +12,9 @@ pub struct Queue {
     pub family_index: u32,
     pub queue_index: u32,
     pub is_shared: bool,
+    pub pools: CommandPools,
+    pub submission_counter: AtomicU64,
+    pub timeline: Semaphore,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +41,10 @@ impl Queue {
                 .get_device_queue(info.family_index, info.queue_index)
         };
 
+        let pools = CommandPools::new(device.clone());
+        let submission_counter = AtomicU64::new(1);
+        let timeline = device.create_semaphore(0);
+
         let new = Self {
             handle,
             device,
@@ -46,6 +53,9 @@ impl Queue {
             family_index: info.family_index,
             queue_index: info.queue_index,
             is_shared: info.is_shared,
+            pools,
+            submission_counter,
+            timeline,
         };
 
         Arc::new(new)
@@ -234,6 +244,27 @@ impl Queue {
             entry.1 = queue_index + 1;
         } else {
             used_queues.push((family_index, queue_index + 1));
+        }
+    }
+
+    pub fn current_index(&self) -> u64 {
+        self.submission_counter
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn current_timeline(&self) -> u64 {
+        self.timeline.get()
+    }
+
+    pub fn wait(&self, threshold: u64) {
+        let current_submission = self
+            .submission_counter
+            .load(std::sync::atomic::Ordering::Acquire);
+
+        let timeline = self.timeline.get();
+
+        if current_submission.saturating_sub(threshold) > timeline {
+            self.timeline.wait(current_submission - 1, None);
         }
     }
 

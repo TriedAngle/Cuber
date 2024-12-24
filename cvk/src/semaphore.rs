@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration, u64};
+use std::{fmt, sync::Arc, time::Duration, u64};
 
 use ash::vk;
 
@@ -7,6 +7,12 @@ use crate::Device;
 pub struct Semaphore {
     pub handle: vk::Semaphore,
     device: Arc<ash::Device>,
+}
+
+impl fmt::Debug for Semaphore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Semaphore").finish()
+    }
 }
 
 impl Device {

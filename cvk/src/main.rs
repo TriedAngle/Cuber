@@ -191,6 +191,8 @@ struct Render {
     instance: Arc<cvk::Instance>,
     device: Arc<cvk::Device>,
     editor_text: String,
+    max_frame: Option<u64>,
+    frame_count: u64,
 }
 
 impl Render {
@@ -201,6 +203,7 @@ impl Render {
         render_queue: Arc<cvk::Queue>,
         transfer_queue: Arc<cvk::Queue>,
         window: Arc<Window>,
+        max_frame: Option<u64>,
     ) -> Result<Self> {
         let size = window.inner_size();
         let surface = instance.create_surface(&device.adapter(), &window, |formats| {
@@ -422,6 +425,8 @@ impl Render {
             pc,
             particle_buffer,
             editor_text: String::new(),
+            max_frame,
+            frame_count: 0,
         };
 
         Ok(new)
@@ -516,18 +521,17 @@ impl Render {
 
         recorder.end_rendering();
 
-        let compute_present_semaphore = self.device.create_binary_semaphore(false);
         let _ = self.render_queue.submit(
             &[recorder.finish()],
             &[(signals.available, vk::PipelineStageFlags::TOP_OF_PIPE)],
             &[],
-            &[compute_present_semaphore.handle],
+            &[],
             &[],
         );
 
         let mut egui_recorder = self.render_queue.record();
 
-        self.egui.begin_frame(&self.window, frame);
+        self.egui.begin_frame(&self.window);
         egui::Window::new("Debug")
             .resizable(true)
             .show(&self.egui.ctx, |ui| {
@@ -546,15 +550,8 @@ impl Render {
 
         let egui_output = self.egui.end_frame(&self.window);
 
-        self.egui.update_textures(
-            &mut egui_recorder,
-            &egui_output.textures_delta,
-            frame,
-            &self.render_queue,
-        );
-
         self.egui
-            .render(&mut egui_recorder, egui_output.shapes, frame);
+            .render(&mut egui_recorder, egui_output, &self.render_queue, frame);
 
         egui_recorder.image_transition(
             &frame,
@@ -567,18 +564,19 @@ impl Render {
                 dst_access: vk::AccessFlags::empty(),
             },
         );
+
         let _ = self.render_queue.submit(
             &[egui_recorder.finish()],
-            &[(
-                compute_present_semaphore.handle,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-            )],
+            &[],
             &[],
             &[signals.finished],
             &[],
         );
 
         self.swapchain.present_frame(&self.render_queue, frame);
+
+        self.render_queue.wait(10);
+
         self.window.request_redraw();
     }
 }
@@ -675,6 +673,7 @@ impl ApplicationHandler for VulkanApp {
             self.render_queue.clone(),
             self.transfer_queue.clone(),
             window.clone(),
+            None,
         )
         .unwrap();
         self.window = Some(window);
@@ -719,7 +718,7 @@ impl ApplicationHandler for VulkanApp {
 
     fn window_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
+        event_loop: &ActiveEventLoop,
         _window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
@@ -730,7 +729,14 @@ impl ApplicationHandler for VulkanApp {
         match event {
             WindowEvent::RedrawRequested => {
                 if let Some(render) = &mut self.render {
-                    render.render()
+                    if let Some(max) = render.max_frame {
+                        if max <= render.frame_count {
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                    render.render();
+                    render.frame_count += 1;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {

@@ -1,9 +1,13 @@
 use anyhow::Result;
-use std::{sync::Arc, time::Duration, u64};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+    u64,
+};
 
 use ash::vk;
 
-use crate::{Adapter, Device, Frame, Queue};
+use crate::{semaphore, Adapter, Device, Frame, Queue};
 
 #[derive(Clone, Copy)]
 pub struct FrameSignals {
