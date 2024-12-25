@@ -11,7 +11,7 @@ pub struct Instance {
 }
 
 impl Instance {
-    pub fn new(app: &str, engine: &str) -> Result<Self> {
+    pub fn new(app: &str, engine: &str) -> Result<Arc<Self>> {
         let entry = unsafe { ash::Entry::load()? };
         let app_name = ffi::CString::new(app)?;
         let engine_name = ffi::CString::new(engine)?;
@@ -61,7 +61,7 @@ impl Instance {
         let handle = unsafe { entry.create_instance(&ifo, None)? };
 
         let new = Self { entry, handle };
-        Ok(new)
+        Ok(Arc::new(new))
     }
 
     pub fn adapters(&self, formats: &[vk::Format]) -> Result<Vec<Arc<Adapter>>> {

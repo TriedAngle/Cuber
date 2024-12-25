@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cvk = { workspace = true }
+game = { workspace = true }
+bytemuck = { workspace = true }
+nalgebra = { workspace = true }
+parking_lot = { workspace = true }
+anyhow = { workspace = true }

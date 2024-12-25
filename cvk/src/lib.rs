@@ -35,7 +35,10 @@ pub use texture::{
 
 pub use ash as raw;
 use ash::vk;
-pub use ash::vk::{Format, QueueFlags};
+pub use ash::vk::{
+    CullModeFlags, DescriptorSetLayoutCreateFlags, Format, FrontFace, PipelineStageFlags,
+    PolygonMode, PrimitiveTopology, QueueFlags, ShaderStageFlags,
+};
 
 use anyhow::Result;
 use naga::back::spv;
@@ -67,6 +70,16 @@ pub struct ShaderFunction<'a> {
 }
 
 impl ShaderFunction<'_> {
+    pub fn null() -> Self {
+        unsafe {
+            Self {
+                #[allow(deref_nullptr)]
+                shader: &*(std::ptr::null::<Shader>()),
+                entry_point: "",
+            }
+        }
+    }
+
     pub fn entry_point_idx(&self) -> Result<usize> {
         self.shader
             .module

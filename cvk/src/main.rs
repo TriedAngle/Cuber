@@ -659,7 +659,7 @@ struct VulkanApp {
 
 impl VulkanApp {
     pub fn new(_event_loop: &EventLoop<()>) -> Result<Self> {
-        let instance = Arc::new(cvk::Instance::new("Cuber", "Cuber Engine")?);
+        let instance = cvk::Instance::new("CVK", "CVK")?;
 
         let formats = &[
             cvk::Format::R8G8B8_UNORM,

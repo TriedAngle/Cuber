@@ -35,6 +35,32 @@ pub struct DescriptorBinding {
     pub flags: Option<vk::DescriptorBindingFlags>,
 }
 
+impl DescriptorBinding {
+    pub fn unique(binding: u32, ty: DescriptorType, stages: vk::ShaderStageFlags) -> Self {
+        Self {
+            binding,
+            ty,
+            count: 1,
+            stages,
+            flags: None,
+        }
+    }
+    pub fn array(
+        binding: u32,
+        ty: DescriptorType,
+        count: u32,
+        stages: vk::ShaderStageFlags,
+    ) -> Self {
+        Self {
+            binding,
+            ty,
+            count,
+            stages,
+            flags: None,
+        }
+    }
+}
+
 pub struct DescriptorSetLayoutInfo<'a> {
     pub bindings: &'a [DescriptorBinding],
     pub flags: vk::DescriptorSetLayoutCreateFlags,

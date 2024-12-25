@@ -13,6 +13,19 @@ pub struct ComputePipelineInfo<'a> {
     pub tag: Option<(u64, &'a [u8])>,
 }
 
+impl Default for ComputePipelineInfo<'_> {
+    fn default() -> Self {
+        Self {
+            shader: ShaderFunction::null(),
+            descriptor_layouts: &[],
+            push_constant_size: None,
+            cache: None,
+            label: None,
+            tag: None,
+        }
+    }
+}
+
 pub struct RenderPipelineInfo<'a> {
     pub vertex_shader: ShaderFunction<'a>,
     pub fragment_shader: ShaderFunction<'a>,
@@ -28,6 +41,27 @@ pub struct RenderPipelineInfo<'a> {
     pub front_face: vk::FrontFace,
     pub label: Option<&'a str>,
     pub tag: Option<(u64, &'a [u8])>,
+}
+
+impl Default for RenderPipelineInfo<'_> {
+    fn default() -> Self {
+        Self {
+            vertex_shader: ShaderFunction::null(),
+            fragment_shader: ShaderFunction::null(),
+            color_formats: &[],
+            depth_format: None,
+            descriptor_layouts: &[],
+            push_constant_size: None,
+            blend_states: None,
+            vertex_input_state: None,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            polygon: vk::PolygonMode::FILL,
+            cull: vk::CullModeFlags::NONE,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            label: None,
+            tag: None,
+        }
+    }
 }
 
 pub trait Pipeline {
