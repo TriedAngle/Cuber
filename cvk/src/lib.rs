@@ -28,7 +28,7 @@ pub use descriptor::*;
 pub use pipeline::*;
 pub use queues::{Queue, QueueRequest};
 pub use semaphore::Semaphore;
-pub use swapchain::{Frame, FrameSignals, Surface, Swapchain};
+pub use swapchain::{Frame, FrameSignals, Swapchain, SwapchainConfig, SwapchainStatus};
 pub use texture::{
     CustomImageViewInfo, Image, ImageInfo, ImageTransition, ImageViewInfo, Sampler, SamplerInfo,
 };

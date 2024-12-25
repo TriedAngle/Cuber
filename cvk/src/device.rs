@@ -160,6 +160,10 @@ impl Device {
         }
     }
 
+    pub fn wait_idle(&self) {
+        let _ = unsafe { self.handle.device_wait_idle() };
+    }
+
     pub fn handle(&self) -> &ash::Device {
         &self.handle
     }

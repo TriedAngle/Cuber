@@ -3,7 +3,9 @@ extern crate vk_mem as vkm;
 use std::{mem, sync::Arc};
 
 use anyhow::Result;
-use cvk::{egui::EguiState, raw::vk, utils, Device, ImageViewInfo};
+use cvk::{
+    egui::EguiState, raw::vk, utils, Device, ImageViewInfo, SwapchainConfig, SwapchainStatus,
+};
 
 use game::Camera;
 use rand::Rng;
@@ -207,20 +209,25 @@ impl Render {
         max_frame: Option<u64>,
     ) -> Result<Self> {
         let size = window.inner_size();
-        let surface = instance.create_surface(&device.adapter(), &window, |formats| {
-            log::debug!("available formats: {:?}", formats);
-            formats
-                .iter()
-                .find(|f| {
-                    f.format == vk::Format::R8G8B8A8_UNORM
-                        && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-                })
-                .map(|f| *f)
-                .inspect(|f| log::debug!("using {:?}", f))
-                .unwrap_or(formats[0])
-        })?;
 
-        assert!(surface.is_compatible(&device.adapter(), &render_queue));
+        let config = SwapchainConfig {
+            preferred_image_count: 3,
+            preferred_present_mode: vk::PresentModeKHR::MAILBOX,
+            format_selector: Box::new(|formats| {
+                formats
+                    .iter()
+                    .find(|f| {
+                        f.format == vk::Format::R8G8B8A8_UNORM
+                            && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                    })
+                    .copied()
+                    .unwrap_or(formats[0])
+            }),
+        };
+
+        let swapchain = device.create_swapchain(config, &window)?;
+
+        // assert!(swapchain.is_compatible(&device.adapter(), &render_queue));
 
         let mut particles = vec![Particle::default(); PARTICLE_COUNT];
 
@@ -302,7 +309,7 @@ impl Render {
         let descriptor_set = device.create_descriptor_set(pool.clone(), &layout);
 
         let present_texture = device.create_texture(&cvk::ImageInfo {
-            format: surface.format().format,
+            format: swapchain.format().format,
             width: size.width,
             height: size.height,
             usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
@@ -370,7 +377,7 @@ impl Render {
         let present_pipeline = device.create_render_pipeline(&cvk::RenderPipelineInfo {
             vertex_shader: present_shader.entry("vmain"),
             fragment_shader: present_shader.entry("fmain"),
-            color_formats: &[surface.format().format],
+            color_formats: &[swapchain.format.format],
             depth_format: None,
             descriptor_layouts: &[&layout],
             push_constant_size: None,
@@ -384,9 +391,6 @@ impl Render {
             tag: None,
         });
 
-        let swapchain = device.create_swapchain(surface.clone(), 3, vk::PresentModeKHR::MAILBOX)?;
-
-        log::debug!("sc format: {:?}", swapchain.surface.format());
         let compute_complete = device.create_binary_semaphore(false);
 
         let pc = PushConstants {
@@ -402,7 +406,7 @@ impl Render {
         let egui = EguiState::new(
             device.clone(),
             &window,
-            surface.format().format,
+            swapchain.format.format,
             swapchain.frames_in_flight,
             scale_factor,
             fonts,
@@ -437,7 +441,38 @@ impl Render {
     }
 
     fn render(&mut self) {
-        let (frame, signals, _suboptimal) = self.swapchain.acquire_next_frame(None);
+        let (frame, signals, _status) = match self.swapchain.acquire_next_frame(None) {
+            Ok((frame, signals, status)) => {
+                match status {
+                    SwapchainStatus::OutOfDate => {
+                        log::debug!("Swapchain Out of Date");
+                        if let Err(e) = self.swapchain.rebuild() {
+                            log::error!("Failed to rebuild swapchain: {:?}", e);
+                            return;
+                        }
+                        if let Err(e) = self.handle_resize() {
+                            log::error!("Failed to handle resize: {:?}", e);
+                            return;
+                        }
+                        return;
+                    }
+                    SwapchainStatus::Suboptimal => {
+                        log::debug!("Suboptimal swapchain");
+                        if let Err(e) = self.handle_resize() {
+                            log::error!("Failed to handle resize: {:?}", e);
+                            return;
+                        }
+                        return;
+                    }
+                    SwapchainStatus::Optimal => {}
+                }
+                (frame, signals, status)
+            }
+            Err(e) => {
+                log::error!("Failed to acquire next frame: {:?}", e);
+                return;
+            }
+        };
 
         let mut recorder = self.render_queue.record();
 
@@ -535,11 +570,78 @@ impl Render {
             &[],
         );
 
-        self.swapchain.present_frame(&self.render_queue, frame);
+        match self.swapchain.present_frame(&self.render_queue, frame) {
+            Ok(status) => match status {
+                SwapchainStatus::OutOfDate => {
+                    if let Err(e) = self.swapchain.rebuild() {
+                        log::error!("Failed to rebuild swapchain: {:?}", e);
+                    }
+                    if let Err(e) = self.handle_resize() {
+                        log::error!("Failed to handle resize: {:?}", e);
+                    }
+                }
+                SwapchainStatus::Suboptimal => {
+                    log::warn!("Suboptimal swapchain after present");
+                }
+                SwapchainStatus::Optimal => {}
+            },
+            Err(e) => {
+                log::error!("Failed to present frame: {:?}", e);
+            }
+        }
 
         self.render_queue.wait(10);
 
         self.window.request_redraw();
+    }
+
+    fn handle_resize(&mut self) -> Result<()> {
+        let size = self.window.inner_size();
+
+        self.pc.window = [size.width, size.height];
+        self.egui.size = size;
+
+        let new_texture = self.device.create_texture(&cvk::ImageInfo {
+            format: self.swapchain.format().format,
+            width: size.width,
+            height: size.height,
+            usage: vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::SAMPLED,
+            sharing: vk::SharingMode::EXCLUSIVE,
+            usage_locality: vkm::MemoryUsage::AutoPreferDevice,
+            allocation_locality: vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            view: ImageViewInfo {
+                aspect: vk::ImageAspectFlags::COLOR,
+                ..Default::default()
+            },
+            layout: vk::ImageLayout::UNDEFINED,
+            sampler: Some(cvk::SamplerInfo::default()),
+            label: Some("Debug Present Texture"),
+            ..Default::default()
+        });
+
+        self.descriptor_set.write(&[
+            cvk::DescriptorWrite::StorageImage {
+                binding: 0,
+                image_view: new_texture.view,
+                image_layout: vk::ImageLayout::GENERAL,
+                array_element: None,
+            },
+            cvk::DescriptorWrite::SampledImage {
+                binding: 2,
+                image_view: new_texture.view,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                array_element: None,
+            },
+            cvk::DescriptorWrite::Sampler {
+                binding: 3,
+                sampler: new_texture.sampler(),
+                array_element: None,
+            },
+        ]);
+
+        self.present_texture = new_texture;
+
+        Ok(())
     }
 }
 
@@ -704,12 +806,15 @@ impl ApplicationHandler for VulkanApp {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(render) = &mut self.render {
-                    let height = render.swapchain.extent.height as f32;
+                    let height = render.window.inner_size().height as f32;
                     render.pc.mouse = [position.x as f32, height - position.y as f32];
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                log::debug!("WindowEvent: Scale Factor Change: {:?}", scale_factor)
+                log::debug!("WindowEvent: Scale Factor Change: {:?}", scale_factor);
+                if let Some(render) = &mut self.render {
+                    render.egui.ctx.set_pixels_per_point(scale_factor as f32);
+                }
             }
             _ => {}
         }

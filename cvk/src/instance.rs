@@ -1,9 +1,8 @@
 use anyhow::Result;
 use ash::vk;
 use std::{ffi, sync::Arc};
-use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use crate::{Adapter, Device, Queue, QueueRequest, Surface};
+use crate::{Adapter, Device, Queue, QueueRequest};
 
 pub struct Instance {
     #[allow(unused)]
@@ -63,26 +62,6 @@ impl Instance {
 
         let new = Self { entry, handle };
         Ok(new)
-    }
-
-    pub fn create_surface(
-        &self,
-        adapter: &Adapter,
-        window: &winit::window::Window,
-        choose_format: impl Fn(&[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR,
-    ) -> Result<Arc<Surface>> {
-        let handle = unsafe {
-            ash_window::create_surface(
-                &self.entry,
-                &self.handle,
-                window.display_handle().unwrap().as_raw(),
-                window.window_handle().unwrap().as_raw(),
-                None,
-            )?
-        };
-        let instance = ash::khr::surface::Instance::new(&self.entry, &self.handle);
-        let surface = Surface::new(handle, instance, adapter, choose_format)?;
-        Ok(Arc::new(surface))
     }
 
     pub fn adapters(&self, formats: &[vk::Format]) -> Result<Vec<Arc<Adapter>>> {
