@@ -52,7 +52,10 @@ impl ClientState {
         window.request_redraw();
     }
 
-    pub fn resize(&mut self, id: WindowId, size: PhysicalSize<u32>) {}
+    pub fn resize(&mut self, id: WindowId, size: PhysicalSize<u32>) {
+        let _ = id;
+        let _ = size;
+    }
 
     pub fn reset_deltas(&mut self) {
         self.input.flush(self.delta_time);
@@ -97,6 +100,9 @@ impl ClientState {
             .duration_since(self.last_update)
             .unwrap_or(time::Duration::from_secs_f64(1. / 60.));
         self.last_update = now;
+        for (_id, renderer) in &mut self.renderes {
+            renderer.update_delta_time(self.delta_time);
+        }
     }
 
     pub fn create_window(

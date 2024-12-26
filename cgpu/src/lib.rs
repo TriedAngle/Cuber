@@ -78,13 +78,14 @@ impl GPUContext {
                 ),
                 cvk::DescriptorBinding::array(
                     3,
-                    cvk::DescriptorType::Sampler,
+                    cvk::DescriptorType::SampledImage,
                     10,
                     cvk::ShaderStageFlags::FRAGMENT,
                 ),
                 cvk::DescriptorBinding::array(
+                    // Added new sampler binding
                     4,
-                    cvk::DescriptorType::SampledImage,
+                    cvk::DescriptorType::Sampler,
                     10,
                     cvk::ShaderStageFlags::FRAGMENT,
                 ),

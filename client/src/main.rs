@@ -1,11 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
-
 use client::ClientState;
 use winit::{
     application::ApplicationHandler,
     event::{StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
+    window::WindowId,
 };
 
 pub struct Application {

@@ -42,7 +42,7 @@ impl DescriptorBinding {
             ty,
             count: 1,
             stages,
-            flags: None,
+            flags: Some(vk::DescriptorBindingFlags::PARTIALLY_BOUND),
         }
     }
     pub fn array(
@@ -56,7 +56,7 @@ impl DescriptorBinding {
             ty,
             count,
             stages,
-            flags: None,
+            flags: Some(vk::DescriptorBindingFlags::PARTIALLY_BOUND),
         }
     }
 }

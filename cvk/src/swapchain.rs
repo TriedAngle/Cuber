@@ -6,10 +6,7 @@ use winit::{
     window::Window,
 };
 
-use crate::{
-    texture::{CustomImageViewInfo, ImageDetails},
-    Device, Image, Queue,
-};
+use crate::{CustomImageViewInfo, Device, Image, ImageDetails, Queue};
 
 #[derive(Clone)]
 pub struct Frame {

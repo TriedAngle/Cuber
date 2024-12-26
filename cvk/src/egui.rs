@@ -100,7 +100,7 @@ impl EguiTextures {
     }
 
     fn create_texture(&self, size: [u32; 2]) -> Image {
-        self.device.create_texture(&ImageInfo {
+        self.device.create_image(&ImageInfo {
             format: vk::Format::R8G8B8A8_UNORM,
             width: size[0],
             height: size[1],

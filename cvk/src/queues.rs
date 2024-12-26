@@ -268,6 +268,10 @@ impl Queue {
         }
     }
 
+    pub fn wait_idle(&self) {
+        let _ = unsafe { self.device.handle.queue_wait_idle(self.handle) };
+    }
+
     pub fn handle(&self) -> vk::Queue {
         self.handle
     }

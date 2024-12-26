@@ -6,12 +6,12 @@ mod buffer;
 mod command;
 mod descriptor;
 mod device;
+mod image;
 mod instance;
 mod pipeline;
 mod queues;
 mod semaphore;
 mod swapchain;
-mod texture;
 
 pub mod egui;
 pub mod utils;
@@ -25,19 +25,23 @@ pub use instance::Instance;
 pub use buffer::{Buffer, BufferInfo};
 pub use command::{CommandBuffer, CommandPools, CommandRecorder, ThreadCommandPool};
 pub use descriptor::*;
+pub use image::{
+    CustomImageViewInfo, Image, ImageDetails, ImageInfo, ImageTransition, ImageViewInfo, Sampler,
+    SamplerInfo,
+};
 pub use pipeline::*;
 pub use queues::{Queue, QueueRequest};
 pub use semaphore::Semaphore;
 pub use swapchain::{Frame, FrameSignals, Swapchain, SwapchainConfig, SwapchainStatus};
-pub use texture::{
-    CustomImageViewInfo, Image, ImageInfo, ImageTransition, ImageViewInfo, Sampler, SamplerInfo,
-};
 
 pub use ash as raw;
 use ash::vk;
 pub use ash::vk::{
-    CullModeFlags, DescriptorSetLayoutCreateFlags, Format, FrontFace, PipelineStageFlags,
-    PolygonMode, PrimitiveTopology, QueueFlags, ShaderStageFlags,
+    AttachmentLoadOp, AttachmentStoreOp, ClearColorValue, ClearValue, ColorSpaceKHR, CompareOp,
+    CullModeFlags, DescriptorSetLayoutCreateFlags, Extent2D, Extent3D, Format, FrontFace,
+    ImageAspectFlags, ImageLayout, ImageUsageFlags, Offset2D, Offset3D, PipelineStageFlags,
+    PolygonMode, PresentModeKHR, PrimitiveTopology, QueueFlags, Rect2D, RenderingAttachmentInfo,
+    ShaderStageFlags, Viewport,
 };
 
 use anyhow::Result;

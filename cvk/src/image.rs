@@ -170,7 +170,7 @@ impl<'a> CustomImageViewInfo<'a> {
 }
 
 impl Device {
-    pub fn create_texture(&self, info: &ImageInfo<'_>) -> Image {
+    pub fn create_image(&self, info: &ImageInfo<'_>) -> Image {
         let allocator = self.allocator.clone();
         let texture_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)

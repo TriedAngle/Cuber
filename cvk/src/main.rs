@@ -601,7 +601,7 @@ impl Render {
         self.pc.window = [size.width, size.height];
         self.egui.size = size;
 
-        let new_texture = self.device.create_texture(&cvk::ImageInfo {
+        let new_texture = self.device.create_image(&cvk::ImageInfo {
             format: self.swapchain.format().format,
             width: size.width,
             height: size.height,
