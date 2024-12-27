@@ -2,6 +2,7 @@ use std::{mem, sync::Arc, time};
 
 use anyhow::Result;
 use cvk;
+use game::Camera;
 use winit::window::Window;
 
 #[repr(C)]
@@ -15,6 +16,8 @@ pub struct PresentPushConstants {
 pub struct RayTracePushConstants {
     pub camera: [[f32; 4]; 4],
     pub camera_inverse: [[f32; 4]; 4],
+    pub camera_pos: [f32; 3],
+    _padding0: u32,
     pub dimensions: [u32; 3],
     pub packed_resolution: u32,
     pub flags0: u32,
@@ -22,9 +25,9 @@ pub struct RayTracePushConstants {
     pub dt: f32,
     pub depth_boost: f32,
     pub brick_hit: [u32; 3],
-    pub _padding0: u32,
+    _padding1: u32,
     pub voxel_hit: [u32; 3],
-    pub _padding1: u32,
+    _padding2: u32,
 }
 
 impl PresentPushConstants {
@@ -38,6 +41,8 @@ impl RayTracePushConstants {
         Self {
             camera: [[0.; 4]; 4],
             camera_inverse: [[0.; 4]; 4],
+            camera_pos: [0.; 3],
+            _padding0: 0,
             dimensions: [0; 3],
             packed_resolution: 0,
             flags0: 0,
@@ -45,9 +50,9 @@ impl RayTracePushConstants {
             dt: 0.,
             depth_boost: 0.,
             brick_hit: [0; 3],
-            _padding0: 0,
-            voxel_hit: [0; 3],
             _padding1: 0,
+            voxel_hit: [0; 3],
+            _padding2: 0,
         }
     }
 
@@ -68,8 +73,8 @@ pub struct RenderContext {
     depth_test_image: cvk::Image,
     raytrace_pipeline: cvk::ComputePipeline,
     present_pipeline: cvk::RenderPipeline,
-    rtpc: RayTracePushConstants,
-    ppc: PresentPushConstants,
+    pub rtpc: RayTracePushConstants,
+    pub ppc: PresentPushConstants,
     pub egui: cvk::egui::EguiState,
 }
 
@@ -78,8 +83,12 @@ impl RenderContext {
         let device = gpu.device.clone();
         let queue = gpu.render_queue.clone();
 
-        let raytrace_shader = device.create_shader(include_str!("shaders/raytrace.wgsl"))?;
-        let present_shader = device.create_shader(include_str!("shaders/present.wgsl"))?;
+        let raytrace_shader = device
+            .create_shader(include_str!("shaders/raytrace.wgsl"))
+            .unwrap();
+        let present_shader = device
+            .create_shader(include_str!("shaders/present.wgsl"))
+            .unwrap();
 
         let raytrace_pipeline = device.create_compute_pipeline(&cvk::ComputePipelineInfo {
             label: Some("Raytrace Pipeline"),
@@ -102,7 +111,9 @@ impl RenderContext {
             ..Default::default()
         });
 
-        let rtpc = RayTracePushConstants::empty();
+        let mut rtpc = RayTracePushConstants::empty();
+        rtpc.dimensions = [64, 64, 64];
+        rtpc.set_resolution(window.inner_size().width, window.inner_size().height);
         let ppc = PresentPushConstants::empty();
 
         let swapchain = device.create_swapchain(
@@ -302,53 +313,53 @@ impl RenderContext {
 
         self.gpu.descriptors.write(&[
             cvk::DescriptorWrite::StorageImage {
-                binding: 2,
+                binding: 4,
                 image_view: self.present_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(0),
             },
             cvk::DescriptorWrite::StorageImage {
-                binding: 2,
+                binding: 4,
                 image_view: self.normal_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(1),
             },
             cvk::DescriptorWrite::StorageImage {
-                binding: 2,
+                binding: 4,
                 image_view: self.depth_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(2),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 3,
+                binding: 5,
                 image_view: self.present_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(0),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 3,
+                binding: 5,
                 image_view: self.normal_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(1),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 3,
+                binding: 5,
                 image_view: self.depth_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(2),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 4,
+                binding: 6,
                 sampler: &self.present_image.sampler(),
                 array_element: Some(0),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 4,
+                binding: 6,
                 sampler: &self.normal_image.sampler(),
                 array_element: Some(1),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 4,
+                binding: 6,
                 sampler: &self.depth_image.sampler(),
                 array_element: Some(2),
             },
@@ -373,6 +384,16 @@ impl RenderContext {
 
     pub fn update_delta_time(&mut self, dt: time::Duration) {
         self.rtpc.dt = dt.as_secs_f32();
+    }
+
+    pub fn update_camera(&mut self, camera: &Camera) {
+        let size = self.window.inner_size();
+        let matrix = camera.view_projection_matrix();
+        let inverse = matrix.try_inverse().unwrap_or(na::Matrix4::identity());
+        self.rtpc.camera = *matrix.as_ref();
+        self.rtpc.camera_inverse = *inverse.as_ref();
+        self.rtpc.camera_pos = *camera.position.coords.as_ref();
+        self.rtpc.set_resolution(size.width, size.height);
     }
 
     fn create_image_resources(

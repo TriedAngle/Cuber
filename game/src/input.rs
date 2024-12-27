@@ -80,7 +80,7 @@ impl Input {
             }
             DeviceEvent::MouseMotion { delta } => {
                 let (dx, dy) = *delta;
-                self.cursor_delta = na::Vector2::new(dx as f32, dy as f32);
+                self.cursor_delta = na::Vector2::new(dx as f32, -dy as f32);
             }
             DeviceEvent::MouseWheel { delta } => {
                 if self.scroll_cooldown > 0. {

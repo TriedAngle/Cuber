@@ -44,7 +44,7 @@ pub use ash::vk::{
     ShaderStageFlags, Viewport,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use naga::back::spv;
 
 pub struct Allocation {
@@ -128,13 +128,24 @@ impl ShaderFunction<'_> {
 }
 
 impl Device {
-    pub fn create_shader(&self, source: &str) -> Result<Shader> {
-        let module = naga::front::wgsl::parse_str(source)?;
+    pub fn create_shader(&self, source: &str) -> anyhow::Result<Shader> {
+        let module = match naga::front::wgsl::parse_str(source) {
+            Ok(m) => m,
+            Err(err) => {
+                let detailed_msg = err.emit_to_string(source);
+                anyhow::bail!("WGSL parse error:\n{}", detailed_msg);
+            }
+        };
 
         let flags = naga::valid::ValidationFlags::all();
-        let capabilities = naga::valid::Capabilities::all(); // why not
-
-        let info = naga::valid::Validator::new(flags, capabilities).validate(&module)?;
+        let capabilities = naga::valid::Capabilities::all();
+        let info = match naga::valid::Validator::new(flags, capabilities).validate(&module) {
+            Ok(info) => info,
+            Err(err) => {
+                let detailed_msg = err.emit_to_string(source);
+                anyhow::bail!("WGSL validation error:\n{}", detailed_msg)
+            }
+        };
 
         Ok(Shader {
             module,

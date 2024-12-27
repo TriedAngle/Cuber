@@ -72,7 +72,7 @@ impl Camera {
 
         let forward = self.rotation * -*na::Vector3::z_axis();
         let right = self.rotation * *na::Vector3::x_axis();
-        let up = self.rotation * *na::Vector3::y_axis();
+        let up = self.rotation * -*na::Vector3::y_axis();
 
         if input.pressing(KeyCode::KeyW) {
             self.position += forward * self.speed * dt;
@@ -143,10 +143,10 @@ impl Camera {
         let mut roll = 0.0;
 
         if input.pressing(KeyCode::KeyQ) {
-            roll += self.sensitivity * 1300.0 * dt;
+            roll -= self.sensitivity * 1300.0 * dt;
         }
         if input.pressing(KeyCode::KeyE) {
-            roll -= self.sensitivity * 1300.0 * dt;
+            roll += self.sensitivity * 1300.0 * dt;
         }
         roll
     }

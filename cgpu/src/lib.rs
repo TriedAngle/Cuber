@@ -70,21 +70,30 @@ impl GPUContext {
                     cvk::DescriptorType::StorageBuffer,
                     cvk::ShaderStageFlags::COMPUTE,
                 ),
-                cvk::DescriptorBinding::array(
+                cvk::DescriptorBinding::unique(
                     2,
+                    cvk::DescriptorType::StorageBuffer,
+                    cvk::ShaderStageFlags::COMPUTE,
+                ),
+                cvk::DescriptorBinding::unique(
+                    3,
+                    cvk::DescriptorType::StorageBuffer,
+                    cvk::ShaderStageFlags::COMPUTE,
+                ),
+                cvk::DescriptorBinding::array(
+                    4,
                     cvk::DescriptorType::StorageImage,
                     10,
                     cvk::ShaderStageFlags::COMPUTE,
                 ),
                 cvk::DescriptorBinding::array(
-                    3,
+                    5,
                     cvk::DescriptorType::SampledImage,
                     10,
                     cvk::ShaderStageFlags::FRAGMENT,
                 ),
                 cvk::DescriptorBinding::array(
-                    // Added new sampler binding
-                    4,
+                    6,
                     cvk::DescriptorType::Sampler,
                     10,
                     cvk::ShaderStageFlags::FRAGMENT,

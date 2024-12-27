@@ -1,6 +1,9 @@
+extern crate nalgebra as na;
+
 use std::{collections::HashMap, sync::Arc, time};
 
-use game::Input;
+use game::{Camera, Input};
+use na::AbstractRotation;
 use render::RenderContext;
 use winit::{
     dpi::PhysicalSize,
@@ -22,11 +25,23 @@ pub struct ClientState {
     windows: HashMap<WindowId, Arc<Window>>,
     renderes: HashMap<WindowId, RenderContext>,
     focused: Option<Arc<Window>>,
+    camera: Camera,
 }
 
 impl ClientState {
     pub fn new(el: &EventLoop<()>) -> Self {
         let gpu = cgpu::GPUContext::new().unwrap();
+
+        let camera = Camera::new(
+            na::Point3::new(0.0, 0.0, 0.0),
+            na::UnitQuaternion::identity(),
+            50.0,
+            0.002,
+            45.0,
+            16.0 / 9.0,
+            0.1,
+            100.0,
+        );
 
         Self {
             last_update: time::SystemTime::now(),
@@ -37,6 +52,7 @@ impl ClientState {
             windows: HashMap::new(),
             renderes: HashMap::new(),
             focused: None,
+            camera,
         }
     }
 
@@ -46,7 +62,9 @@ impl ClientState {
         };
 
         if let Some(renderer) = self.renderes.get_mut(&id) {
+            renderer.update_camera(&self.camera);
             renderer.render();
+            renderer.rtpc.dimensions = [64, 64, 64];
         }
 
         window.request_redraw();
@@ -102,7 +120,17 @@ impl ClientState {
         self.last_update = now;
         for (_id, renderer) in &mut self.renderes {
             renderer.update_delta_time(self.delta_time);
+            if self.input.pressed(KeyCode::KeyM) {
+                renderer.ppc.mode += 1;
+                if renderer.ppc.mode == 3 {
+                    renderer.ppc.mode = 0;
+                }
+            }
         }
+
+        let dt = self.delta_time.as_secs_f32();
+        self.camera.update_mouse(dt, &self.input);
+        self.camera.update_keyboard(dt, &self.input);
     }
 
     pub fn create_window(
