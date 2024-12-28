@@ -376,116 +376,170 @@ pub struct MaterialBrick8 {
     pub meta: u32,
     pub raw: [u32; 128], // 512 bytes = 128 u32s (8 bits per value)
 }
-//
-// impl MaterialBrick1 {
-//     pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
-//         let mut brick = Self { raw: [0; 16] };
-//         Self::pack_values(expanded, &mut brick.raw);
-//         brick
-//     }
-// }
-//
-// impl MaterialBrick2 {
-//     pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
-//         let mut brick = Self { raw: [0; 32] };
-//         Self::pack_values(expanded, &mut brick.raw);
-//         brick
-//     }
-// }
-//
-// impl MaterialBrick4 {
-//     pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
-//         let mut brick = Self { raw: [0; 64] };
-//         Self::pack_values(expanded, &mut brick.raw);
-//         brick
-//     }
-// }
-//
-// impl MaterialBrick8 {
-//     pub fn from_expanded_brick(expanded: &ExpandedBrick) -> Self {
-//         let mut brick = Self { raw: [0; 128] };
-//         Self::pack_values(expanded, &mut brick.raw);
-//         brick
-//     }
-// }
-//
-// // Common trait for shared functionality
-// trait MaterialBrickOps {
-//     const BITS_PER_VALUE: usize;
-//     const MASK: u32;
-//
-//     fn pack_values(expanded: &ExpandedBrick, raw: &mut [u32]) {
-//         for i in 0..512 {
-//             let value = expanded.raw[i] as u32;
-//             let values_per_u32 = 32 / Self::BITS_PER_VALUE;
-//             let word_index = i / values_per_u32;
-//             let shift = (i % values_per_u32) * Self::BITS_PER_VALUE;
-//
-//             raw[word_index] |= (value & Self::MASK) << shift;
-//         }
-//     }
-//
-//     fn get_value(raw: &[u32], x: u32, y: u32, z: u32) -> u8 {
-//         let index = (x + y * 8 + z * 64) as usize;
-//         let values_per_u32 = 32 / Self::BITS_PER_VALUE;
-//         let word_index = index / values_per_u32;
-//         let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
-//
-//         ((raw[word_index] >> shift) & Self::MASK) as u8
-//     }
-//
-//     fn set_value(raw: &mut [u32], x: u32, y: u32, z: u32, val: u8) {
-//         let index = (x + y * 8 + z * 64) as usize;
-//         let values_per_u32 = 32 / Self::BITS_PER_VALUE;
-//         let word_index = index / values_per_u32;
-//         let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
-//
-//         let mask = Self::MASK << shift;
-//         raw[word_index] = (raw[word_index] & !mask) | (((val as u32) & Self::MASK) << shift);
-//     }
-// }
-//
-// // Implement for each brick type
-// impl MaterialBrickOps for MaterialBrick1 {
-//     const BITS_PER_VALUE: usize = 1;
-//     const MASK: u32 = 0b1;
-// }
-//
-// impl MaterialBrickOps for MaterialBrick2 {
-//     const BITS_PER_VALUE: usize = 2;
-//     const MASK: u32 = 0b11;
-// }
-//
-// impl MaterialBrickOps for MaterialBrick4 {
-//     const BITS_PER_VALUE: usize = 4;
-//     const MASK: u32 = 0b1111;
-// }
-//
-// impl MaterialBrickOps for MaterialBrick8 {
-//     const BITS_PER_VALUE: usize = 8;
-//     const MASK: u32 = 0b11111111;
-// }
-//
-// // Implement common methods for each brick type
-// macro_rules! impl_material_brick_methods {
-//     ($type:ty) => {
-//         impl $type {
-//             pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
-//                 Self::get_value(&self.raw, x, y, z)
-//             }
-//
-//             pub fn set(&mut self, x: u32, y: u32, z: u32, val: u8) {
-//                 Self::set_value(&mut self.raw, x, y, z, val)
-//             }
-//         }
-//     };
-// }
-//
-// impl_material_brick_methods!(MaterialBrick1);
-// impl_material_brick_methods!(MaterialBrick2);
-// impl_material_brick_methods!(MaterialBrick4);
-// impl_material_brick_methods!(MaterialBrick8);
-//
+
+impl MaterialBrick1 {
+    pub fn empty() -> Self {
+        Self {
+            meta: Self::encode_size_only(Self::BITS_PER_VALUE),
+            raw: [0; 16],
+        }
+    }
+
+    pub fn from_expanded_brick(expanded: &ExpandedBrick, meta: u32) -> Self {
+        let mut brick = Self {
+            meta: Self::encode_meta(meta),
+            raw: [0; 16],
+        };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+impl MaterialBrick2 {
+    pub fn empty() -> Self {
+        Self {
+            meta: Self::encode_size_only(Self::BITS_PER_VALUE),
+            raw: [0; 32],
+        }
+    }
+    pub fn from_expanded_brick(expanded: &ExpandedBrick, meta: u32) -> Self {
+        let mut brick = Self {
+            meta: Self::encode_meta(meta),
+            raw: [0; 32],
+        };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+impl MaterialBrick4 {
+    pub fn empty() -> Self {
+        Self {
+            meta: Self::encode_size_only(Self::BITS_PER_VALUE),
+            raw: [0; 64],
+        }
+    }
+    pub fn from_expanded_brick(expanded: &ExpandedBrick, meta: u32) -> Self {
+        let mut brick = Self {
+            meta: Self::encode_meta(meta),
+            raw: [0; 64],
+        };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+impl MaterialBrick8 {
+    pub fn empty() -> Self {
+        Self {
+            meta: Self::encode_size_only(Self::BITS_PER_VALUE),
+            raw: [0; 128],
+        }
+    }
+    pub fn from_expanded_brick(expanded: &ExpandedBrick, meta: u32) -> Self {
+        let mut brick = Self {
+            meta: Self::encode_meta(meta),
+            raw: [0; 128],
+        };
+        Self::pack_values(expanded, &mut brick.raw);
+        brick
+    }
+}
+
+pub trait MaterialBrickOps {
+    const BITS_PER_VALUE: usize;
+    const MASK: u32;
+
+    fn encode_meta(meta_value: u32) -> u32 {
+        let meta_value = meta_value & 0x1FFF_FFFF;
+        let size_bits = ((Self::BITS_PER_VALUE - 1) as u32) << 29;
+        meta_value | size_bits
+    }
+
+    fn decode_meta(meta: u32) -> u32 {
+        meta & 0x1FFF_FFFF
+    }
+
+    fn decode_meta_size(meta: u32) -> usize {
+        ((meta >> 29) as usize) + 1
+    }
+
+    fn encode_size_only(bits_per_value: usize) -> u32 {
+        ((bits_per_value - 1) as u32) << 29
+    }
+
+    fn pack_values(expanded: &ExpandedBrick, raw: &mut [u32]) {
+        for i in 0..512 {
+            let value = expanded.raw[i] as u32;
+            let values_per_u32 = 32 / Self::BITS_PER_VALUE;
+            let word_index = i / values_per_u32;
+            let shift = (i % values_per_u32) * Self::BITS_PER_VALUE;
+
+            raw[word_index] |= (value & Self::MASK) << shift;
+        }
+    }
+
+    fn get_value(raw: &[u32], x: u32, y: u32, z: u32) -> u8 {
+        let index = (x + y * 8 + z * 64) as usize;
+        let values_per_u32 = 32 / Self::BITS_PER_VALUE;
+        let word_index = index / values_per_u32;
+        let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
+
+        ((raw[word_index] >> shift) & Self::MASK) as u8
+    }
+
+    fn set_value(raw: &mut [u32], x: u32, y: u32, z: u32, val: u8) {
+        let index = (x + y * 8 + z * 64) as usize;
+        let values_per_u32 = 32 / Self::BITS_PER_VALUE;
+        let word_index = index / values_per_u32;
+        let shift = (index % values_per_u32) * Self::BITS_PER_VALUE;
+
+        let mask = Self::MASK << shift;
+        raw[word_index] = (raw[word_index] & !mask) | (((val as u32) & Self::MASK) << shift);
+    }
+}
+
+// Implement for each brick type
+impl MaterialBrickOps for MaterialBrick1 {
+    const BITS_PER_VALUE: usize = 1;
+    const MASK: u32 = 0b1;
+}
+
+impl MaterialBrickOps for MaterialBrick2 {
+    const BITS_PER_VALUE: usize = 2;
+    const MASK: u32 = 0b11;
+}
+
+impl MaterialBrickOps for MaterialBrick4 {
+    const BITS_PER_VALUE: usize = 4;
+    const MASK: u32 = 0b1111;
+}
+
+impl MaterialBrickOps for MaterialBrick8 {
+    const BITS_PER_VALUE: usize = 8;
+    const MASK: u32 = 0b11111111;
+}
+
+// Implement common methods for each brick type
+macro_rules! impl_material_brick_methods {
+    ($type:ty) => {
+        impl $type {
+            pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
+                Self::get_value(&self.raw, x, y, z)
+            }
+
+            pub fn set(&mut self, x: u32, y: u32, z: u32, val: u8) {
+                Self::set_value(&mut self.raw, x, y, z, val)
+            }
+        }
+    };
+}
+
+impl_material_brick_methods!(MaterialBrick1);
+impl_material_brick_methods!(MaterialBrick2);
+impl_material_brick_methods!(MaterialBrick4);
+impl_material_brick_methods!(MaterialBrick8);
+
 #[derive(Debug)]
 pub enum MaterialBrick {
     Size1(MaterialBrick1),
@@ -493,35 +547,60 @@ pub enum MaterialBrick {
     Size4(MaterialBrick4),
     Size8(MaterialBrick8),
 }
-//
-// impl MaterialBrick {
-//     pub fn data(&self) -> &[u8] {
-//         match self {
-//             Self::Size1(b) => bytemuck::cast_slice(&b.raw),
-//             Self::Size2(b) => bytemuck::cast_slice(&b.raw),
-//             Self::Size4(b) => bytemuck::cast_slice(&b.raw),
-//             Self::Size8(b) => bytemuck::cast_slice(&b.raw),
-//         }
-//     }
-//
-//     pub fn element_size(&self) -> u64 {
-//         match self {
-//             Self::Size1(_) => 1,
-//             Self::Size2(_) => 2,
-//             Self::Size4(_) => 4,
-//             Self::Size8(_) => 8,
-//         }
-//     }
-//
-//     pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
-//         match self {
-//             Self::Size1(b) => b.get(x, y, z),
-//             Self::Size2(b) => b.get(x, y, z),
-//             Self::Size4(b) => b.get(x, y, z),
-//             Self::Size8(b) => b.get(x, y, z),
-//         }
-//     }
-// }
+
+impl MaterialBrick {
+    pub fn data(&self) -> &[u8] {
+        match self {
+            Self::Size1(b) => bytemuck::cast_slice(&b.raw),
+            Self::Size2(b) => bytemuck::cast_slice(&b.raw),
+            Self::Size4(b) => bytemuck::cast_slice(&b.raw),
+            Self::Size8(b) => bytemuck::cast_slice(&b.raw),
+        }
+    }
+
+    pub fn element_size(&self) -> u64 {
+        match self {
+            Self::Size1(_) => 1,
+            Self::Size2(_) => 2,
+            Self::Size4(_) => 4,
+            Self::Size8(_) => 8,
+        }
+    }
+
+    pub fn get(&self, x: u32, y: u32, z: u32) -> u8 {
+        match self {
+            Self::Size1(b) => b.get(x, y, z),
+            Self::Size2(b) => b.get(x, y, z),
+            Self::Size4(b) => b.get(x, y, z),
+            Self::Size8(b) => b.get(x, y, z),
+        }
+    }
+    pub fn set_meta_value(&mut self, meta_value: u32) {
+        match self {
+            Self::Size1(b) => b.meta = MaterialBrick1::encode_meta(meta_value),
+            Self::Size2(b) => b.meta = MaterialBrick2::encode_meta(meta_value),
+            Self::Size4(b) => b.meta = MaterialBrick4::encode_meta(meta_value),
+            Self::Size8(b) => b.meta = MaterialBrick8::encode_meta(meta_value),
+        }
+    }
+    pub fn meta_value(&self) -> u32 {
+        match self {
+            Self::Size1(b) => MaterialBrick1::decode_meta(b.meta),
+            Self::Size2(b) => MaterialBrick2::decode_meta(b.meta),
+            Self::Size4(b) => MaterialBrick4::decode_meta(b.meta),
+            Self::Size8(b) => MaterialBrick8::decode_meta(b.meta),
+        }
+    }
+
+    pub fn size_from_meta(&self) -> usize {
+        match self {
+            Self::Size1(b) => MaterialBrick1::decode_meta_size(b.meta),
+            Self::Size2(b) => MaterialBrick2::decode_meta_size(b.meta),
+            Self::Size4(b) => MaterialBrick4::decode_meta_size(b.meta),
+            Self::Size8(b) => MaterialBrick8::decode_meta_size(b.meta),
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -606,89 +685,87 @@ impl ExpandedBrick {
             _ => 8,
         }
     }
-}
 
-// impl ExpandedBrick {
-//     pub fn compress(
-//         &self,
-//         material_mapping: &ExpandedMaterialMapping,
-//     ) -> (MaterialBrick, Vec<MaterialId>) {
-//         // Get unique values and sort them
-//         let mut unique_values: Vec<u8> = self.raw.iter().copied().collect();
-//         unique_values.sort_unstable();
-//         unique_values.dedup();
-//
-//         let mut value_map = [0u8; 256];
-//         let mut material_ids = vec![MaterialId(0)]; // Always start with MaterialId(0)
-//         let mut next_value = 1u8; // Start from 1 for non-zero values
-//
-//         for &val in unique_values.iter() {
-//             if val != 0 {
-//                 // Skip 0 as it must map to 0
-//                 value_map[val as usize] = next_value;
-//                 material_ids.push(material_mapping.material(val));
-//                 next_value += 1;
-//             }
-//         }
-//
-//         let unique_count = next_value - 1;
-//
-//         let material_brick = match unique_count {
-//             0 => MaterialBrick::Size1(MaterialBrick1 { raw: [0; 16] }),
-//             1..=1 => {
-//                 let mut brick = MaterialBrick1 { raw: [0; 16] };
-//                 for x in 0..8 {
-//                     for y in 0..8 {
-//                         for z in 0..8 {
-//                             let old_val = self.get(x, y, z);
-//                             let new_val = value_map[old_val as usize];
-//                             brick.set(x, y, z, new_val);
-//                         }
-//                     }
-//                 }
-//                 MaterialBrick::Size1(brick)
-//             }
-//             2..=3 => {
-//                 let mut brick = MaterialBrick2 { raw: [0; 32] };
-//                 for x in 0..8 {
-//                     for y in 0..8 {
-//                         for z in 0..8 {
-//                             let old_val = self.get(x, y, z);
-//                             let new_val = value_map[old_val as usize];
-//                             brick.set(x, y, z, new_val);
-//                         }
-//                     }
-//                 }
-//                 MaterialBrick::Size2(brick)
-//             }
-//             4..=15 => {
-//                 let mut brick = MaterialBrick4 { raw: [0; 64] };
-//                 for x in 0..8 {
-//                     for y in 0..8 {
-//                         for z in 0..8 {
-//                             let old_val = self.get(x, y, z);
-//                             let new_val = value_map[old_val as usize];
-//                             brick.set(x, y, z, new_val);
-//                         }
-//                     }
-//                 }
-//                 MaterialBrick::Size4(brick)
-//             }
-//             _ => {
-//                 let mut brick = MaterialBrick8 { raw: [0; 128] };
-//                 for x in 0..8 {
-//                     for y in 0..8 {
-//                         for z in 0..8 {
-//                             let old_val = self.get(x, y, z);
-//                             let new_val = value_map[old_val as usize];
-//                             brick.set(x, y, z, new_val);
-//                         }
-//                     }
-//                 }
-//                 MaterialBrick::Size8(brick)
-//             }
-//         };
-//
-//         (material_brick, material_ids)
-//     }
-// }
+    pub fn compress(
+        &self,
+        material_mapping: &ExpandedMaterialMapping,
+    ) -> (MaterialBrick, Vec<MaterialId>) {
+        // Get unique values and sort them
+        let mut unique_values: Vec<u8> = self.raw.iter().copied().collect();
+        unique_values.sort_unstable();
+        unique_values.dedup();
+
+        let mut value_map = [0u8; 256];
+        let mut material_ids = vec![MaterialId(0)]; // Always start with MaterialId(0)
+        let mut next_value = 1u8; // Start from 1 for non-zero values
+
+        for &val in unique_values.iter() {
+            if val != 0 {
+                // Skip 0 as it must map to 0
+                value_map[val as usize] = next_value;
+                material_ids.push(material_mapping.material(val));
+                next_value += 1;
+            }
+        }
+
+        let unique_count = next_value - 1;
+
+        let material_brick = match unique_count {
+            0 => MaterialBrick::Size1(MaterialBrick1::empty()),
+            1..=1 => {
+                let mut brick = MaterialBrick1::empty();
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size1(brick)
+            }
+            2..=3 => {
+                let mut brick = MaterialBrick2::empty();
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size2(brick)
+            }
+            4..=15 => {
+                let mut brick = MaterialBrick4::empty();
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size4(brick)
+            }
+            _ => {
+                let mut brick = MaterialBrick8::empty();
+                for x in 0..8 {
+                    for y in 0..8 {
+                        for z in 0..8 {
+                            let old_val = self.get(x, y, z);
+                            let new_val = value_map[old_val as usize];
+                            brick.set(x, y, z, new_val);
+                        }
+                    }
+                }
+                MaterialBrick::Size8(brick)
+            }
+        };
+
+        (material_brick, material_ids)
+    }
+}

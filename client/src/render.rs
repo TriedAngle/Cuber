@@ -3,7 +3,7 @@ use std::{mem, sync::Arc, time};
 use anyhow::Result;
 use cvk;
 use game::Camera;
-use winit::window::Window;
+use winit::{event::WindowEvent, window::Window};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -70,6 +70,7 @@ pub struct RenderContext {
     present_image: cvk::Image,
     normal_image: cvk::Image,
     depth_image: cvk::Image,
+    steps_image: cvk::Image,
     depth_test_image: cvk::Image,
     raytrace_pipeline: cvk::ComputePipeline,
     present_pipeline: cvk::RenderPipeline,
@@ -148,7 +149,7 @@ impl RenderContext {
             style,
         );
 
-        let (present_image, normal_image, depth_image, depth_test_image) =
+        let (present_image, normal_image, depth_image, steps_image, depth_test_image) =
             Self::create_image_resources(&device, &swapchain);
 
         let mut new = Self {
@@ -160,6 +161,7 @@ impl RenderContext {
             present_image,
             normal_image,
             depth_image,
+            steps_image,
             depth_test_image,
             raytrace_pipeline,
             present_pipeline,
@@ -253,23 +255,6 @@ impl RenderContext {
         recorder.draw(0..6, 0..1);
         recorder.end_rendering();
 
-        self.egui.begin_frame(&self.window);
-        egui::Window::new("Debug")
-            .resizable(true)
-            .show(&self.egui.ctx, |ui| {
-                ui.label("Hello from egui!");
-            });
-
-        egui::Window::new("egui stuff")
-            .resizable(true)
-            .show(&self.egui.ctx, |ui| {
-                ui.label("This is window 1");
-                if ui.button("Click me!").clicked() {
-                    println!("Button clicked!");
-                }
-                ui.text_edit_multiline(&mut String::new());
-            });
-
         let output = self.egui.end_frame(&self.window);
 
         self.egui.render(&mut recorder, output, &self.queue, &frame);
@@ -330,6 +315,12 @@ impl RenderContext {
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(2),
             },
+            cvk::DescriptorWrite::StorageImage {
+                binding: 4,
+                image_view: self.steps_image.view,
+                image_layout: cvk::ImageLayout::GENERAL,
+                array_element: Some(3),
+            },
             cvk::DescriptorWrite::SampledImage {
                 binding: 5,
                 image_view: self.present_image.view,
@@ -348,6 +339,12 @@ impl RenderContext {
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(2),
             },
+            cvk::DescriptorWrite::SampledImage {
+                binding: 5,
+                image_view: self.steps_image.view,
+                image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                array_element: Some(3),
+            },
             cvk::DescriptorWrite::Sampler {
                 binding: 6,
                 sampler: &self.present_image.sampler(),
@@ -363,6 +360,11 @@ impl RenderContext {
                 sampler: &self.depth_image.sampler(),
                 array_element: Some(2),
             },
+            cvk::DescriptorWrite::Sampler {
+                binding: 6,
+                sampler: &self.steps_image.sampler(),
+                array_element: Some(3),
+            },
         ]);
     }
 
@@ -372,11 +374,12 @@ impl RenderContext {
         self.egui.size = size;
 
         self.rtpc.set_resolution(size.width, size.height);
-        let (present, normal, depth, depth_test) =
+        let (present, normal, depth, steps, depth_test) =
             Self::create_image_resources(&self.device, &self.swapchain);
         self.present_image = present;
         self.normal_image = normal;
         self.depth_image = depth;
+        self.steps_image = steps;
         self.depth_test_image = depth_test;
 
         Ok(())
@@ -399,7 +402,7 @@ impl RenderContext {
     fn create_image_resources(
         device: &cvk::Device,
         sc: &cvk::Swapchain,
-    ) -> (cvk::Image, cvk::Image, cvk::Image, cvk::Image) {
+    ) -> (cvk::Image, cvk::Image, cvk::Image, cvk::Image, cvk::Image) {
         let (width, height) = (
             sc.capabilities.current_extent.width,
             sc.capabilities.current_extent.height,
@@ -407,7 +410,7 @@ impl RenderContext {
 
         let present_image = device.create_image(&cvk::ImageInfo {
             label: Some("Present Image"),
-            format: sc.format.format,
+            format: cvk::Format::R8G8B8A8_UNORM,
             width,
             height,
             usage: cvk::ImageUsageFlags::STORAGE | cvk::ImageUsageFlags::SAMPLED,
@@ -426,7 +429,7 @@ impl RenderContext {
 
         let normal_image = device.create_image(&cvk::ImageInfo {
             label: Some("Normal Image"),
-            format: sc.format.format,
+            format: cvk::Format::R8G8B8A8_UNORM,
             width,
             height,
             usage: cvk::ImageUsageFlags::STORAGE | cvk::ImageUsageFlags::SAMPLED,
@@ -462,6 +465,25 @@ impl RenderContext {
             ..Default::default()
         });
 
+        let steps_image = device.create_image(&cvk::ImageInfo {
+            label: Some("Steps Image"),
+            format: cvk::Format::R32_SFLOAT,
+            width,
+            height,
+            usage: cvk::ImageUsageFlags::STORAGE | cvk::ImageUsageFlags::SAMPLED,
+            view: cvk::ImageViewInfo {
+                label: Some("Steps Image View"),
+                aspect: cvk::ImageAspectFlags::COLOR,
+                ..Default::default()
+            },
+            sampler: Some(cvk::SamplerInfo {
+                label: Some("Steps Image Sampler"),
+                max_lod: 100.,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
         let depth_test_image = device.create_image(&cvk::ImageInfo {
             label: Some("Depth Test Image"),
             format: cvk::Format::D32_SFLOAT,
@@ -482,6 +504,16 @@ impl RenderContext {
             ..Default::default()
         });
 
-        (present_image, normal_image, depth_image, depth_test_image)
+        (
+            present_image,
+            normal_image,
+            depth_image,
+            steps_image,
+            depth_test_image,
+        )
+    }
+
+    pub fn egui_handle_window_events(&mut self, event: &WindowEvent) {
+        self.egui.handle_window_events(&self.window, event);
     }
 }

@@ -120,12 +120,19 @@ fn get_brick_handle(pos: vec3<i32>) -> BrickHandle {
 }
 
 fn step_mask(side_dist: vec3<f32>) -> vec3<f32> {
-    let is_min = (side_dist <= side_dist.yzx) && (side_dist <= side_dist.zxy);
-    return select(
-        vec3<f32>(is_min),
-        vec3<f32>(0.0, 0.0, 1.0),
-        !any(is_min)
-    );
+    var mask: vec3<bool>;
+    let b1 = side_dist < side_dist.yzx;
+    let b2 = side_dist <= side_dist.zxy;
+
+    mask.z = b1.z && b2.z;
+    mask.x = b1.x && b2.x;
+    mask.y = b1.y && b2.y;
+
+    if !any(mask) {
+        mask.z = true;
+    }
+
+    return vec3<f32>(f32(mask.x), f32(mask.y), f32(mask.z));
 }
 
 fn intersect_box(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> {
@@ -140,6 +147,9 @@ fn intersect_box(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, 
 
     return vec2<f32>(t_near, t_far);
 }
+
+
+var<private> ray_steps: u32 = 0;
 
 fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     let world_min = vec3<f32>(0.0);
@@ -160,6 +170,7 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     var mask = step_mask(side_dist);
 
     for (var steps = 0u; steps < MAX_RAY_STEPS; steps++) {
+        ray_steps = ray_steps + 1;
         let brick_pos = vec3<i32>(floor(map_pos));
         // let brick_handle = get_brick_handle(brick_pos);
         //
@@ -222,31 +233,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let hit = traverse_brickmap(ray_pos, ray_dir);
 
-    let depth = select(
-        1.0,
-        clip_pos.z / clip_pos.w,
-        hit.hit
-    );
-
     let color = hit.color;
 
-    let depth_boosted = pow(depth, pc.depth_boost);
-    let depth_color = vec4<f32>(depth_boosted, depth_boosted, depth_boosted, 1.0);
+    let depth = calculate_depth(hit, ray_pos, ray_dir);
+    let depth_color = vec4<f32>(depth, depth, depth, 1.0);
 
-    let normal = -sign(ray_dir) * hit.mask;
-    let normal_color = select(
-        vec4<f32>(0.0, 0.0, 0.0, 1.0),
-        vec4<f32>(select(
-            abs(normal),
-            vec3<f32>(1.0) - abs(normal),
-            -sign(ray_dir) * hit.mask < vec3<f32>(0.0)
-        ), 1.0),
-        hit.hit,
-    );
+    let normal = calculate_normal(hit.mask, ray_dir);
+    let normal_color = vec4<f32>(normal, 1.0);
 
+    let intensity = calculate_steps_intensity();
+    let intensity_color = vec4<f32>(intensity, intensity, intensity, 1.0);
+    
     textureStore(images[0], vec2<i32>(global_id.xy), color);
-    textureStore(images[1], vec2<i32>(global_id.xy), depth_color);
-    textureStore(images[2], vec2<i32>(global_id.xy), normal_color);
+    textureStore(images[1], vec2<i32>(global_id.xy), normal_color);
+    textureStore(images[2], vec2<i32>(global_id.xy), depth_color);
+    textureStore(images[3], vec2<i32>(global_id.xy), intensity_color);
 }
 
 fn sd_sphere(p: vec3<f32>, d: f32) -> f32 {
@@ -263,4 +264,57 @@ fn get_sdf_voxel(c: vec3<i32>) -> bool {
     let d = max(-sd_sphere(p, 7.5), sd_box(p, vec3<f32>(6.0)));
 
     return d < 0.0;
+}
+
+fn calculate_normal(mask: vec3<f32>, ray_dir: vec3<f32>) -> vec3<f32> {
+    var normal: vec3<f32>;
+
+    let ray_sign = sign(ray_dir);
+    
+    if (mask.x > 0.0) {
+        normal = select(
+            vec3<f32>(1.0, 0.0, 0.0),  // positive x: red
+            vec3<f32>(0.0, 1.0, 1.0),  // negative x: cyan
+            ray_sign.x > 0.0
+        );
+    } else if (mask.y > 0.0) {
+        normal = select(
+            vec3<f32>(0.0, 1.0, 0.0),  // positive y: green
+            vec3<f32>(1.0, 0.0, 1.0),  // negative y: magenta
+            ray_sign.y > 0.0
+        );
+    } else if (mask.z > 0.0) {
+        normal = select(
+            vec3<f32>(0.0, 0.0, 1.0),  // positive z: blue
+            vec3<f32>(1.0, 1.0, 0.0),  // negative z: yellow
+            ray_sign.z > 0.0
+        );
+    }
+    
+    return normal;
+}
+
+
+fn calculate_depth(hit: Hit, ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> f32 {
+    if (!hit.hit) {
+        return 1.0;
+    }
+    
+    let hit_distance = length(hit.pos - ray_pos);
+    
+    let max_distance = length(vec3<f32>(pc.dimensions));
+    let normalized_depth = saturate(hit_distance / max_distance);
+    
+    return normalized_depth;
+}
+
+fn calculate_steps_intensity() -> f32 {
+    // MAX_RAY_STEPS * 8 would be the theoretical maximum for one additional level
+    // slightly lower normalization factor to make the visualization more visible
+    let max_expected_steps = MAX_RAY_STEPS * 6u;
+    
+    let normalized = f32(ray_steps) / f32(max_expected_steps);
+
+    // Using sqrt makes small step counts more distinguishable
+    return sqrt(saturate(normalized));
 }

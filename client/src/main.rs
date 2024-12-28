@@ -1,3 +1,5 @@
+use std::time;
+
 use client::ClientState;
 use winit::{
     application::ApplicationHandler,
@@ -30,8 +32,7 @@ impl ApplicationHandler for Application {
             StartCause::Poll
             | StartCause::WaitCancelled { .. }
             | StartCause::ResumeTimeReached { .. } => {
-                self.state.update_time();
-                self.state.reset_deltas();
+                self.state.fixed_tick();
             }
             _ => {}
         }
@@ -70,7 +71,7 @@ impl ApplicationHandler for Application {
             }
             WindowEvent::RedrawRequested => {
                 log::trace!("Redraw Requested Window: {:?}", window_id);
-                self.state.render(window_id);
+                self.state.fixed_render_tick(window_id);
             }
             WindowEvent::Resized(size) => {
                 log::debug!("Resize Window: {:?}", window_id);
