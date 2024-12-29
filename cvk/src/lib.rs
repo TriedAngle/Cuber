@@ -6,6 +6,7 @@ mod buffer;
 mod command;
 mod descriptor;
 mod device;
+mod freelist;
 mod image;
 mod instance;
 mod pipeline;
@@ -25,6 +26,7 @@ pub use instance::Instance;
 pub use buffer::{Buffer, BufferInfo};
 pub use command::{CommandBuffer, CommandPools, CommandRecorder, ThreadCommandPool};
 pub use descriptor::*;
+pub use freelist::GPUFreeList;
 pub use image::{
     CustomImageViewInfo, Image, ImageDetails, ImageInfo, ImageTransition, ImageViewInfo, Sampler,
     SamplerInfo,
@@ -44,7 +46,7 @@ pub use ash::vk::{
     ShaderStageFlags, Viewport,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use naga::back::spv;
 
 pub struct Allocation {
