@@ -1,6 +1,10 @@
+extern crate nalgebra as na;
 use std::sync::Arc;
 
 use anyhow::Result;
+
+mod brickmap;
+pub use brickmap::GPUBrickMap;
 
 pub struct GPUContext {
     pub compute_queue: Arc<cvk::Queue>,

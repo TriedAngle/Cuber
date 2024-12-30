@@ -105,7 +105,7 @@ fn brick_handle_get_empty_value(brick_handle: BrickHandle) -> u32 {
 
 fn brick_handle_index(pos: vec3<i32>) -> u32 {
     return u32(
-        pos.x + pos.y * pc.dimensions.x + pos.z * pc.dimensions.x * pc.dimensions.y
+        pos.x + (pos.y * pc.dimensions.x) + (pos.z * pc.dimensions.x * pc.dimensions.y)
     );
 }
 
@@ -154,15 +154,18 @@ var<private> ray_steps: u32 = 0;
 fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     let world_min = vec3<f32>(0.0);
     let world_max = vec3<f32>(pc.dimensions);
-    // let bounds = intersect_box(ray_pos, ray_dir, world_min, world_max);
-    //
-    // if bounds.x > bounds.y || bounds.y < 0.0 {
-    //     return new_empty_hit();
-    // }
-    //
-    // var current_pos = ray_pos + ray_dir * max(bounds.x, 0.0);
+    let bounds = intersect_box(ray_pos, ray_dir, world_min, world_max);
+
+    if bounds.x > bounds.y || bounds.y < 0.0 {
+        return new_empty_hit();
+    }
 
     var current_pos = ray_pos;
+    if bounds.x > 0.0 {
+        current_pos = ray_pos + ray_dir * bounds.x;
+    }
+
+    // var current_pos = ray_pos;
     var map_pos = floor(current_pos);
     let ray_sign = sign(ray_dir);
     let delta_dist = 1.0 / ray_dir;
@@ -172,24 +175,24 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     for (var steps = 0u; steps < MAX_RAY_STEPS; steps++) {
         ray_steps = ray_steps + 1;
         let brick_pos = vec3<i32>(floor(map_pos));
-        // let brick_handle = get_brick_handle(brick_pos);
-        //
-        // let is_data = brick_handle_is_empty(brick_handle);
-        // let is_lod = brick_handle_is_lod(brick_handle);
-        //
-        let sdf_hit = get_sdf_voxel(brick_pos);
-        if sdf_hit {
-            return new_hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, mask);
+        let brick_handle = get_brick_handle(brick_pos);
+
+        let is_data = brick_handle_is_data(brick_handle);
+        let is_lod = brick_handle_is_lod(brick_handle);
+
+        // let sdf_hit = get_sdf_voxel(brick_pos);
+        // if sdf_hit {
+            // return new_hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, mask);
+        // }
+
+        if is_data {
+            let trace_brick_offset = brick_handle_get_data(brick_handle);
+
+            return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, true, mask);
+        } else if is_lod {
+        } else {
         }
 
-        // if is_data {
-        //     let trace_brick_offset = brick_handle_get_data(brick_handle);
-        //
-        //     return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, mask);
-        // } else if is_lod {
-        // } else {
-        // }
-        //
         mask = step_mask(side_dist);
 
         let t = min(side_dist.x, min(side_dist.y, side_dist.z));
@@ -198,9 +201,9 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
         map_pos = map_pos + (mask * ray_sign);
         side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
 
-        // if any(map_pos >= world_max) || any(map_pos < world_min) {
-        //     break;
-        // }
+        if any(map_pos >= world_max) || any(map_pos < world_min) {
+            break;
+        }
     }
 
     return new_empty_hit();

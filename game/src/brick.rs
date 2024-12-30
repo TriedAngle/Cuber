@@ -1,11 +1,7 @@
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use rand::Rng;
 
-use crate::{
-    material::{ExpandedMaterialMapping, MaterialId},
-    palette::PaletteId,
-    DenseBuffer,
-};
+use crate::material::{ExpandedMaterialMapping, MaterialId};
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -101,7 +97,7 @@ pub struct BrickMap {
     size: na::Vector3<u32>,
     handles: RwLock<Vec<BrickHandle>>,
     bricks: RwLock<Vec<TraceBrick>>,
-    material_bricks: DenseBuffer,
+    freelist: Mutex<Vec<u32>>,
 }
 
 impl BrickMap {
@@ -109,13 +105,13 @@ impl BrickMap {
         let volume = size.x * size.y * size.z;
         let handles = RwLock::new(vec![BrickHandle::EMPTY; volume as usize]);
         let bricks = RwLock::new(vec![]);
-        let material_bricks = DenseBuffer::new(512 << 20);
+        let freelist = Mutex::new(Vec::new());
 
         Self {
             size,
             handles,
             bricks,
-            material_bricks,
+            freelist,
         }
     }
 
@@ -136,10 +132,26 @@ impl BrickMap {
         handles[id] = handle;
     }
 
-    pub fn set_empty(&self, at: na::Point3<u32>) {
+    pub fn set_empty(&self, at: na::Point3<u32>) -> BrickHandle {
         let id = self.index(at);
         let mut handles = self.handles.write();
-        handles[id] = BrickHandle::empty();
+        let handle = handles[id];
+        self.deallocate_brick(handle);
+        let new_handle = BrickHandle::empty();
+        handles[id] = new_handle;
+        new_handle
+    }
+
+    pub fn set_lod(&self, at: na::Point3<u32>, lod: MaterialId) -> BrickHandle {
+        let id = self.index(at);
+        let mut handles = self.handles.write();
+        let handle = handles[id];
+        self.deallocate_brick(handle);
+        let mut new_handle = BrickHandle::empty();
+        new_handle.set_lod(true);
+        new_handle.set_empty_value(lod.0);
+        handles[id] = new_handle;
+        new_handle
     }
 
     pub fn is_empty(&self, at: na::Point3<u32>) -> bool {
@@ -207,28 +219,45 @@ impl BrickMap {
         self.size
     }
 
-    pub fn brick_push(&self, brick: TraceBrick) -> BrickHandle {
-        let offset = self.bricks.read().len();
+    pub fn set_brick(&self, brick: TraceBrick, at: na::Point3<u32>) -> (BrickHandle, bool) {
         let mut bricks = self.bricks.write();
+        let old_handle = self.get_handle(at);
+        if let Some(_old_brick) = self.get_brick(old_handle) {
+            let offset = old_handle.get_data_value();
+            bricks[offset as usize] = brick;
+            return (old_handle, false);
+        }
+
+        let mut freelist = self.freelist.lock();
+        if let Some(offset) = freelist.pop() {
+            bricks[offset as usize] = brick;
+            let handle = BrickHandle::new_data(offset);
+            self.set_handle(handle, at);
+            return (handle, false);
+        }
+
+        let offset = bricks.len() as u32;
         bricks.push(brick);
-        BrickHandle(offset as u32)
+        let handle = BrickHandle::new_data(offset as u32);
+        self.set_handle(handle, at);
+        (handle, true)
     }
 
-    pub fn get_or_push_brick(&self, brick: TraceBrick, at: na::Point3<u32>) -> BrickHandle {
-        let mut bricks = self.bricks.write();
+    pub fn deallocate_brick(&self, handle: BrickHandle) -> bool {
+        if !handle.is_data() {
+            return false;
+        }
 
-        let handle = BrickHandle::new_data(bricks.len() as u32);
-        bricks.push(brick);
-        self.set_handle(handle, at);
-        handle
+        let offset = handle.get_data_value() as usize;
+
+        let mut freelist = self.freelist.lock();
+        freelist.push(offset as u32);
+
+        true
     }
 
     pub fn volume(&self) -> u32 {
         self.size.x * self.size.y * self.size.z
-    }
-
-    pub fn material_bricks(&self) -> &DenseBuffer {
-        &self.material_bricks
     }
 
     // pub fn edit_brick_no_resize(
@@ -346,6 +375,22 @@ impl TraceBrick {
 
     pub fn set_brick_offset(&mut self, offset: u32) {
         self.brick = offset;
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialBrickMeta {
+    pub meta: u32,
+}
+
+impl MaterialBrickMeta {
+    pub fn decode_meta(&self) -> u32 {
+        self.meta & 0x1FFF_FFFF
+    }
+
+    pub fn decode_meta_size(&self) -> usize {
+        ((self.meta >> 29) as usize) + 1
     }
 }
 
@@ -558,6 +603,12 @@ impl MaterialBrick {
         }
     }
 
+    pub fn size(&self) -> usize {
+        let element_size = self.element_size() as usize;
+        let size = element_size * 512 + std::mem::size_of::<u32>();
+        size
+    }
+
     pub fn element_size(&self) -> u64 {
         match self {
             Self::Size1(_) => 1,
@@ -629,6 +680,25 @@ impl ExpandedBrick {
         new
     }
 
+    fn encode_meta(&mut self, meta_value: u32) {
+        let bits_per_element = Self::get_required_bits(&self);
+        let meta_value = meta_value & 0x1FFF_FFFF;
+        let size_bits = ((bits_per_element - 1) as u32) << 29;
+        self.meta = meta_value | size_bits;
+    }
+
+    fn decode_meta(&self) -> u32 {
+        self.meta & 0x1FFF_FFFF
+    }
+
+    fn decode_meta_size(&self) -> usize {
+        ((self.meta >> 29) as usize) + 1
+    }
+
+    fn encode_size_only(bits_per_value: usize) -> u32 {
+        ((bits_per_value - 1) as u32) << 29
+    }
+
     pub fn is_empty(&self) -> bool {
         self.raw == Self::EMPTY.raw
     }
@@ -690,7 +760,6 @@ impl ExpandedBrick {
         &self,
         material_mapping: &ExpandedMaterialMapping,
     ) -> (MaterialBrick, Vec<MaterialId>) {
-        // Get unique values and sort them
         let mut unique_values: Vec<u8> = self.raw.iter().copied().collect();
         unique_values.sort_unstable();
         unique_values.dedup();
@@ -711,7 +780,11 @@ impl ExpandedBrick {
         let unique_count = next_value - 1;
 
         let material_brick = match unique_count {
-            0 => MaterialBrick::Size1(MaterialBrick1::empty()),
+            0 => {
+                let mut brick = MaterialBrick1::empty();
+                brick.meta = self.meta;
+                MaterialBrick::Size1(brick)
+            }
             1..=1 => {
                 let mut brick = MaterialBrick1::empty();
                 for x in 0..8 {
@@ -723,6 +796,7 @@ impl ExpandedBrick {
                         }
                     }
                 }
+                brick.meta = self.meta;
                 MaterialBrick::Size1(brick)
             }
             2..=3 => {
@@ -736,6 +810,8 @@ impl ExpandedBrick {
                         }
                     }
                 }
+
+                brick.meta = self.meta;
                 MaterialBrick::Size2(brick)
             }
             4..=15 => {
@@ -749,6 +825,7 @@ impl ExpandedBrick {
                         }
                     }
                 }
+                brick.meta = self.meta;
                 MaterialBrick::Size4(brick)
             }
             _ => {
@@ -762,6 +839,7 @@ impl ExpandedBrick {
                         }
                     }
                 }
+                brick.meta = self.meta;
                 MaterialBrick::Size8(brick)
             }
         };

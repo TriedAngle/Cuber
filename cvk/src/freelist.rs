@@ -8,7 +8,7 @@ use std::{
 };
 
 use ash::vk;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 
 use crate::{Buffer, BufferInfo, Device, Queue};
 
@@ -18,11 +18,13 @@ pub struct GPUFreeList {
     capacity: AtomicU64,
     free: RwLock<BTreeMap<u64, Vec<u64>>>,
     sharing: vk::SharingMode,
-    lock: Mutex<()>,
     label: Option<String>,
     device: Arc<Device>,
     queue: Arc<Queue>,
 }
+
+unsafe impl Send for GPUFreeList {}
+unsafe impl Sync for GPUFreeList {}
 
 impl GPUFreeList {
     pub fn new(
@@ -37,10 +39,9 @@ impl GPUFreeList {
         Self {
             buffer: Cell::new(buffer),
             offset: AtomicU64::new(0),
-            capacity: AtomicU64::new(0),
+            capacity: AtomicU64::new(capacity),
             free: RwLock::new(BTreeMap::new()),
             sharing,
-            lock: Mutex::new(()),
             label,
             device,
             queue,
@@ -161,7 +162,7 @@ impl GPUFreeList {
         let offset = self.offset.fetch_add(size, Ordering::SeqCst);
         let capacity = self.capacity.load(Ordering::Acquire);
 
-        if offset + size <= capacity {
+        if offset + size < capacity {
             Some(offset)
         } else {
             self.offset.fetch_sub(size, Ordering::SeqCst);
@@ -220,18 +221,20 @@ impl GPUFreeList {
         &self,
         data: &T,
         resize: F,
-    ) -> (Buffer, u64) {
+    ) -> (Buffer, u64, u64) {
         let offset = self.allocate::<T, _>(resize).unwrap();
-        self.write(offset, data)
+        let (buffer, submit) = self.write(offset, data);
+        (buffer, submit, offset)
     }
 
     pub fn allocate_and_write_slice<F: FnOnce(Buffer, &Buffer, u64)>(
         &self,
         data: &[u8],
         resize: F,
-    ) -> (Buffer, u64) {
+    ) -> (Buffer, u64, u64) {
         let offset = self.allocate_size(data.len() as u64, resize).unwrap();
-        self.write_slice(offset, data)
+        let (buffer, submit) = self.write_slice(offset, data);
+        (buffer, submit, offset)
     }
 
     pub fn find_free_block(&self, size: u64) -> Option<u64> {
@@ -242,6 +245,11 @@ impl GPUFreeList {
             }
         }
         None
+    }
+
+    pub fn clear(&self) {
+        self.offset.store(0, Ordering::SeqCst);
+        self.free.write().clear();
     }
 
     pub fn buffer(&self) -> &Buffer {

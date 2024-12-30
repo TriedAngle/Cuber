@@ -1,6 +1,7 @@
 use std::{mem, sync::Arc, time};
 
 use anyhow::Result;
+use cgpu::GPUBrickMap;
 use cvk;
 use game::Camera;
 use winit::{event::WindowEvent, window::Window};
@@ -63,6 +64,7 @@ impl RayTracePushConstants {
 
 pub struct RenderContext {
     gpu: Arc<cgpu::GPUContext>,
+    brickmap: Arc<cgpu::GPUBrickMap>,
     queue: Arc<cvk::Queue>,
     device: Arc<cvk::Device>,
     pub window: Arc<Window>,
@@ -80,7 +82,11 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    pub fn new(gpu: Arc<cgpu::GPUContext>, window: Arc<Window>) -> Result<Self> {
+    pub fn new(
+        gpu: Arc<cgpu::GPUContext>,
+        brickmap: Arc<GPUBrickMap>,
+        window: Arc<Window>,
+    ) -> Result<Self> {
         let device = gpu.device.clone();
         let queue = gpu.render_queue.clone();
 
@@ -113,8 +119,9 @@ impl RenderContext {
         });
 
         let mut rtpc = RayTracePushConstants::empty();
-        rtpc.dimensions = [64, 64, 64];
         rtpc.set_resolution(window.inner_size().width, window.inner_size().height);
+        rtpc.dimensions = *brickmap.cpu.dimensions().as_ref();
+
         let ppc = PresentPushConstants::empty();
 
         let swapchain = device.create_swapchain(
@@ -152,8 +159,9 @@ impl RenderContext {
         let (present_image, normal_image, depth_image, steps_image, depth_test_image) =
             Self::create_image_resources(&device, &swapchain);
 
-        let mut new = Self {
+        let new = Self {
             gpu,
+            brickmap,
             device,
             queue,
             window,
@@ -169,11 +177,7 @@ impl RenderContext {
             ppc,
             egui,
         };
-
-        let size = new.window.inner_size();
-        new.rtpc.set_resolution(size.width, size.height);
         new.rebind_descriptors();
-
         Ok(new)
     }
 

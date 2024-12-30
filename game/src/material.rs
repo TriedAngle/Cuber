@@ -6,6 +6,10 @@ use parking_lot::RwLock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialId(pub u32);
 
+impl MaterialId {
+    pub const EMPTY: Self = Self(0);
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {

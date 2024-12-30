@@ -38,6 +38,9 @@ pub struct CommandPools {
     pub pools: Mutex<HashMap<ThreadId, Rc<ThreadCommandPool>>>,
 }
 
+unsafe impl Send for CommandPools {}
+unsafe impl Sync for CommandPools {}
+
 pub struct CommandRecorder {
     pub pool: Rc<ThreadCommandPool>,
     pub buffer: CommandBuffer,
@@ -545,7 +548,8 @@ impl Queue {
         signal_binary: &[vk::Semaphore],
         signal_timeline: &[(vk::Semaphore, u64)],
     ) -> Result<u64> {
-        let submission_index = self.submission_counter.fetch_add(1, Ordering::Relaxed);
+        let _lock = self.lock();
+        let submission_index = self.submission_counter.fetch_add(1, Ordering::SeqCst);
 
         let timeline = self.timeline.get();
 
@@ -603,7 +607,6 @@ impl Queue {
             .push_next(&mut timeline_info);
 
         unsafe {
-            let _lock = self.lock();
             self.device
                 .handle
                 .queue_submit(self.handle, &[submit_info], vk::Fence::null())?;

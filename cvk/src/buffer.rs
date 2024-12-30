@@ -12,6 +12,9 @@ pub struct Buffer {
     pub allocator: Arc<vkm::Allocator>,
 }
 
+unsafe impl Send for Buffer {}
+unsafe impl Sync for Buffer {}
+
 pub struct BufferInfo<'a> {
     pub size: vk::DeviceSize,
     pub usage: vk::BufferUsageFlags,

@@ -1,8 +1,21 @@
 extern crate nalgebra as na;
 
-use std::{collections::HashMap, sync::Arc, time};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    thread, time,
+};
 
-use game::{Camera, Input};
+use cgpu::GPUBrickMap;
+use game::{
+    material::{ExpandedMaterialMapping, MaterialRegistry},
+    palette::PaletteRegistry,
+    worldgen::{GeneratedBrick, WorldGenerator},
+    BrickMap, Camera, Input,
+};
 use parking_lot::Mutex;
 use render::RenderContext;
 use winit::{
@@ -55,6 +68,10 @@ impl TimeTicker {
 pub struct ClientState {
     ticker: TimeTicker,
     render_ticker: TimeTicker,
+    materials: Arc<MaterialRegistry>,
+    palettes: Arc<PaletteRegistry>,
+    brickmap: Arc<BrickMap>,
+    gpu_brickmap: Arc<cgpu::GPUBrickMap>,
     gpu: Arc<cgpu::GPUContext>,
     input: Input,
     #[allow(unused)]
@@ -63,7 +80,7 @@ pub struct ClientState {
     renderes: HashMap<WindowId, Mutex<RenderContext>>,
     capture: bool,
     focused: Option<Arc<Window>>,
-    camera: Camera,
+    camera: Mutex<Camera>,
 }
 
 impl ClientState {
@@ -81,18 +98,95 @@ impl ClientState {
             100.0,
         );
 
-        Self {
+        let materials = Arc::new(MaterialRegistry::new());
+        materials.register_default_materials();
+        let palettes = Arc::new(PaletteRegistry::new());
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(16, 16, 16)));
+
+        let gpu_brickmap = Arc::new(GPUBrickMap::new(
+            gpu.clone(),
+            brickmap.clone(),
+            palettes.clone(),
+            materials.clone(),
+        ));
+
+        let new = Self {
             ticker: TimeTicker::new(time::Duration::from_secs_f64(1.0 / 60.0)),
             render_ticker: TimeTicker::new(time::Duration::from_secs_f64(1.0 / 166.0)),
+            materials,
+            palettes,
+            brickmap,
             gpu,
+            gpu_brickmap,
             input: Input::new(),
             proxy: el.create_proxy(),
             windows: HashMap::new(),
             renderes: HashMap::new(),
             focused: None,
-            capture: true,
-            camera,
-        }
+            capture: false,
+            camera: Mutex::new(camera),
+        };
+
+        new.generate_terrain();
+
+        new
+    }
+
+    pub fn generate_terrain(&self) {
+        let world_gen = WorldGenerator::new(Some(420));
+        let mut material_mapping = ExpandedMaterialMapping::new();
+        let registry = self.materials.as_ref();
+        material_mapping.add_from_registry(registry, "air", 0);
+        material_mapping.add_from_registry(registry, "bedrock", 1);
+        material_mapping.add_from_registry(registry, "stone", 2);
+        material_mapping.add_from_registry(registry, "dirt", 3);
+        material_mapping.add_from_registry(registry, "grass", 4);
+        material_mapping.add_from_registry(registry, "snow", 5);
+
+        let dims = self.brickmap.dimensions();
+        let from = na::Point3::new(0, 0, 0);
+        let to = na::Point3::from(dims);
+        let center = na::Point3::new(0, 0, 0);
+        let lod_distance = 30;
+        let brickmap = self.gpu_brickmap.clone();
+
+        let _t = thread::spawn(move || {
+            let last_percent = Arc::new(AtomicUsize::new(0));
+            let percent_tracker = last_percent.clone();
+            world_gen.generate_volume(
+                from,
+                to,
+                center,
+                lod_distance,
+                &material_mapping,
+                |brick, at, progress| {
+                    match brick {
+                        GeneratedBrick::Brick(brick) => {
+                            brickmap.setup_full_brick(at, Some(brick), &material_mapping);
+                        }
+                        GeneratedBrick::Lod(material) => {}
+                        GeneratedBrick::None => {}
+                    }
+
+                    let percent = (progress * 100.0) as usize;
+                    if percent % 10 == 0 && percent > last_percent.load(Ordering::Relaxed) {
+                        if percent_tracker
+                            .compare_exchange(
+                                percent - 10,
+                                percent,
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            )
+                            .is_ok()
+                        {
+                            println!("Generation progress: {}%", percent);
+                        }
+                    }
+                },
+            );
+
+            brickmap.update_all_handles();
+        });
     }
 
     pub fn resize(&mut self, id: WindowId, size: PhysicalSize<u32>) {
@@ -102,17 +196,40 @@ impl ClientState {
 
     pub fn handle_input(&mut self, dt: time::Duration) {
         let dtf32 = dt.as_secs_f32();
+        {
+            let mut camera = self.camera.lock();
+            camera.update_mouse(dtf32, &self.input);
+            camera.update_keyboard(dtf32, &self.input);
+        }
         for (_id, render) in &self.renderes {
-            self.camera.update_mouse(dtf32, &self.input);
-            self.camera.update_keyboard(dtf32, &self.input);
             let mut render = render.lock();
 
-            render.update_camera(&self.camera);
+            render.update_camera(&self.camera.lock());
             if self.input.pressed(KeyCode::KeyM) {
                 render.ppc.mode += 1;
                 if render.ppc.mode == 4 {
                     render.ppc.mode = 0;
                 }
+            }
+            if self.input.pressed(KeyCode::Tab) {
+                if let Some(window) = &self.focused {
+                    if self.capture {
+                        if window
+                            .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                            .is_ok()
+                        {
+                            window.set_cursor_visible(false);
+                        }
+                    } else {
+                        if window
+                            .set_cursor_grab(winit::window::CursorGrabMode::None)
+                            .is_ok()
+                        {
+                            window.set_cursor_visible(true);
+                        }
+                    }
+                }
+                self.capture = !self.capture;
             }
         }
     }
@@ -224,7 +341,8 @@ impl ClientState {
 
     pub fn create_renderer(&mut self, window: Arc<Window>) {
         let id = window.id();
-        let renderer = RenderContext::new(self.gpu.clone(), window).unwrap();
+        let renderer =
+            RenderContext::new(self.gpu.clone(), self.gpu_brickmap.clone(), window).unwrap();
 
         self.renderes.insert(id, Mutex::new(renderer));
     }

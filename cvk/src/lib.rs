@@ -39,12 +39,13 @@ pub use swapchain::{Frame, FrameSignals, Swapchain, SwapchainConfig, SwapchainSt
 pub use ash as raw;
 use ash::vk;
 pub use ash::vk::{
-    AttachmentLoadOp, AttachmentStoreOp, ClearColorValue, ClearValue, ColorSpaceKHR, CompareOp,
-    CullModeFlags, DescriptorSetLayoutCreateFlags, Extent2D, Extent3D, Format, FrontFace,
-    ImageAspectFlags, ImageLayout, ImageUsageFlags, Offset2D, Offset3D, PipelineStageFlags,
-    PolygonMode, PresentModeKHR, PrimitiveTopology, QueueFlags, Rect2D, RenderingAttachmentInfo,
-    ShaderStageFlags, Viewport,
+    AttachmentLoadOp, AttachmentStoreOp, BufferUsageFlags, ClearColorValue, ClearValue,
+    ColorSpaceKHR, CompareOp, CullModeFlags, DescriptorSetLayoutCreateFlags, Extent2D, Extent3D,
+    Format, FrontFace, ImageAspectFlags, ImageLayout, ImageUsageFlags, MemoryPropertyFlags,
+    Offset2D, Offset3D, PipelineStageFlags, PolygonMode, PresentModeKHR, PrimitiveTopology,
+    QueueFlags, Rect2D, RenderingAttachmentInfo, ShaderStageFlags, SharingMode, Viewport,
 };
+pub use vkm::{AllocationCreateFlags, MemoryUsage};
 
 use anyhow::Result;
 use naga::back::spv;

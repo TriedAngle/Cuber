@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::SystemTime,
@@ -326,164 +326,62 @@ impl WorldGenerator {
             .unwrap_or_else(|| materials.material(materials.get("air"))) // Default to air if something goes wrong
     }
 
-    pub fn generate_volume<F, C>(
+    pub fn generate_volume<F>(
         &self,
-        brickmap: &BrickMap,
         from: na::Point3<u32>,
         to: na::Point3<u32>,
         center: na::Point3<u32>,
         lod_distance: u32,
         materials: &ExpandedMaterialMapping,
-        palettes: &PaletteRegistry,
-        chunk_size: u32,
         callback: F,
-        chunk_callback: C,
     ) where
-        F: Fn(&GeneratedBrick, BrickHandle, na::Point3<u32>, f64) + Send + Sync,
-        C: Fn(Vec<MaterialBrick>, Vec<PaletteId>, Vec<BrickHandle>, Vec<na::Point3<u32>>, f64)
-            + Send
-            + Sync,
+        F: Fn(&GeneratedBrick, na::Point3<u32>, f64) + Send + Sync,
     {
-        let chunk_dims = na::Point3::new(
-            ((to.x - from.x + chunk_size - 1) / chunk_size).max(1),
-            ((to.y - from.y + chunk_size - 1) / chunk_size).max(1),
-            ((to.z - from.z + chunk_size - 1) / chunk_size).max(1),
-        );
-
-        let total_volume = ((to.x - from.x) * (to.y - from.y) * (to.z - from.z)) as u64;
-        let start = SystemTime::now();
-        log::info!(
-            "Starting Generating Volume [{}] {} -> {}",
-            total_volume,
-            from,
-            to
-        );
-
-        let processed = Arc::new(AtomicU64::new(0));
-        let last_percentage = Arc::new(AtomicU64::new(0));
-
-        let mut chunk_coords: Vec<_> = (0..chunk_dims.x)
-            .flat_map(|cx| {
-                (0..chunk_dims.y).flat_map(move |cy| {
-                    (0..chunk_dims.z).map(move |cz| {
-                        let chunk_pos = na::Point3::new(
-                            from.x + cx * chunk_size,
-                            from.y + cy * chunk_size,
-                            from.z + cz * chunk_size,
+        let mut chunks: Vec<(na::Point3<u32>, f64)> = (from.x..to.x)
+            .flat_map(|x| {
+                (from.y..to.y).flat_map(move |y| {
+                    (from.z..to.z).map(move |z| {
+                        let pos = na::Point3::new(x, y, z);
+                        let dist = na::distance(
+                            &na::Point3::new(pos.x as f64, pos.y as f64, pos.z as f64),
+                            &na::Point3::new(center.x as f64, center.y as f64, center.z as f64),
                         );
-                        let dist_squared = (chunk_pos.x as i64 - center.x as i64).pow(2)
-                            + (chunk_pos.y as i64 - center.y as i64).pow(2)
-                            + (chunk_pos.z as i64 - center.z as i64).pow(2);
-                        ((cx, cy, cz), dist_squared)
+                        (pos, dist)
                     })
                 })
             })
             .collect();
 
-        // Sort by distance (closest first)
-        chunk_coords.sort_by_key(|&(_, dist)| dist);
-
-        // Process chunks in sorted order
-        chunk_coords
-            .par_iter()
-            .map(|&((cx, cy, cz), _)| (cx, cy, cz))
-            .for_each(|(cx, cy, cz)| {
-                let chunk_start = na::Point3::new(
-                    from.x + cx * chunk_size,
-                    from.y + cy * chunk_size,
-                    from.z + cz * chunk_size,
-                );
-                let chunk_end = na::Point3::new(
-                    (from.x + (cx + 1) * chunk_size).min(to.x),
-                    (from.y + (cy + 1) * chunk_size).min(to.y),
-                    (from.z + (cz + 1) * chunk_size).min(to.z),
-                );
-
-                let mut chunk_bricks = Vec::new();
-                let mut chunk_palettes = Vec::new();
-                let mut chunk_positions = Vec::new();
-                let mut chunk_handles = Vec::new();
-
-                for x in chunk_start.x..chunk_end.x {
-                    for y in chunk_start.y..chunk_end.y {
-                        for z in chunk_start.z..chunk_end.z {
-                            let at = na::Point3::new(x, y, z);
-                            let distance = na::distance(&center.cast::<f32>(), &at.cast::<f32>());
-                            let (brick, handle) = if distance >= lod_distance as f32 {
-                                let lod =
-                                    self.generate_lod_chunk(materials, x, y, z, LodSamples::A1);
-                                if lod == materials.material(materials.get("air")) {
-                                    let handle = BrickHandle::empty();
-                                    brickmap.set_handle(handle, at);
-                                    (GeneratedBrick::None, handle)
-                                } else {
-                                    let mut handle = BrickHandle::empty();
-                                    handle.set_lod(true);
-                                    handle.set_empty_value(lod.0);
-                                    brickmap.set_handle(handle, at);
-                                    (GeneratedBrick::Lod(lod), handle)
-                                }
-                            } else {
-                                let expanded_brick = self.generate_chunk(materials, x, y, z);
-                                let brick = expanded_brick.to_trace_brick();
-                                if brick.is_empty() {
-                                    let handle = BrickHandle::empty();
-                                    brickmap.set_handle(handle, at);
-                                    (GeneratedBrick::None, handle)
-                                } else {
-                                    let handle = brickmap.get_or_push_brick(brick, at);
-
-                                    let (mut compressed, materials) =
-                                        expanded_brick.compress(&materials);
-
-                                    let palette_id = palettes.register_palette(materials);
-
-                                    compressed.set_meta_value(palette_id.0);
-                                    chunk_bricks.push(compressed);
-                                    chunk_palettes.push(palette_id);
-                                    chunk_positions.push(at);
-                                    chunk_handles.push(handle);
-                                    (GeneratedBrick::Brick(expanded_brick), handle)
-                                }
-                            };
-
-                            let current = processed.fetch_add(1, Ordering::Relaxed);
-                            let percentagef = (current as f64 * 100.0) / total_volume as f64;
-                            let percentage = (current * 100) / total_volume;
-                            let last = last_percentage.load(Ordering::Relaxed);
-                            if percentage > last
-                                && last_percentage
-                                    .compare_exchange(
-                                        last,
-                                        percentage,
-                                        Ordering::Relaxed,
-                                        Ordering::Relaxed,
-                                    )
-                                    .is_ok()
-                            {
-                                log::info!("World Generation Progress: {}%", percentage);
-                            }
-
-                            callback(&brick, handle, at, percentagef);
-                        }
-                    }
+        chunks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let total_chunks = chunks.len();
+        log::debug!("Generating: {:?} chunks", total_chunks);
+        let processed_chunks = AtomicUsize::new(0);
+        chunks.par_iter().for_each(|(pos, _)| {
+            let generated = if na::distance(
+                &na::Point3::new(pos.x as f64, pos.y as f64, pos.z as f64),
+                &na::Point3::new(center.x as f64, center.y as f64, center.z as f64),
+            ) > lod_distance as f64
+            {
+                let material_id =
+                    self.generate_lod_chunk(materials, pos.x, pos.y, pos.z, LodSamples::A1);
+                if material_id == MaterialId::EMPTY {
+                    GeneratedBrick::None
+                } else {
+                    GeneratedBrick::Lod(material_id)
                 }
+            } else {
+                let brick = self.generate_chunk(materials, pos.x, pos.y, pos.z);
+                if brick.is_empty() {
+                    GeneratedBrick::None
+                } else {
+                    GeneratedBrick::Brick(brick)
+                }
+            };
 
-                let current = processed.load(Ordering::Relaxed);
-                let percentagef = (current as f64 * 100.0) / total_volume as f64;
-                chunk_callback(
-                    chunk_bricks,
-                    chunk_palettes,
-                    chunk_handles,
-                    chunk_positions,
-                    percentagef,
-                );
-            });
+            let progress =
+                processed_chunks.fetch_add(1, Ordering::Relaxed) as f64 / total_chunks as f64;
 
-        log::info!(
-            "Finish Generation of Volume [{}] took: {:.3}s",
-            total_volume,
-            start.elapsed().unwrap().as_secs_f64()
-        );
+            callback(&generated, *pos, progress);
+        });
     }
 }
