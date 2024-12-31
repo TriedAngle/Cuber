@@ -2,7 +2,7 @@ use std::{mem, sync::Arc};
 
 use game::{
     brick::{BrickMap, ExpandedBrick, MaterialBrickMeta, TraceBrick},
-    material::{ExpandedMaterialMapping, MaterialRegistry},
+    material::{ExpandedMaterialMapping, MaterialId, MaterialRegistry},
     palette::PaletteRegistry,
     BrickHandle, MaterialBrick,
 };
@@ -179,11 +179,20 @@ impl GPUBrickMap {
         &self,
         at: na::Point3<u32>,
         expanded_brick: Option<&ExpandedBrick>,
+        material: Option<MaterialId>,
         material_mapping: &ExpandedMaterialMapping,
     ) {
         let mut recorder = self.queue.record();
         let Some(expanded_brick) = expanded_brick else {
-            let handle = BrickHandle::empty();
+            let handle = if let Some(material) = material {
+                let mut handle = BrickHandle::empty();
+                handle.set_lod(true);
+                handle.set_empty_value(material.0);
+                handle
+            } else {
+                BrickHandle::empty()
+            };
+            self.cpu.set_handle(handle, at);
             let (aligned_handles, aligned_handle_offset) = self.prepare_transfer_handle(handle, at);
             let aligned_handles_size = aligned_handles.len() * mem::size_of::<BrickHandle>();
             let staging_buffer = Self::create_staging_buffer(
@@ -214,15 +223,16 @@ impl GPUBrickMap {
         material_brick.set_meta_value(palette_id.0);
 
         let material_brick_data = material_brick.data();
+
+        let material_brick_size = material_brick.size();
         let material_brick_offset = self
             .bricks
-            .allocate_size(material_brick_data.len() as u64, |old, _new, submit| {
+            .allocate_size(material_brick_size as u64, |old, _new, submit| {
                 let mut staging = self.staging_buffers.lock();
                 staging.push((old, submit));
                 self.rebind_brick_descriptors();
             })
             .unwrap();
-        let material_brick_size = material_brick.size();
 
         trace_brick.set_brick_offset(material_brick_offset as u32);
 
@@ -238,7 +248,8 @@ impl GPUBrickMap {
                 .unwrap();
         }
 
-        let trace_brick_offset = handle.get_data_value();
+        let trace_brick_offset_sized = handle.get_data_value();
+        let trace_brick_offset = trace_brick_offset_sized * mem::size_of::<TraceBrick>() as u32;
 
         let (aligned_handles, aligned_handle_offset) = self.prepare_transfer_handle(handle, at);
         let aligned_handles_size = mem::size_of::<BrickHandle>() * aligned_handles.len();
@@ -250,7 +261,8 @@ impl GPUBrickMap {
             required_size as u64,
             "Full Brick Staging Buffer",
         );
-        staging_buffer.upload(material_brick.data(), 0);
+        staging_buffer.upload(bytemuck::cast_slice(&[material_brick.meta()]), 0);
+        staging_buffer.upload(material_brick_data, mem::size_of::<u32>());
         staging_buffer.upload(bytemuck::cast_slice(&[trace_brick]), material_brick_size);
         staging_buffer.upload(
             bytemuck::cast_slice(&aligned_handles),

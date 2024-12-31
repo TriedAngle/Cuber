@@ -651,6 +651,15 @@ impl MaterialBrick {
             Self::Size8(b) => MaterialBrick8::decode_meta_size(b.meta),
         }
     }
+
+    pub fn meta(&self) -> u32 {
+        match self {
+            Self::Size1(b) => b.meta,
+            Self::Size2(b) => b.meta,
+            Self::Size4(b) => b.meta,
+            Self::Size8(b) => b.meta,
+        }
+    }
 }
 
 #[repr(C)]

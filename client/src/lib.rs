@@ -101,7 +101,7 @@ impl ClientState {
         let materials = Arc::new(MaterialRegistry::new());
         materials.register_default_materials();
         let palettes = Arc::new(PaletteRegistry::new());
-        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(16, 16, 16)));
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(32, 32, 32)));
 
         let gpu_brickmap = Arc::new(GPUBrickMap::new(
             gpu.clone(),
@@ -162,9 +162,11 @@ impl ClientState {
                 |brick, at, progress| {
                     match brick {
                         GeneratedBrick::Brick(brick) => {
-                            brickmap.setup_full_brick(at, Some(brick), &material_mapping);
+                            brickmap.setup_full_brick(at, Some(brick), None, &material_mapping);
                         }
-                        GeneratedBrick::Lod(material) => {}
+                        GeneratedBrick::Lod(material) => {
+                            brickmap.setup_full_brick(at, None, Some(*material), &material_mapping);
+                        }
                         GeneratedBrick::None => {}
                     }
 

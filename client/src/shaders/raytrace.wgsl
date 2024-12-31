@@ -69,6 +69,7 @@ var<storage, read> palettes: array<u32>;
 @group(0) @binding(4)
 var images: binding_array<texture_storage_2d<rgba8unorm, write>, 10>; 
 
+const BRICK_SIZE: u32 = 8;
 const MAX_RAY_STEPS: u32 = 64;
 const EPSILON: f32 = 0.00001;
 
@@ -119,6 +120,17 @@ fn get_brick_handle(pos: vec3<i32>) -> BrickHandle {
     return brick_handle;
 }
 
+fn get_trace_voxel(brick_handle: BrickHandle, local_pos: vec3<i32>) -> bool {
+    let offset = brick_handle_get_data(brick_handle);
+
+    let pos = vec3<u32>(local_pos);
+    let voxel_idx = pos.x + pos.y * BRICK_SIZE + pos.z * BRICK_SIZE * BRICK_SIZE;
+    let u32_index = voxel_idx / 32;
+    let bit_index = voxel_idx % 32;
+    let voxel_data = trace_bricks[offset].raw[u32_index];
+    return (voxel_data & (1u << u32(bit_index))) != 0u;
+}
+
 fn step_mask(side_dist: vec3<f32>) -> vec3<f32> {
     var mask: vec3<bool>;
     let b1 = side_dist < side_dist.yzx;
@@ -151,6 +163,37 @@ fn intersect_box(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, 
 
 var<private> ray_steps: u32 = 0;
 
+
+fn trace_brick(brick_handle: BrickHandle, brick_pos: vec3<i32>, in_ray_pos: vec3<f32>, ray_dir: vec3<f32>, world_mask: vec3<f32>) -> Hit {
+    let ray_pos = clamp(in_ray_pos, vec3<f32>(EPSILON), vec3<f32>(8.0 - EPSILON));
+    var map_pos = floor(ray_pos);
+    let ray_sign = sign(ray_dir);
+    let delta_dist = 1.0 / ray_dir;
+    var side_dist = ((map_pos - ray_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
+    var mask = world_mask;
+
+    while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) {
+        ray_steps = ray_steps + 1;
+        let vox = get_trace_voxel(brick_handle, vec3<i32>(floor(map_pos)));
+        if vox {
+            // let palette_vox_id = get_brick_voxel(trace.brick, vec3<i32>(floor(map_pos)));
+            // let palette_offset = trace.palette;
+            // let material_id = palettes[palette_offset + palette_vox_id];
+            // let material = materials[material_id];
+
+            let pos = floor(map_pos) / 8.0;
+            let color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
+            // let color = material.color;
+            return Hit(color, map_pos, true, mask);
+        }
+        mask = step_mask(side_dist);
+        map_pos += mask * ray_sign;
+        side_dist += mask * ray_sign * delta_dist;
+    }
+
+    return new_empty_hit();
+}
+
 fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     let world_min = vec3<f32>(0.0);
     let world_max = vec3<f32>(pc.dimensions);
@@ -169,7 +212,7 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
     var map_pos = floor(current_pos);
     let ray_sign = sign(ray_dir);
     let delta_dist = 1.0 / ray_dir;
-    var side_dist = ((map_pos - ray_pos) + 0.5 + ray_sign * 0.5) * delta_dist;
+    var side_dist = ((map_pos - current_pos) + 0.5 + ray_sign * 0.5) * delta_dist;
     var mask = step_mask(side_dist);
 
     for (var steps = 0u; steps < MAX_RAY_STEPS; steps++) {
@@ -180,16 +223,27 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
         let is_data = brick_handle_is_data(brick_handle);
         let is_lod = brick_handle_is_lod(brick_handle);
 
-        // let sdf_hit = get_sdf_voxel(brick_pos);
-        // if sdf_hit {
-            // return new_hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, mask);
-        // }
-
         if is_data {
-            let trace_brick_offset = brick_handle_get_data(brick_handle);
+            let intersect = ((map_pos - ray_pos) + 0.5 - (0.5 * ray_sign)) * delta_dist;
+            let dist = max(intersect.x, max(intersect.y, intersect.z));
+            let hit_point = ray_pos + (ray_dir * dist);
+            var local_block_coord = hit_point - map_pos;
 
-            return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, true, mask);
+            if all(map_pos == floor(ray_pos)) {
+                local_block_coord = ray_pos - map_pos;
+            }
+
+            var hit = trace_brick(brick_handle, vec3<i32>(floor(map_pos)), local_block_coord * 8.0, ray_dir, mask);
+
+            if hit.hit {
+                let hit_local = hit.pos;
+                hit.pos = map_pos + hit_local;
+                return hit;
+            }
+
+            // return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, true, mask);
         } else if is_lod {
+            return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, true, mask);
         } else {
         }
 
