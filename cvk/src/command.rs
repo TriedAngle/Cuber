@@ -86,43 +86,43 @@ impl CommandPools {
     pub fn try_cleanup(&self, completed_index: u64) {
         let mut pools = self.pools.lock();
 
-        for (_t, pool) in pools.iter_mut() {
-            let mut retired = pool.retired.borrow_mut();
-            let freeable = {
-                let mut freeable = Vec::new();
-                retired.retain(|b| {
-                    if b.submission <= completed_index {
-                        freeable.push(b.handle);
-                        false
-                    } else {
-                        true
+        let thread_id = thread::current().id();
+        let pool = pools.get_mut(&thread_id).unwrap();
+        let mut retired = pool.retired.borrow_mut();
+        let freeable = {
+            let mut freeable = Vec::new();
+            retired.retain(|b| {
+                if b.submission <= completed_index {
+                    freeable.push(b.handle);
+                    false
+                } else {
+                    true
+                }
+            });
+            freeable
+        };
+
+        if !freeable.is_empty() {
+            let mut ready = pool.ready.borrow_mut();
+            if ready.len() < 10 {
+                let new_ready_buffers = freeable.into_iter().map(|b| {
+                    unsafe {
+                        let _ = self.device.handle.reset_command_buffer(
+                            b,
+                            vk::CommandBufferResetFlags::RELEASE_RESOURCES,
+                        );
+                    }
+                    CommandBuffer {
+                        handle: b,
+                        submission: Rc::new(RefCell::new(0)),
                     }
                 });
-                freeable
-            };
-
-            if !freeable.is_empty() {
-                let mut ready = pool.ready.borrow_mut();
-                if ready.len() < 10 {
-                    let new_ready_buffers = freeable.into_iter().map(|b| {
-                        unsafe {
-                            let _ = self.device.handle.reset_command_buffer(
-                                b,
-                                vk::CommandBufferResetFlags::RELEASE_RESOURCES,
-                            );
-                        }
-                        CommandBuffer {
-                            handle: b,
-                            submission: Rc::new(RefCell::new(0)),
-                        }
-                    });
-                    ready.extend(new_ready_buffers);
-                } else {
-                    unsafe {
-                        self.device
-                            .handle
-                            .free_command_buffers(pool.handle, &freeable);
-                    }
+                ready.extend(new_ready_buffers);
+            } else {
+                unsafe {
+                    self.device
+                        .handle
+                        .free_command_buffers(pool.handle, &freeable);
                 }
             }
         }

@@ -355,7 +355,7 @@ impl WorldGenerator {
         chunks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         let total_chunks = chunks.len();
         let processed_chunks = AtomicUsize::new(0);
-        chunks.iter().for_each(|(pos, _)| {
+        chunks.par_iter().for_each(|(pos, _)| {
             let generated = if na::distance(
                 &na::Point3::new(pos.x as f64, pos.y as f64, pos.z as f64),
                 &na::Point3::new(center.x as f64, center.y as f64, center.z as f64),

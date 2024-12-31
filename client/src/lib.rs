@@ -127,8 +127,6 @@ impl ClientState {
             camera: Mutex::new(camera),
         };
 
-        new.generate_terrain();
-
         new
     }
 
@@ -187,7 +185,7 @@ impl ClientState {
                 },
             );
 
-            brickmap.update_all_handles();
+            // brickmap.update_all_handles();
         });
     }
 
@@ -277,7 +275,9 @@ impl ClientState {
 
         for (_id, render) in self.renderes.iter() {
             let mut render = render.lock();
+            // if !self.capture {
             render.egui.handle_device_events(event);
+            // }
         }
     }
 
@@ -286,7 +286,9 @@ impl ClientState {
 
         if let Some(render) = self.renderes.get(&id) {
             let mut render = render.lock();
+            // if !self.capture {
             render.egui_handle_window_events(event);
+            // }
         }
 
         if self.input.pressing(KeyCode::Escape) {

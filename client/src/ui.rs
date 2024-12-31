@@ -53,7 +53,13 @@ impl ClientState {
                     {
                         update_camera = true;
                     }
-                })
+                });
+
+                ui.separator();
+                ui.label(RichText::new("World").underline());
+                if ui.button("Regenerate Terrain").clicked() {
+                    self.generate_terrain();
+                }
             });
 
         egui::Window::new("egui stuff")
