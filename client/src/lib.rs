@@ -240,6 +240,7 @@ impl ClientState {
         let dt = self.ticker.update();
 
         while self.ticker.accumulator >= self.ticker.rate {
+            self.gpu_brickmap.try_drop_staging();
             self.ticker.accumulator -= self.ticker.rate;
         }
 

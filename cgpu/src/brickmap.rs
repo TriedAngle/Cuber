@@ -120,7 +120,14 @@ impl GPUBrickMap {
         })
     }
 
-    pub fn update_all_handles(&self) {
+    pub fn try_drop_staging(&self) {
+        let mut buffers = self.staging_buffers.lock();
+        let timeline = self.queue.current_timeline(); 
+
+        buffers.retain(|(_buffer, submit)| *submit > timeline);
+    }
+
+    pub fn transfer_all_handles(&self) {
         let dims = self.cpu.dimensions();
         let size = (dims.x * dims.y * dims.z) as u64 * mem::size_of::<BrickHandle>() as u64;
         let staging = Self::create_staging_buffer(&self.device, size, "Handles Staging Buffer");
@@ -131,6 +138,34 @@ impl GPUBrickMap {
 
         recorder.copy_buffer(&staging, &self.brickmap, 0, 0, size as usize);
 
+        let submission = self.queue.submit_express(&[recorder.finish()]).unwrap();
+
+        let mut staging_buffers = self.staging_buffers.lock();
+
+        staging_buffers.push((staging, submission));
+    }
+
+    pub fn transfer_all_materials(&self) {
+        let data: &[u8] = bytemuck::cast_slice(self.material_registry.materials());
+        let staging = Self::create_staging_buffer(&self.device, data.len() as u64, "All Materials Staging Buffer");
+        staging.upload(data, 0);
+
+        let mut recorder = self.queue.record();
+        recorder.copy_buffer(&staging, self.materials.buffer(),0, 0, data.len());
+        let submission = self.queue.submit_express(&[recorder.finish()]).unwrap();
+
+        let mut staging_buffers = self.staging_buffers.lock();
+
+        staging_buffers.push((staging, submission));
+    }
+
+    pub fn transfer_all_palettes(&self) {
+        let data: &[u8] = bytemuck::cast_slice(self.palette_registry.palette_data());
+        let staging = Self::create_staging_buffer(&self.device, data.len() as u64, "All Palettes Staging Buffer");
+        staging.upload(data, 0);
+
+        let mut recorder = self.queue.record();
+        recorder.copy_buffer(&staging, self.materials.buffer(),0, 0, data.len());
         let submission = self.queue.submit_express(&[recorder.finish()]).unwrap();
 
         let mut staging_buffers = self.staging_buffers.lock();
@@ -327,5 +362,22 @@ impl GPUBrickMap {
         ])
     }
 
-    // pub fn rebind_material_descriptors
+    pub fn rebind_material_descriptors(&self) {
+        self.context.descriptors.write(&[
+            cvk::DescriptorWrite::StorageBuffer {
+                binding: 3,
+                buffer: &self.materials.buffer(),
+                offset: 0,
+                range: self.materials.buffer().size,
+                array_element: None,
+            },
+            cvk::DescriptorWrite::StorageBuffer {
+                binding: 4,
+                buffer: &self.palettes.buffer(),
+                offset: 0,
+                range: self.palettes.buffer().size,
+                array_element: None,
+            },
+        ]);
+    }
 }
