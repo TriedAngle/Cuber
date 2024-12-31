@@ -128,10 +128,10 @@ impl Camera {
         let mut roll = 0.0;
 
         if input.pressing(KeyCode::KeyQ) {
-            roll -= self.sensitivity * dt;
+            roll -= self.speed * 0.1 * dt;
         }
         if input.pressing(KeyCode::KeyE) {
-            roll += self.sensitivity * dt;
+            roll += self.speed * 0.1 * dt;
         }
         roll
     }

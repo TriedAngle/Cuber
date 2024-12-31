@@ -23,7 +23,7 @@ use winit::{
     event::{DeviceEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::KeyCode,
-    window::{Window, WindowAttributes, WindowId},
+    window::{CursorGrabMode, Window, WindowAttributes, WindowId},
 };
 
 mod render;
@@ -91,7 +91,7 @@ impl ClientState {
             na::Point3::new(0.0, 0.0, 0.0),
             na::UnitQuaternion::identity(),
             50.0,
-            5.,
+            20.,
             45.0,
             16.0 / 9.0,
             0.1,
@@ -123,7 +123,7 @@ impl ClientState {
             windows: HashMap::new(),
             renderes: HashMap::new(),
             focused: None,
-            capture: false,
+            capture: true,
             camera: Mutex::new(camera),
         };
 
@@ -184,8 +184,6 @@ impl ClientState {
                     }
                 },
             );
-
-            // brickmap.update_all_handles();
         });
     }
 
@@ -212,6 +210,7 @@ impl ClientState {
                 }
             }
             if self.input.pressed(KeyCode::Tab) {
+                self.capture = !self.capture;
                 if let Some(window) = &self.focused {
                     if self.capture {
                         if window
@@ -219,6 +218,8 @@ impl ClientState {
                             .is_ok()
                         {
                             window.set_cursor_visible(false);
+                        } else {
+                            log::error!("Failed to grab: {:?}", window.id());
                         }
                     } else {
                         if window
@@ -226,10 +227,11 @@ impl ClientState {
                             .is_ok()
                         {
                             window.set_cursor_visible(true);
+                        } else {
+                            log::error!("Failed to grab: {:?}", window.id());
                         }
                     }
                 }
-                self.capture = !self.capture;
             }
         }
     }
@@ -275,9 +277,7 @@ impl ClientState {
 
         for (_id, render) in self.renderes.iter() {
             let mut render = render.lock();
-            // if !self.capture {
             render.egui.handle_device_events(event);
-            // }
         }
     }
 
@@ -286,9 +286,9 @@ impl ClientState {
 
         if let Some(render) = self.renderes.get(&id) {
             let mut render = render.lock();
-            // if !self.capture {
-            render.egui_handle_window_events(event);
-            // }
+            if !self.capture {
+                render.egui_handle_window_events(event);
+            }
         }
 
         if self.input.pressing(KeyCode::Escape) {
@@ -301,22 +301,25 @@ impl ClientState {
     }
 
     pub fn focus_window(&mut self, id: WindowId) {
-        let window = self.windows.get(&id).unwrap().clone();
-        if self.capture {
-            if window
-                .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                .is_ok()
-            {
-                window.set_cursor_visible(false);
-            } else {
-                log::error!("Failed to grab cursor {:?}", window.id())
+        if let Some(window) = self.windows.get(&id) {
+            self.focused = Some(window.clone());
+
+            if self.capture {
+                if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                    window.set_cursor_visible(false);
+                } else {
+                    log::error!("Failed to grab: {:?}", id);
+                }
             }
         }
-        self.focused = Some(window);
     }
 
-    pub fn unfocus_window(&mut self, _id: WindowId) {
-        self.focused = None
+    pub fn unfocus_window(&mut self, id: WindowId) {
+        self.focused = None;
+        if let Some(window) = self.windows.get(&id) {
+            let _ = window.set_cursor_grab(CursorGrabMode::None);
+            window.set_cursor_visible(true);
+        }
     }
 
     pub fn create_window(

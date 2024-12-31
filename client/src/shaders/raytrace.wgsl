@@ -61,12 +61,15 @@ var<storage, read> brick_handles: array<BrickHandle>;
 var<storage, read> trace_bricks: array<TraceBrick>;
 
 @group(0) @binding(2)
-var<storage, read> materials: array<PbrMaterial>;
+var<storage, read> material_bricks: array<u32>;
 
 @group(0) @binding(3)
-var<storage, read> palettes: array<u32>;
+var<storage, read> materials: array<PbrMaterial>;
 
 @group(0) @binding(4)
+var<storage, read> palettes: array<u32>;
+
+@group(0) @binding(5)
 var images: binding_array<texture_storage_2d<rgba8unorm, write>, 10>; 
 
 const BRICK_SIZE: u32 = 8;
@@ -237,7 +240,7 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
 
             if hit.hit {
                 let hit_local = hit.pos;
-                hit.pos = map_pos + hit_local;
+                hit.pos = map_pos + (hit_local / 8.0);
                 return hit;
             }
 

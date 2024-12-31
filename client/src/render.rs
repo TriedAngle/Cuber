@@ -233,7 +233,7 @@ impl RenderContext {
             .store_op(cvk::AttachmentStoreOp::STORE)
             .clear_value(cvk::ClearValue {
                 color: cvk::ClearColorValue {
-                    float32: [0., 0., 0., 1.0],
+                    float32: [0., 0., 0., 0.0],
                 },
             });
 
@@ -302,70 +302,70 @@ impl RenderContext {
 
         self.gpu.descriptors.write(&[
             cvk::DescriptorWrite::StorageImage {
-                binding: 4,
+                binding: 5,
                 image_view: self.present_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(0),
             },
             cvk::DescriptorWrite::StorageImage {
-                binding: 4,
+                binding: 5,
                 image_view: self.normal_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(1),
             },
             cvk::DescriptorWrite::StorageImage {
-                binding: 4,
+                binding: 5,
                 image_view: self.depth_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(2),
             },
             cvk::DescriptorWrite::StorageImage {
-                binding: 4,
+                binding: 5,
                 image_view: self.steps_image.view,
                 image_layout: cvk::ImageLayout::GENERAL,
                 array_element: Some(3),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 5,
+                binding: 6,
                 image_view: self.present_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(0),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 5,
+                binding: 6,
                 image_view: self.normal_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(1),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 5,
+                binding: 6,
                 image_view: self.depth_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(2),
             },
             cvk::DescriptorWrite::SampledImage {
-                binding: 5,
+                binding: 6,
                 image_view: self.steps_image.view,
                 image_layout: cvk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 array_element: Some(3),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 6,
+                binding: 7,
                 sampler: &self.present_image.sampler(),
                 array_element: Some(0),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 6,
+                binding: 7,
                 sampler: &self.normal_image.sampler(),
                 array_element: Some(1),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 6,
+                binding: 7,
                 sampler: &self.depth_image.sampler(),
                 array_element: Some(2),
             },
             cvk::DescriptorWrite::Sampler {
-                binding: 6,
+                binding: 7,
                 sampler: &self.steps_image.sampler(),
                 array_element: Some(3),
             },

@@ -13,10 +13,10 @@ struct PushConstants {
 
 var<push_constant> pc: PushConstants;
 
-@group(0) @binding(5)
+@group(0) @binding(6)
 var images: binding_array<texture_2d<f32>, 10>; 
 
-@group(0) @binding(6)
+@group(0) @binding(7)
 var samplers: binding_array<sampler, 10>;
 
 
