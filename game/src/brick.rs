@@ -497,8 +497,14 @@ pub trait MaterialBrickOps {
 
     fn encode_meta(meta_value: u32) -> u32 {
         let meta_value = meta_value & 0x1FFF_FFFF;
-        let size_bits = ((Self::BITS_PER_VALUE - 1) as u32) << 29;
-        meta_value | size_bits
+        let format = match Self::BITS_PER_VALUE {
+            1 => 0,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            _ => panic!("Invalid bits per value"),
+        };
+        meta_value | (format << 29)
     }
 
     fn decode_meta(meta: u32) -> u32 {
@@ -506,7 +512,7 @@ pub trait MaterialBrickOps {
     }
 
     fn decode_meta_size(meta: u32) -> usize {
-        ((meta >> 29) as usize) + 1
+        1 << ((meta >> 29) & 0x7) as usize
     }
 
     fn encode_size_only(bits_per_value: usize) -> u32 {
@@ -689,24 +695,24 @@ impl ExpandedBrick {
         new
     }
 
-    fn encode_meta(&mut self, meta_value: u32) {
-        let bits_per_element = Self::get_required_bits(&self);
-        let meta_value = meta_value & 0x1FFF_FFFF;
-        let size_bits = ((bits_per_element - 1) as u32) << 29;
-        self.meta = meta_value | size_bits;
-    }
-
-    fn decode_meta(&self) -> u32 {
-        self.meta & 0x1FFF_FFFF
-    }
-
-    fn decode_meta_size(&self) -> usize {
-        ((self.meta >> 29) as usize) + 1
-    }
-
-    fn encode_size_only(bits_per_value: usize) -> u32 {
-        ((bits_per_value - 1) as u32) << 29
-    }
+    // fn encode_meta(&mut self, meta_value: u32) {
+    //     let bits_per_element = Self::get_required_bits(&self);
+    //     let meta_value = meta_value & 0x1FFF_FFFF;
+    //     let size_bits = ((bits_per_element - 1) as u32) << 29;
+    //     self.meta = meta_value | size_bits;
+    // }
+    //
+    // fn decode_meta(&self) -> u32 {
+    //     self.meta & 0x1FFF_FFFF
+    // }
+    //
+    // fn decode_meta_size(&self) -> usize {
+    //     ((self.meta >> 29) as usize) + 1
+    // }
+    //
+    // fn encode_size_only(bits_per_value: usize) -> u32 {
+    //     ((bits_per_value - 1) as u32) << 29
+    // }
 
     pub fn is_empty(&self) -> bool {
         self.raw == Self::EMPTY.raw

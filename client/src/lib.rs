@@ -11,6 +11,7 @@ use std::{
 
 use cgpu::GPUBrickMap;
 use game::{
+    brick::ExpandedBrick,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
     worldgen::{GeneratedBrick, WorldGenerator},
@@ -87,8 +88,8 @@ impl ClientState {
     pub fn new(el: &EventLoop<()>) -> Self {
         let gpu = cgpu::GPUContext::new().unwrap();
 
-        let camera = Camera::new(
-            na::Point3::new(0.0, 0.0, 0.0),
+        let mut camera = Camera::new(
+            na::Point3::new(-15.0, 45.0, -15.0),
             na::UnitQuaternion::identity(),
             50.0,
             20.,
@@ -98,10 +99,12 @@ impl ClientState {
             100.0,
         );
 
+        camera.look_at(na::Point3::new(0.0, 35.0, 0.0), &-na::Vector3::y_axis());
+
         let materials = Arc::new(MaterialRegistry::new());
         materials.register_default_materials();
         let palettes = Arc::new(PaletteRegistry::new());
-        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(32, 32, 32)));
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(64, 64, 64)));
 
         let gpu_brickmap = Arc::new(GPUBrickMap::new(
             gpu.clone(),
@@ -109,6 +112,8 @@ impl ClientState {
             palettes.clone(),
             materials.clone(),
         ));
+
+        gpu_brickmap.transfer_all_materials();
 
         let new = Self {
             ticker: TimeTicker::new(time::Duration::from_secs_f64(1.0 / 60.0)),
@@ -131,7 +136,7 @@ impl ClientState {
     }
 
     pub fn generate_terrain(&self) {
-        let world_gen = WorldGenerator::new(Some(420));
+        let world_gen = WorldGenerator::new(Some(420), 8);
         let mut material_mapping = ExpandedMaterialMapping::new();
         let registry = self.materials.as_ref();
         material_mapping.add_from_registry(registry, "air", 0);
@@ -144,8 +149,8 @@ impl ClientState {
         let dims = self.brickmap.dimensions();
         let from = na::Point3::new(0, 0, 0);
         let to = na::Point3::from(dims);
-        let center = na::Point3::new(0, 0, 0);
-        let lod_distance = 30;
+        let center = na::Point3::new(0, 50, 0);
+        let lod_distance = 40;
         let brickmap = self.gpu_brickmap.clone();
 
         let _t = thread::spawn(move || {
@@ -179,11 +184,14 @@ impl ClientState {
                             )
                             .is_ok()
                         {
-                            println!("Generation progress: {}%", percent);
+                            brickmap.transfer_all_palettes();
+                            log::debug!("Generation Progress: {}%", percent);
                         }
                     }
                 },
             );
+            log::debug!("Generation Progress: 100%");
+            brickmap.transfer_all_palettes();
         });
     }
 

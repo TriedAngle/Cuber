@@ -645,12 +645,16 @@ impl Drop for CommandPools {
             let free_ready = ready.iter().map(|b| b.handle).collect::<Vec<_>>();
             unsafe {
                 let _ = self.device.handle.device_wait_idle();
-                self.device
-                    .handle
-                    .free_command_buffers(pool.handle, &free_retired);
-                self.device
-                    .handle
-                    .free_command_buffers(pool.handle, &free_ready);
+                if !free_retired.is_empty() {
+                    self.device
+                        .handle
+                        .free_command_buffers(pool.handle, &free_retired);
+                }
+                if !free_ready.is_empty() {
+                    self.device
+                        .handle
+                        .free_command_buffers(pool.handle, &free_ready);
+                }
                 self.device.handle.destroy_command_pool(pool.handle, None);
             }
         }

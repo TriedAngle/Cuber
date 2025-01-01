@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -7,7 +8,7 @@ use std::{
 };
 
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
-use rayon::prelude::*;
+use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 
 use crate::{
     brick::{BrickHandle, BrickMap, ExpandedBrick, MaterialBrick},
@@ -43,6 +44,8 @@ impl LodSamples {
 }
 
 pub struct WorldGenerator {
+    pool: ThreadPool,
+    pub threads: usize,
     base_terrain: FastNoiseLite,
     mountain_noise: FastNoiseLite,
     mountain_mask: FastNoiseLite,
@@ -50,13 +53,22 @@ pub struct WorldGenerator {
     cheese_cave_noise: FastNoiseLite,
     spaghetti_cave_noise: FastNoiseLite,
     spaghetti_size_noise: FastNoiseLite,
+    #[allow(unused)]
     seed: i32,
 }
 
 impl WorldGenerator {
-    pub fn new(seed: Option<i32>) -> Self {
+    pub fn new(seed: Option<i32>, threads: usize) -> Self {
         let base_seed = seed.unwrap_or(420);
+
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+
         let mut generator = WorldGenerator {
+            pool,
+            threads,
             base_terrain: FastNoiseLite::new(),
             mountain_noise: FastNoiseLite::new(),
             mountain_mask: FastNoiseLite::new(),
@@ -276,54 +288,64 @@ impl WorldGenerator {
         chunk_x: u32,
         chunk_y: u32,
         chunk_z: u32,
-        samples: LodSamples,
     ) -> MaterialId {
-        use std::collections::HashMap;
+        // Calculate world coordinates for center of chunk
+        let world_x = chunk_x * 8 + 4; // Center X
+        let world_z = chunk_z * 8 + 4; // Center Z
+        let base_y = chunk_y * 8; // Base Y
 
-        let world_x = chunk_x * 8;
-        let world_y = chunk_y * 8;
-        let world_z = chunk_z * 8;
+        // Start from middle of chunk
+        let mut mid_y = base_y + 4;
+        let air_id = materials.get("air");
 
-        let samples_per_axis = samples.samples_per_axis();
-        let step = 8 / samples_per_axis;
+        // Get material at middle point
+        let current_material = self.generate_block(materials, world_x, mid_y, world_z);
 
-        let mut material_counts = HashMap::new();
+        // If middle point is air, search downward first
+        let mut last_solid = None;
+        let mut searching_up = false;
 
-        if samples_per_axis == 1 {
-            let world_x = chunk_x * 8 + 4; // Center of chunk
-            let mut world_y_mid = chunk_y * 8 + 4; // Center of chunk
-            let world_z = chunk_z * 8 + 4; // Center of chunk
-
-            let first_mat = self.generate_block(materials, world_x, world_y_mid, world_z);
-            let mut mat = first_mat;
-            while world_y_mid > world_y && mat == materials.get("air") {
-                world_y_mid -= 1;
-                mat = self.generate_block(materials, world_x, world_y_mid, world_z);
-            }
-
-            return materials.material(mat);
-        }
-        for x in 0..samples_per_axis {
-            let sample_x = world_x + (x * step) + (step / 2);
-
-            for y in 0..samples_per_axis {
-                let sample_y = world_y + (y * step) + (step / 2);
-
-                for z in 0..samples_per_axis {
-                    let sample_z = world_z + (z * step) + (step / 2);
-
-                    let material = self.generate_block(materials, sample_x, sample_y, sample_z);
-                    *material_counts.entry(material).or_insert(0) += 1;
+        if current_material == air_id {
+            // Check downward first
+            for y in (base_y..=mid_y).rev() {
+                let mat = self.generate_block(materials, world_x, y, world_z);
+                if mat != air_id {
+                    last_solid = Some(mat);
+                    mid_y = y;
+                    searching_up = true;
+                    break;
                 }
             }
+        } else {
+            last_solid = Some(current_material);
+            searching_up = true;
         }
 
-        // Return the most common material
-        material_counts
-            .into_iter()
-            .max_by_key(|(_, count)| *count)
-            .map(|(material, _)| materials.material(material))
-            .unwrap_or_else(|| materials.material(materials.get("air"))) // Default to air if something goes wrong
+        // If we found no solid blocks below middle, search upward
+        if last_solid.is_none() {
+            for y in mid_y + 1..base_y + 8 {
+                let mat = self.generate_block(materials, world_x, y, world_z);
+                if mat != air_id {
+                    last_solid = Some(mat);
+                    break;
+                }
+            }
+        } else if searching_up {
+            // We found a solid block below or at middle, now search up for air
+            for y in mid_y + 1..base_y + 8 {
+                let mat = self.generate_block(materials, world_x, y, world_z);
+                if mat == air_id {
+                    break;
+                }
+                last_solid = Some(mat);
+            }
+        }
+
+        // If we found no solid materials at all, return empty
+        match last_solid {
+            Some(material) => materials.material(material),
+            None => materials.material(air_id),
+        }
     }
 
     pub fn generate_volume<F>(
@@ -355,32 +377,34 @@ impl WorldGenerator {
         chunks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         let total_chunks = chunks.len();
         let processed_chunks = AtomicUsize::new(0);
-        chunks.par_iter().for_each(|(pos, _)| {
-            let generated = if na::distance(
-                &na::Point3::new(pos.x as f64, pos.y as f64, pos.z as f64),
-                &na::Point3::new(center.x as f64, center.y as f64, center.z as f64),
-            ) > lod_distance as f64
-            {
-                let material_id =
-                    self.generate_lod_chunk(materials, pos.x, pos.y, pos.z, LodSamples::A1);
-                if material_id == MaterialId::EMPTY {
-                    GeneratedBrick::None
-                } else {
-                    GeneratedBrick::Lod(material_id)
-                }
-            } else {
-                let brick = self.generate_chunk(materials, pos.x, pos.y, pos.z);
-                if brick.is_empty() {
-                    GeneratedBrick::None
-                } else {
-                    GeneratedBrick::Brick(brick)
-                }
-            };
 
-            let progress =
-                processed_chunks.fetch_add(1, Ordering::Relaxed) as f64 / total_chunks as f64;
+        self.pool.install(|| {
+            chunks.par_iter().for_each(|(pos, _)| {
+                let generated = if na::distance(
+                    &na::Point3::new(pos.x as f64, pos.y as f64, pos.z as f64),
+                    &na::Point3::new(center.x as f64, center.y as f64, center.z as f64),
+                ) > lod_distance as f64
+                {
+                    let material_id = self.generate_lod_chunk(materials, pos.x, pos.y, pos.z);
+                    if material_id == MaterialId::EMPTY {
+                        GeneratedBrick::None
+                    } else {
+                        GeneratedBrick::Lod(material_id)
+                    }
+                } else {
+                    let brick = self.generate_chunk(materials, pos.x, pos.y, pos.z);
+                    if brick.is_empty() {
+                        GeneratedBrick::None
+                    } else {
+                        GeneratedBrick::Brick(brick)
+                    }
+                };
 
-            callback(&generated, *pos, progress);
-        });
+                let progress =
+                    processed_chunks.fetch_add(1, Ordering::Relaxed) as f64 / total_chunks as f64;
+
+                callback(&generated, *pos, progress);
+            });
+        })
     }
 }

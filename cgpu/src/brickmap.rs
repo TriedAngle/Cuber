@@ -1,10 +1,10 @@
 use std::{mem, sync::Arc};
 
 use game::{
-    brick::{BrickMap, ExpandedBrick, MaterialBrickMeta, TraceBrick},
+    brick::{BrickMap, ExpandedBrick, TraceBrick},
     material::{ExpandedMaterialMapping, MaterialId, MaterialRegistry},
     palette::PaletteRegistry,
-    BrickHandle, MaterialBrick,
+    BrickHandle,
 };
 use parking_lot::Mutex;
 
@@ -85,6 +85,7 @@ impl GPUBrickMap {
         };
 
         new.rebind_brick_descriptors();
+        new.rebind_material_descriptors();
 
         new
     }
@@ -122,7 +123,7 @@ impl GPUBrickMap {
 
     pub fn try_drop_staging(&self) {
         let mut buffers = self.staging_buffers.lock();
-        let timeline = self.queue.current_timeline(); 
+        let timeline = self.queue.current_timeline();
 
         buffers.retain(|(_buffer, submit)| *submit > timeline);
     }
@@ -147,11 +148,15 @@ impl GPUBrickMap {
 
     pub fn transfer_all_materials(&self) {
         let data: &[u8] = bytemuck::cast_slice(self.material_registry.materials());
-        let staging = Self::create_staging_buffer(&self.device, data.len() as u64, "All Materials Staging Buffer");
+        let staging = Self::create_staging_buffer(
+            &self.device,
+            data.len() as u64,
+            "All Materials Staging Buffer",
+        );
         staging.upload(data, 0);
 
         let mut recorder = self.queue.record();
-        recorder.copy_buffer(&staging, self.materials.buffer(),0, 0, data.len());
+        recorder.copy_buffer(&staging, self.materials.buffer(), 0, 0, data.len());
         let submission = self.queue.submit_express(&[recorder.finish()]).unwrap();
 
         let mut staging_buffers = self.staging_buffers.lock();
@@ -161,11 +166,15 @@ impl GPUBrickMap {
 
     pub fn transfer_all_palettes(&self) {
         let data: &[u8] = bytemuck::cast_slice(self.palette_registry.palette_data());
-        let staging = Self::create_staging_buffer(&self.device, data.len() as u64, "All Palettes Staging Buffer");
+        let staging = Self::create_staging_buffer(
+            &self.device,
+            data.len() as u64,
+            "All Palettes Staging Buffer",
+        );
         staging.upload(data, 0);
 
         let mut recorder = self.queue.record();
-        recorder.copy_buffer(&staging, self.materials.buffer(),0, 0, data.len());
+        recorder.copy_buffer(&staging, self.palettes.buffer(), 0, 0, data.len());
         let submission = self.queue.submit_express(&[recorder.finish()]).unwrap();
 
         let mut staging_buffers = self.staging_buffers.lock();
@@ -269,7 +278,7 @@ impl GPUBrickMap {
             })
             .unwrap();
 
-        trace_brick.set_brick_offset(material_brick_offset as u32);
+        trace_brick.set_brick_offset(material_brick_offset as u32 / mem::size_of::<u32>() as u32);
 
         let (handle, needs_alloc) = self.cpu.set_brick(trace_brick, at);
 

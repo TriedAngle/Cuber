@@ -24,6 +24,18 @@ struct TraceBrick {
     brick_offset: u32,
 }
 
+struct MaterialBrickMeta {
+    raw: u32,
+}
+
+struct PaletteHandle {
+    raw: u32,
+}
+
+struct MaterialHandle {
+    raw: u32,
+}
+
 struct PbrMaterial {
     color: vec4<f32>,
     emissive: vec3<f32>,
@@ -73,7 +85,7 @@ var<storage, read> palettes: array<u32>;
 var images: binding_array<texture_storage_2d<rgba8unorm, write>, 10>; 
 
 const BRICK_SIZE: u32 = 8;
-const MAX_RAY_STEPS: u32 = 64;
+const MAX_RAY_STEPS: u32 = 256;
 const EPSILON: f32 = 0.00001;
 
 const DATA_BIT: u32 = 0x80000000u;  // Bit 31
@@ -134,6 +146,53 @@ fn get_trace_voxel(brick_handle: BrickHandle, local_pos: vec3<i32>) -> bool {
     return (voxel_data & (1u << u32(bit_index))) != 0u;
 }
 
+fn get_material(material_handle: MaterialHandle) -> PbrMaterial {
+    let offset = material_handle.raw;
+    let material = materials[offset];
+    return material;
+}
+
+fn get_brick_offset(brick_handle: BrickHandle) -> u32 {
+    let trace_offset = brick_handle_get_data(brick_handle);
+    let offset = trace_bricks[trace_offset].brick_offset;
+    return offset;
+}
+
+fn get_brick_meta(brick_offset: u32) -> MaterialBrickMeta {
+    let offset = brick_offset;
+    let raw = material_bricks[offset];
+    return MaterialBrickMeta(raw);
+}
+
+fn get_brick_meta_size(brick_meta: MaterialBrickMeta) -> u32 {
+    // let format = brick_meta.raw >> 29u;
+    return 1u << (( brick_meta.raw >> 29u) & 0x7u);
+}
+
+fn get_brick_meta_palette(brick_meta: MaterialBrickMeta) -> PaletteHandle {
+    return PaletteHandle(brick_meta.raw & 0x1FFFFFFFu);
+}
+
+fn get_brick_voxel(brick_offset: u32, local_pos: vec3<i32>) -> MaterialHandle {
+    let brick_meta = get_brick_meta(brick_offset);
+    let offset = brick_offset + 1;
+    let pos = vec3<u32>(local_pos);
+
+    let element_size = get_brick_meta_size(brick_meta);
+    let palette_handle = get_brick_meta_palette(brick_meta);
+    let voxel_idx = pos.x + pos.y * BRICK_SIZE + pos.z * BRICK_SIZE * BRICK_SIZE;
+
+    let elements_per_u32 = 32u / element_size;
+    let element_idx = offset + (voxel_idx / elements_per_u32);
+    let bit_offset = (voxel_idx % elements_per_u32) * element_size;
+    let mask = (1u << element_size) - 1u;
+
+    let packed = material_bricks[element_idx];
+    let palette_idx = (packed >> bit_offset) & mask;
+    let material_handle_raw = palettes[palette_handle.raw + palette_idx];
+    return MaterialHandle(material_handle_raw);
+}
+
 fn step_mask(side_dist: vec3<f32>) -> vec3<f32> {
     var mask: vec3<bool>;
     let b1 = side_dist < side_dist.yzx;
@@ -176,17 +235,17 @@ fn trace_brick(brick_handle: BrickHandle, brick_pos: vec3<i32>, in_ray_pos: vec3
     var mask = world_mask;
 
     while all(vec3<f32>(0.0) <= map_pos) && all(map_pos <= vec3<f32>(7.0)) {
+        let pos = vec3<i32>(floor(map_pos));
         ray_steps = ray_steps + 1;
-        let vox = get_trace_voxel(brick_handle, vec3<i32>(floor(map_pos)));
+        let vox = get_trace_voxel(brick_handle, pos);
         if vox {
-            // let palette_vox_id = get_brick_voxel(trace.brick, vec3<i32>(floor(map_pos)));
-            // let palette_offset = trace.palette;
-            // let material_id = palettes[palette_offset + palette_vox_id];
-            // let material = materials[material_id];
+            let offset = get_brick_offset(brick_handle);
+            let material_handle = get_brick_voxel(offset, pos);
+            let material = get_material(material_handle);
 
             let pos = floor(map_pos) / 8.0;
-            let color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
-            // let color = material.color;
+            // let color = vec4<f32>(floor(map_pos) / 8.0, 1.0);
+            let color = material.color;
             return Hit(color, map_pos, true, mask);
         }
         mask = step_mask(side_dist);
@@ -211,7 +270,6 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
         current_pos = ray_pos + ray_dir * bounds.x;
     }
 
-    // var current_pos = ray_pos;
     var map_pos = floor(current_pos);
     let ray_sign = sign(ray_dir);
     let delta_dist = 1.0 / ray_dir;
@@ -243,10 +301,11 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
                 hit.pos = map_pos + (hit_local / 8.0);
                 return hit;
             }
-
-            // return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, true, mask);
         } else if is_lod {
-            return Hit(vec4<f32>(1.0, 0.0, 1.0, 1.0), map_pos, true, mask);
+            let material_offset = brick_handle_get_empty_value(brick_handle);
+            let material_handle = MaterialHandle(material_offset);
+            let material = get_material(material_handle);
+            return Hit(material.color, map_pos, true, mask);
         } else {
         }
 
@@ -303,7 +362,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let intensity = calculate_steps_intensity();
     let intensity_color = vec4<f32>(intensity, intensity, intensity, 1.0);
-    
+
     textureStore(images[0], vec2<i32>(global_id.xy), color);
     textureStore(images[1], vec2<i32>(global_id.xy), normal_color);
     textureStore(images[2], vec2<i32>(global_id.xy), depth_color);
@@ -330,41 +389,41 @@ fn calculate_normal(mask: vec3<f32>, ray_dir: vec3<f32>) -> vec3<f32> {
     var normal: vec3<f32>;
 
     let ray_sign = sign(ray_dir);
-    
-    if (mask.x > 0.0) {
+
+    if mask.x > 0.0 {
         normal = select(
             vec3<f32>(1.0, 0.0, 0.0),  // positive x: red
             vec3<f32>(0.0, 1.0, 1.0),  // negative x: cyan
             ray_sign.x > 0.0
         );
-    } else if (mask.y > 0.0) {
+    } else if mask.y > 0.0 {
         normal = select(
             vec3<f32>(0.0, 1.0, 0.0),  // positive y: green
             vec3<f32>(1.0, 0.0, 1.0),  // negative y: magenta
             ray_sign.y > 0.0
         );
-    } else if (mask.z > 0.0) {
+    } else if mask.z > 0.0 {
         normal = select(
             vec3<f32>(0.0, 0.0, 1.0),  // positive z: blue
             vec3<f32>(1.0, 1.0, 0.0),  // negative z: yellow
             ray_sign.z > 0.0
         );
     }
-    
+
     return normal;
 }
 
 
 fn calculate_depth(hit: Hit, ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> f32 {
-    if (!hit.hit) {
+    if !hit.hit {
         return 1.0;
     }
-    
+
     let hit_distance = length(hit.pos - ray_pos);
-    
+
     let max_distance = length(vec3<f32>(pc.dimensions));
     let normalized_depth = saturate(hit_distance / max_distance);
-    
+
     return normalized_depth;
 }
 
@@ -372,7 +431,7 @@ fn calculate_steps_intensity() -> f32 {
     // MAX_RAY_STEPS * 8 would be the theoretical maximum for one additional level
     // slightly lower normalization factor to make the visualization more visible
     let max_expected_steps = MAX_RAY_STEPS * 6u;
-    
+
     let normalized = f32(ray_steps) / f32(max_expected_steps);
 
     // Using sqrt makes small step counts more distinguishable

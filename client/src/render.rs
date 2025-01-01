@@ -267,7 +267,10 @@ impl RenderContext {
 
         let _ = self.queue.submit(
             &[recorder.finish()],
-            &[(signals.available, cvk::PipelineStageFlags::TOP_OF_PIPE)],
+            &[(
+                signals.available,
+                cvk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            )],
             &[],
             &[signals.finished],
             &[],
