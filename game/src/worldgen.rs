@@ -1,19 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-    time::SystemTime,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 
 use crate::{
-    brick::{BrickHandle, BrickMap, ExpandedBrick, MaterialBrick},
+    brick::ExpandedBrick,
     material::{ExpandedMaterialMapping, MaterialId},
-    palette::{PaletteId, PaletteRegistry},
 };
 
 #[derive(Debug, Clone, Copy)]

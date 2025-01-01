@@ -91,7 +91,8 @@ const EPSILON: f32 = 0.00001;
 const DATA_BIT: u32 = 0x80000000u;  // Bit 31
 const LOD_BIT: u32  = 0x40000000u;  // Bit 30 
 const DATA_MASK: u32 = 0x7FFFFFFFu;  // Bits 0-30 for data
-const EMPTY_DATA_MASK: u32 = 0x3FFFFFFFu; // Bits 0-29 for empty handle values
+const EMPTY_DATA_MASK: u32 = 0x1FFFFFFFu; // Bits 0-29 for empty handle values
+const MAX_DISTANCE: u32 = EMPTY_DATA_MASK;
 
 fn get_resolution() -> vec2<f32> {
     let width = (pc.packed_resolution & 0xFFFFu) >> 0u;
@@ -166,7 +167,7 @@ fn get_brick_meta(brick_offset: u32) -> MaterialBrickMeta {
 
 fn get_brick_meta_size(brick_meta: MaterialBrickMeta) -> u32 {
     // let format = brick_meta.raw >> 29u;
-    return 1u << (( brick_meta.raw >> 29u) & 0x7u);
+    return 1u << ((brick_meta.raw >> 29u) & 0x7u);
 }
 
 fn get_brick_meta_palette(brick_meta: MaterialBrickMeta) -> PaletteHandle {
@@ -307,6 +308,17 @@ fn traverse_brickmap(ray_pos: vec3<f32>, ray_dir: vec3<f32>) -> Hit {
             let material = get_material(material_handle);
             return Hit(material.color, map_pos, true, mask);
         } else {
+            let sdf_value = brick_handle_get_empty_value(brick_handle);
+
+            if sdf_value > 1 && sdf_value != MAX_DISTANCE {
+                let sdf = sdf_value - 1;
+                current_pos = current_pos + (ray_dir * f32(sdf));
+
+                map_pos = floor(current_pos);
+                side_dist = ((map_pos - current_pos) + 0.5 + (ray_sign * 0.5)) * delta_dist;
+                mask = step_mask(side_dist);                
+                continue;
+            }
         }
 
         mask = step_mask(side_dist);

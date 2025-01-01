@@ -308,7 +308,7 @@ impl Render {
 
         let descriptor_set = device.create_descriptor_set(pool.clone(), &layout);
 
-        let present_texture = device.create_texture(&cvk::ImageInfo {
+        let present_texture = device.create_image(&cvk::ImageInfo {
             format: swapchain.format().format,
             width: size.width,
             height: size.height,

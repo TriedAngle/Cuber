@@ -4,7 +4,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 mod brickmap;
+mod sdf;
 pub use brickmap::GPUBrickMap;
+pub use sdf::SDFOptimizer;
 
 pub struct GPUContext {
     pub compute_queue: Arc<cvk::Queue>,

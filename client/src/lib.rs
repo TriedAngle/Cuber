@@ -72,6 +72,7 @@ pub struct ClientState {
     materials: Arc<MaterialRegistry>,
     palettes: Arc<PaletteRegistry>,
     brickmap: Arc<BrickMap>,
+    sdf_optimizer: Arc<cgpu::SDFOptimizer>,
     gpu_brickmap: Arc<cgpu::GPUBrickMap>,
     gpu: Arc<cgpu::GPUContext>,
     input: Input,
@@ -89,7 +90,7 @@ impl ClientState {
         let gpu = cgpu::GPUContext::new().unwrap();
 
         let mut camera = Camera::new(
-            na::Point3::new(-15.0, 45.0, -15.0),
+            na::Point3::new(-64.0, 45.0, -5.0),
             na::UnitQuaternion::identity(),
             50.0,
             20.,
@@ -99,14 +100,14 @@ impl ClientState {
             100.0,
         );
 
-        camera.look_at(na::Point3::new(0.0, 35.0, 0.0), &-na::Vector3::y_axis());
+        camera.look_at(na::Point3::new(-50.0, 35.0, 5.0), &-na::Vector3::y_axis());
 
         let materials = Arc::new(MaterialRegistry::new());
         materials.register_default_materials();
         let palettes = Arc::new(PaletteRegistry::new());
-        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(64, 64, 64)));
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(128, 128, 128)));
 
-        let gpu_brickmap = Arc::new(GPUBrickMap::new(
+        let gpu_brickmap = Arc::new(cgpu::GPUBrickMap::new(
             gpu.clone(),
             brickmap.clone(),
             palettes.clone(),
@@ -114,6 +115,12 @@ impl ClientState {
         ));
 
         gpu_brickmap.transfer_all_materials();
+
+        let sdf_optimizer = Arc::new(cgpu::SDFOptimizer::new(
+            gpu.device.clone(),
+            gpu_brickmap.clone(),
+            gpu.compute_queue.clone(),
+        ));
 
         let new = Self {
             ticker: TimeTicker::new(time::Duration::from_secs_f64(1.0 / 60.0)),
@@ -123,6 +130,7 @@ impl ClientState {
             brickmap,
             gpu,
             gpu_brickmap,
+            sdf_optimizer,
             input: Input::new(),
             proxy: el.create_proxy(),
             windows: HashMap::new(),
@@ -136,7 +144,7 @@ impl ClientState {
     }
 
     pub fn generate_terrain(&self) {
-        let world_gen = WorldGenerator::new(Some(420), 8);
+        let world_gen = WorldGenerator::new(Some(420), 16);
         let mut material_mapping = ExpandedMaterialMapping::new();
         let registry = self.materials.as_ref();
         material_mapping.add_from_registry(registry, "air", 0);
@@ -149,9 +157,10 @@ impl ClientState {
         let dims = self.brickmap.dimensions();
         let from = na::Point3::new(0, 0, 0);
         let to = na::Point3::from(dims);
-        let center = na::Point3::new(0, 50, 0);
-        let lod_distance = 40;
+        let center = na::Point3::new(64, 50, 16);
+        let lod_distance = 32;
         let brickmap = self.gpu_brickmap.clone();
+        let optimizer = self.sdf_optimizer.clone();
 
         let _t = thread::spawn(move || {
             let last_percent = Arc::new(AtomicUsize::new(0));
@@ -184,14 +193,16 @@ impl ClientState {
                             )
                             .is_ok()
                         {
+                            log::debug!("WorldGen: {:?}% Done", percent);
                             brickmap.transfer_all_palettes();
-                            log::debug!("Generation Progress: {}%", percent);
+                            optimizer.run();
                         }
                     }
                 },
             );
-            log::debug!("Generation Progress: 100%");
+            log::debug!("WorldGen: 100% Done");
             brickmap.transfer_all_palettes();
+            optimizer.run();
         });
     }
 
