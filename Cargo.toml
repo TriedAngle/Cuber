@@ -1,7 +1,10 @@
 [workspace]
 resolver = "2"
-members = [
-    "glyphers",
-    "glyphers_ffi",
-    "samples/glyphers_test"
+members = [ 
+    "cvk", 
+    "game",
+    "client",
+    "liverking", 
+    "cgpu",
 ]
+default-run = "game"
