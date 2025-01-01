@@ -10,7 +10,6 @@ pub struct Camera {
     pub aspect: f32,
     pub znear: f32,
     pub zfar: f32,
-    pub updated: bool,
 }
 
 impl Camera {
@@ -33,30 +32,24 @@ impl Camera {
             aspect,
             znear,
             zfar,
-            updated: false,
         }
     }
 
     pub fn look_at(&mut self, target: na::Point3<f32>, up: &na::Vector3<f32>) {
         let direction = self.position - target;
-
         self.rotation = na::UnitQuaternion::face_towards(&direction, &up);
     }
 
-    pub fn update_mouse(&mut self, _dt: f32, input: &Input) {
-        let (yaw, pitch) = self.calculate_rotation(input);
+    pub fn update_mouse(&mut self, dt: f32, input: &Input) {
+        let (yaw, pitch) = self.calculate_rotation(input, dt);
 
         let local_x_axis = self.rotation * na::Vector3::x_axis();
         let local_y_axis = self.rotation * na::Vector3::y_axis();
 
-        let yaw_quat = na::UnitQuaternion::from_axis_angle(&local_y_axis, yaw);
-        let pitch_quat = na::UnitQuaternion::from_axis_angle(&local_x_axis, pitch);
+        let combined_rotation = na::UnitQuaternion::from_axis_angle(&local_y_axis, yaw)
+            * na::UnitQuaternion::from_axis_angle(&local_x_axis, pitch);
 
-        let new_rotation = yaw_quat * pitch_quat * self.rotation;
-        if self.rotation != new_rotation {
-            self.updated = true;
-            self.rotation = new_rotation;
-        }
+        self.rotation = combined_rotation * self.rotation;
     }
 
     pub fn update_keyboard(&mut self, dt: f32, input: &Input) {
@@ -67,40 +60,35 @@ impl Camera {
 
         if self.rotation != new_rotation {
             self.rotation = new_rotation;
-            self.updated = true;
         }
 
         let forward = self.rotation * -*na::Vector3::z_axis();
         let right = self.rotation * *na::Vector3::x_axis();
-        let up = self.rotation * *na::Vector3::y_axis();
+        let up = self.rotation * -*na::Vector3::y_axis();
 
+        let mut movement = na::Vector3::zeros();
         if input.pressing(KeyCode::KeyW) {
-            self.position += forward * self.speed * dt;
-            self.updated = true;
+            movement += forward;
         }
         if input.pressing(KeyCode::KeyS) {
-            self.position -= forward * self.speed * dt;
-            self.updated = true;
+            movement -= forward;
         }
-
         if input.pressing(KeyCode::KeyD) {
-            self.position += right * self.speed * dt;
-            self.updated = true;
+            movement += right;
         }
         if input.pressing(KeyCode::KeyA) {
-            self.position -= right * self.speed * dt;
-            self.updated = true;
+            movement -= right;
         }
-
         if input.pressing(KeyCode::Space) {
-            self.position += up * self.speed * dt;
-            self.updated = true;
+            movement += up;
         }
         if input.pressing(KeyCode::ShiftLeft) {
-            self.position -= up * self.speed * dt;
-            self.updated = true;
+            movement -= up;
         }
 
+        self.position += movement * self.speed * dt;
+
+        // TODO: move this out
         if input.pressing(KeyCode::ControlLeft) {
             let scroll = input.scroll().y;
             if scroll != 0.0 {
@@ -115,27 +103,24 @@ impl Camera {
                 };
 
                 self.speed = (self.speed + scroll * speed_factor).max(0.1).min(1000.0);
-
                 log::trace!("New speed: {}", self.speed);
             }
         }
 
-        // Handle zoom
         if input.pressing(KeyCode::KeyC) {
             let scroll = input.scroll().y;
             if scroll != 0.0 {
                 let zoom_speed = 2.0;
                 self.fov = (self.fov - scroll * zoom_speed).max(10.0).min(120.0);
-                self.updated = true;
                 log::trace!("New FOV: {}", self.fov);
             }
         }
     }
 
-    fn calculate_rotation(&self, input: &Input) -> (f32, f32) {
+    fn calculate_rotation(&self, input: &Input, dt: f32) -> (f32, f32) {
         let delta = input.cursor_move();
-        let yaw = -delta.x * self.sensitivity;
-        let pitch = -delta.y * self.sensitivity;
+        let yaw = -delta.x * self.sensitivity * dt;
+        let pitch = -delta.y * self.sensitivity * dt;
         (yaw, pitch)
     }
 
@@ -143,10 +128,10 @@ impl Camera {
         let mut roll = 0.0;
 
         if input.pressing(KeyCode::KeyQ) {
-            roll += self.sensitivity * 1300.0 * dt;
+            roll -= self.speed * 0.1 * dt;
         }
         if input.pressing(KeyCode::KeyE) {
-            roll -= self.sensitivity * 1300.0 * dt;
+            roll += self.speed * 0.1 * dt;
         }
         roll
     }
@@ -171,17 +156,5 @@ impl Camera {
         let projection = self.projection_matrix();
 
         projection * view
-    }
-
-    pub fn force_udpate(&mut self) {
-        self.updated = true;
-    }
-
-    pub fn updated(&self) -> bool {
-        self.updated
-    }
-
-    pub fn reset_update(&mut self) {
-        self.updated = false;
     }
 }

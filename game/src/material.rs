@@ -6,6 +6,10 @@ use parking_lot::RwLock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MaterialId(pub u32);
 
+impl MaterialId {
+    pub const EMPTY: Self = Self(0);
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {
@@ -35,8 +39,8 @@ impl MaterialRegistry {
             "air",
             PbrMaterial::new([1.0, 0.0, 1.0, 0.0], 0.0, 0.0, [0.0; 3], 0.0),
         );
-        self.register_named_material("stone", PbrMaterial::stone(0.5));
         self.register_named_material("bedrock", PbrMaterial::stone(1.5));
+        self.register_named_material("stone", PbrMaterial::stone(0.5));
         self.register_named_material("dirt", PbrMaterial::dry_dirt());
         self.register_named_material("grass", PbrMaterial::lush_grass());
         self.register_named_material(

@@ -3,18 +3,22 @@ name = "client"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-game = { version = "0.1", path = "../game" }
-cgpu = { version = "0.1", path = "../cgpu" }
-nalgebra = { version = "0.33.2", features = ["convert-bytemuck"] }
-wgpu = "23.0.0"
-# cvk = { version = "0.1", path = "../cvk" }
-winit = "0.30.5"
-pollster = "0.4.0"
-log = "0.4.22"
-env_logger = "0.11.5"
-parking_lot = "0.12.3"
+default-run = "client"
 
-egui = { git = "https://github.com/emilk/egui", branch="master" }
-egui-wgpu = { git = "https://github.com/emilk/egui", branch="master", features = ["winit"] }
-egui-winit = { git = "https://github.com/emilk/egui", branch="master" }
+[dependencies]
+game = { workspace = true }
+cgpu = { workspace = true }
+cvk = { workspace = true }
+
+winit = { workspace = true }
+nalgebra = { workspace = true }
+bytemuck = { workspace = true }
+parking_lot = { workspace = true }
+anyhow = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }
+
+egui = { workspace = true }
+
+env_logger = { version = "0.11.5" }
+

@@ -3,424 +3,382 @@ extern crate nalgebra as na;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    thread,
-    time::{Duration, SystemTime},
+    thread, time,
 };
 
-use cgpu::{state::GPUState, RenderContext};
-use egui_integration::EguiRenderer;
+use cgpu::GPUBrickMap;
 use game::{
-    brick::{BrickHandle, BrickMap},
+    brick::ExpandedBrick,
     material::{ExpandedMaterialMapping, MaterialRegistry},
     palette::PaletteRegistry,
-    raytrace,
-    worldgen::WorldGenerator,
-    Camera, Diagnostics, Input,
+    worldgen::{GeneratedBrick, WorldGenerator},
+    BrickMap, Camera, Input,
 };
+use parking_lot::Mutex;
+use render::RenderContext;
 use winit::{
     dpi::PhysicalSize,
-    event::{DeviceEvent, MouseButton, WindowEvent},
+    event::{DeviceEvent, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::KeyCode,
-    window::{Window, WindowAttributes, WindowId},
+    window::{CursorGrabMode, Window, WindowAttributes, WindowId},
 };
 
-mod diagnostics;
-mod egui_integration;
+mod render;
 mod ui;
 
-pub struct AppState {
-    pub last_update: SystemTime,
-    pub delta_time: Duration,
-    pub diagnostics: Diagnostics,
-    pub input: Input,
-    pub proxy: EventLoopProxy<AppEvent>,
-    pub windows: HashMap<WindowId, Arc<Window>>,
-
-    pub gpu: Arc<GPUState>,
-    pub renderers: HashMap<WindowId, Arc<RenderContext>>,
-    pub eguis: HashMap<WindowId, Arc<EguiRenderer>>,
-    pub scale_factor: f32,
-    pub focus: bool,
-    pub active_window: Option<Arc<Window>>,
-
-    pub generator: Arc<WorldGenerator>,
-    pub material_mapping: Arc<ExpandedMaterialMapping>,
-
-    pub brickmap: Arc<BrickMap>,
-    pub palettes: Arc<PaletteRegistry>,
-    pub materials: Arc<MaterialRegistry>,
-
-    pub camera: Camera,
+pub struct TimeTicker {
+    last: time::SystemTime,
+    accumulator: time::Duration,
+    rate: time::Duration,
 }
 
-#[derive(Debug, Clone)]
-pub enum AppEvent {
-    RequestExit,
-}
-
-impl AppState {
-    pub fn new(event_loop: &EventLoop<AppEvent>) -> Self {
-        let materials = Arc::new(MaterialRegistry::new());
-        materials.register_default_materials();
-
-        let palettes = Arc::new(PaletteRegistry::new());
-
-        let brickmap_dimensions = na::Vector3::new(128, 128, 128);
-        let brickmap = Arc::new(BrickMap::new(brickmap_dimensions));
-
-        let generator = Arc::new(WorldGenerator::new(Some(420)));
-
-        let mut material_mapping = Arc::new(ExpandedMaterialMapping::new());
-
-        if let Some(mapping) = Arc::get_mut(&mut material_mapping) {
-            mapping.add_from_registry(&materials, "air", 0);
-            mapping.add_from_registry(&materials, "stone", 1);
-            mapping.add_from_registry(&materials, "bedrock", 2);
-            mapping.add_from_registry(&materials, "dirt", 3);
-            mapping.add_from_registry(&materials, "grass", 4);
-            mapping.add_from_registry(&materials, "snow", 5);
+impl TimeTicker {
+    pub fn new(rate: time::Duration) -> Self {
+        Self {
+            last: time::SystemTime::now(),
+            accumulator: time::Duration::ZERO,
+            rate,
         }
-
-        let gpu = Arc::new(pollster::block_on(GPUState::new(
-            brickmap.clone(),
-            materials.clone(),
-            palettes.clone(),
-            1000 << 20,
-            128 << 20,
-        )));
-
-        gpu.materials.update_all_materials();
-
-        let mut camera = Camera::new(
-            na::Point3::new(64., 64., 64.),
-            na::UnitQuaternion::identity(),
-            50.,
-            0.002,
-            45.,
-            16.0 / 9.0,
-            0.1,
-            100.,
-        );
-
-        camera.look_at(na::Point3::new(64., 64., 63.), &na::Vector3::y_axis());
-
-        let state = Self {
-            last_update: SystemTime::now(),
-            delta_time: Duration::from_nanos(0),
-            diagnostics: Diagnostics::new(),
-            input: Input::new(),
-            proxy: event_loop.create_proxy(),
-            windows: HashMap::new(),
-
-            gpu,
-            renderers: HashMap::new(),
-            eguis: HashMap::new(),
-            scale_factor: 1.0,
-            focus: true,
-            active_window: None,
-
-            generator,
-            material_mapping,
-
-            brickmap,
-            palettes,
-            materials,
-            camera,
-        };
-
-        state.generate_volume();
-
-        state
     }
 
-    pub fn generate_volume(&self) {
-        let brickmap = self.brickmap.clone();
-        let material_mapping = self.material_mapping.clone();
-        let palettes = self.palettes.clone();
-        let generator = self.generator.clone();
-        let gpu = self.gpu.clone();
-        let sdf = Arc::new(cgpu::sdf::SDFGenerator::new(
-            gpu.device.clone(),
-            gpu.queue.clone(),
-            gpu.bricks.clone(),
+    pub fn update(&mut self) -> time::Duration {
+        let now = time::SystemTime::now();
+        let mut ticked_time = match now.duration_since(self.last) {
+            Ok(ticked) => ticked,
+            Err(e) => {
+                log::warn!("{:?}", e);
+                return time::Duration::ZERO;
+            }
+        };
+        self.last = now;
+
+        if ticked_time > time::Duration::from_millis(250) {
+            log::warn!("Frame time exploding");
+            ticked_time = time::Duration::from_millis(250);
+        }
+
+        self.accumulator += ticked_time;
+        ticked_time
+    }
+}
+
+pub struct ClientState {
+    ticker: TimeTicker,
+    render_ticker: TimeTicker,
+    materials: Arc<MaterialRegistry>,
+    palettes: Arc<PaletteRegistry>,
+    brickmap: Arc<BrickMap>,
+    sdf_optimizer: Arc<cgpu::SDFOptimizer>,
+    gpu_brickmap: Arc<cgpu::GPUBrickMap>,
+    gpu: Arc<cgpu::GPUContext>,
+    input: Input,
+    #[allow(unused)]
+    proxy: EventLoopProxy<()>,
+    windows: HashMap<WindowId, Arc<Window>>,
+    renderes: HashMap<WindowId, Mutex<RenderContext>>,
+    capture: bool,
+    focused: Option<Arc<Window>>,
+    camera: Mutex<Camera>,
+}
+
+impl ClientState {
+    pub fn new(el: &EventLoop<()>) -> Self {
+        let gpu = cgpu::GPUContext::new().unwrap();
+
+        let mut camera = Camera::new(
+            na::Point3::new(-64.0, 45.0, -5.0),
+            na::UnitQuaternion::identity(),
+            50.0,
+            20.,
+            45.0,
+            16.0 / 9.0,
+            0.1,
+            100.0,
+        );
+
+        camera.look_at(na::Point3::new(-50.0, 35.0, 5.0), &-na::Vector3::y_axis());
+
+        let materials = Arc::new(MaterialRegistry::new());
+        materials.register_default_materials();
+        let palettes = Arc::new(PaletteRegistry::new());
+        let brickmap = Arc::new(BrickMap::new(na::Vector3::new(128, 128, 128)));
+
+        let gpu_brickmap = Arc::new(cgpu::GPUBrickMap::new(
+            gpu.clone(),
+            brickmap.clone(),
+            palettes.clone(),
+            materials.clone(),
         ));
 
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(3));
-            let dimensions = brickmap.dimensions();
-            let last_update = AtomicI32::new(0);
+        gpu_brickmap.transfer_all_materials();
 
-            generator.generate_volume(
-                &brickmap,
-                na::Point3::origin(),
-                na::Point3::from(dimensions),
-                na::Point3::new(100, 32, 100),
-                50,
+        let sdf_optimizer = Arc::new(cgpu::SDFOptimizer::new(
+            gpu.device.clone(),
+            gpu_brickmap.clone(),
+            gpu.compute_queue.clone(),
+        ));
+
+        let new = Self {
+            ticker: TimeTicker::new(time::Duration::from_secs_f64(1.0 / 60.0)),
+            render_ticker: TimeTicker::new(time::Duration::from_secs_f64(1.0 / 166.0)),
+            materials,
+            palettes,
+            brickmap,
+            gpu,
+            gpu_brickmap,
+            sdf_optimizer,
+            input: Input::new(),
+            proxy: el.create_proxy(),
+            windows: HashMap::new(),
+            renderes: HashMap::new(),
+            focused: None,
+            capture: true,
+            camera: Mutex::new(camera),
+        };
+
+        new
+    }
+
+    pub fn generate_terrain(&self) {
+        let world_gen = WorldGenerator::new(Some(420), 16);
+        let mut material_mapping = ExpandedMaterialMapping::new();
+        let registry = self.materials.as_ref();
+        material_mapping.add_from_registry(registry, "air", 0);
+        material_mapping.add_from_registry(registry, "bedrock", 1);
+        material_mapping.add_from_registry(registry, "stone", 2);
+        material_mapping.add_from_registry(registry, "dirt", 3);
+        material_mapping.add_from_registry(registry, "grass", 4);
+        material_mapping.add_from_registry(registry, "snow", 5);
+
+        let dims = self.brickmap.dimensions();
+        let from = na::Point3::new(0, 0, 0);
+        let to = na::Point3::from(dims);
+        let center = na::Point3::new(64, 50, 16);
+        let lod_distance = 32;
+        let brickmap = self.gpu_brickmap.clone();
+        let optimizer = self.sdf_optimizer.clone();
+
+        let _t = thread::spawn(move || {
+            let last_percent = Arc::new(AtomicUsize::new(0));
+            let percent_tracker = last_percent.clone();
+            world_gen.generate_volume(
+                from,
+                to,
+                center,
+                lod_distance,
                 &material_mapping,
-                &palettes,
-                4,
-                |_, _, _, _| {},
-                |bricks, palettes, handles, _ats, percentage| {
-                    // let _ = gpu.bricks.allocate_bricks(&bricks, &handles, &palettes);
-                    let offsets = brickmap
-                        .material_bricks()
-                        .allocate_bricks(&bricks)
-                        .expect("Must be able to allocate");
+                |brick, at, progress| {
+                    match brick {
+                        GeneratedBrick::Brick(brick) => {
+                            brickmap.setup_full_brick(at, Some(brick), None, &material_mapping);
+                        }
+                        GeneratedBrick::Lod(material) => {
+                            brickmap.setup_full_brick(at, None, Some(*material), &material_mapping);
+                        }
+                        GeneratedBrick::None => {}
+                    }
 
-                    offsets.iter().zip(handles).zip(palettes).for_each(
-                        |((&(offset, size), handle), palette)| {
-                            let _ = brickmap.modify_brick(handle, |trace| {
-                                trace.set_brick_info(size as u32 - 1, offset as u32);
-                                trace.set_palette(palette);
-                            });
-                        },
-                    );
-
-                    let current_percentage = percentage as i32;
-                    let previous = last_update.load(Ordering::Relaxed);
-                    if current_percentage >= previous + 10 || current_percentage == 100 {
-                        if last_update
+                    let percent = (progress * 100.0) as usize;
+                    if percent % 10 == 0 && percent > last_percent.load(Ordering::Relaxed) {
+                        if percent_tracker
                             .compare_exchange(
-                                previous,
-                                current_percentage - (current_percentage % 10),
-                                Ordering::SeqCst,
+                                percent - 10,
+                                percent,
+                                Ordering::Relaxed,
                                 Ordering::Relaxed,
                             )
                             .is_ok()
                         {
-                            log::debug!("Updated Buffers");
-                            gpu.bricks.update_all_handles();
-                            gpu.bricks.update_all_bricks();
-                            gpu.bricks.update_all_material_bricks();
-                            gpu.materials.update_all_palettes();
+                            log::debug!("WorldGen: {:?}% Done", percent);
+                            brickmap.transfer_all_palettes();
+                            optimizer.run();
                         }
                     }
                 },
             );
-            gpu.bricks.update_all_handles();
-            gpu.bricks.update_all_bricks();
-            gpu.bricks.update_all_material_bricks();
-            gpu.materials.update_all_palettes();
-
-            let sdf_start = SystemTime::now();
-            log::debug!("Start: generate SDF");
-
-            let dims = gpu.bricks.brickmap.dimensions();
-            let steps = dims.x.max(dims.y.max(dims.z));
-            sdf.generate(steps);
-            log::debug!(
-                "Finish: generate SDF, took: {:.3}s",
-                sdf_start.elapsed().unwrap().as_secs_f64()
-            );
+            log::debug!("WorldGen: 100% Done");
+            brickmap.transfer_all_palettes();
+            optimizer.run();
         });
     }
 
-    pub fn handle_window_event(&mut self, event: &WindowEvent, window_id: WindowId) {
-        self.input.update_window(event);
-        if !self.focus {
-            if let Some(egui) = self.eguis.get_mut(&window_id) {
-                let egui = Arc::get_mut(egui).unwrap();
-                egui.handle_input(&event);
-            }
-        }
+    pub fn resize(&mut self, id: WindowId, size: PhysicalSize<u32>) {
+        let _ = id;
+        let _ = size;
     }
 
-    pub fn handle_device_event(&mut self, event: &DeviceEvent) {
-        self.input.update(&event);
-        self.handle_input();
-    }
-
-    pub fn handle_input(&mut self) {
-        if self.released(KeyCode::Escape) {
-            self.proxy.send_event(AppEvent::RequestExit).unwrap();
+    pub fn handle_input(&mut self, dt: time::Duration) {
+        let dtf32 = dt.as_secs_f32();
+        {
+            let mut camera = self.camera.lock();
+            camera.update_mouse(dtf32, &self.input);
+            camera.update_keyboard(dtf32, &self.input);
         }
+        for (_id, render) in &self.renderes {
+            let mut render = render.lock();
 
-        if self.pressed(KeyCode::KeyT) {
-            self.focus = !self.focus;
-            if let Some(window) = &self.active_window {
-                if self.focus {
-                    if window
-                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                        .is_ok()
-                    {
-                        window.set_cursor_visible(false);
-                    } else {
-                        log::error!("Failed to grab: {:?}", window.id());
-                    }
-                } else {
-                    if window
-                        .set_cursor_grab(winit::window::CursorGrabMode::None)
-                        .is_ok()
-                    {
-                        window.set_cursor_visible(true);
-                    } else {
-                        log::error!("Failed to ungrab: {:?}", window.id());
-                    }
+            render.update_camera(&self.camera.lock());
+            if self.input.pressed(KeyCode::KeyM) {
+                render.ppc.mode += 1;
+                if render.ppc.mode == 4 {
+                    render.ppc.mode = 0;
                 }
             }
-        }
-
-        if let Some(window) = &self.active_window {
-            if self.input.mouse_pressed(MouseButton::Left) {
-                let hit = if self.focus {
-                    raytrace::cast_center_ray(&self.camera, &self.brickmap, 64)
-                } else {
-                    let pos = self.input.cursor();
-                    let size = window.inner_size();
-                    raytrace::cast_screen_ray(
-                        &self.camera,
-                        pos,
-                        na::Vector2::new(size.width as f32, size.height as f32),
-                        &self.brickmap,
-                        64,
-                    )
-                };
-
-                if let Some(hit) = hit {
-                    let center = na::Point3::new(
-                        hit.brick_pos.x as f32 + hit.normal.x as f32 * 0.5,
-                        hit.brick_pos.y as f32 + hit.normal.y as f32 * 0.5,
-                        hit.brick_pos.z as f32 + hit.normal.z as f32 * 0.5,
-                    );
-
-                    // Get all modified brick handles
-                    let (update, remove) = self.brickmap.draw_sphere_sdf(center, 2.0);
-
-                    for (handle, at) in remove {
-                        if handle.is_data() {
-                            self.gpu.bricks.deallocate_brick(handle, at);
-                        } else if handle.is_lod() {
-                            self.gpu.bricks.transfer_handle(BrickHandle::empty(), at);
+            if self.input.pressed(KeyCode::Tab) {
+                self.capture = !self.capture;
+                if let Some(window) = &self.focused {
+                    if self.capture {
+                        if window
+                            .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                            .is_ok()
+                        {
+                            window.set_cursor_visible(false);
+                        } else {
+                            log::error!("Failed to grab: {:?}", window.id());
                         }
-                        self.brickmap.set_handle(BrickHandle::empty(), at);
-                    }
-                    // Update GPU for all modified bricks
-                    for handle in update {
-                        self.gpu.bricks.transfer_brick(handle);
+                    } else {
+                        if window
+                            .set_cursor_grab(winit::window::CursorGrabMode::None)
+                            .is_ok()
+                        {
+                            window.set_cursor_visible(true);
+                        } else {
+                            log::error!("Failed to grab: {:?}", window.id());
+                        }
                     }
                 }
             }
         }
-
-        if self.focus {
-            let dt = self.delta_time.as_secs_f32();
-            self.camera.update_mouse(dt, &self.input);
-        }
     }
 
-    pub fn render(&mut self, window: &WindowId) {
-        self.diagnostics.start("render");
+    pub fn fixed_tick(&mut self) {
+        let dt = self.ticker.update();
 
-        if let Some(renderer) = self.renderers.get_mut(window) {
-            let renderer = Arc::get_mut(renderer).unwrap();
+        while self.ticker.accumulator >= self.ticker.rate {
+            self.gpu_brickmap.try_drop_staging();
+            self.ticker.accumulator -= self.ticker.rate;
+        }
 
-            let hit = if self.focus {
-                raytrace::cast_center_ray(&self.camera, &self.brickmap, 64)
-            } else {
-                let pos = self.input.cursor();
-                let size = renderer.window().inner_size();
-                raytrace::cast_screen_ray(
-                    &self.camera,
-                    pos,
-                    na::Vector2::new(size.width as f32, size.height as f32),
-                    &self.brickmap,
-                    64,
-                )
-            };
-            renderer.update_brick_hit(hit);
+        self.handle_input(dt);
+        self.input.flush(self.ticker.rate);
+    }
 
-            if self.focus {
-                let dt = self.delta_time.as_secs_f32();
-                self.camera.update_keyboard(dt, &self.input);
+    pub fn fixed_render_tick(&mut self, window: WindowId) {
+        if let Some(render) = self.renderes.get(&window) {
+            let mut render = render.lock();
+            let dt = self.render_ticker.update();
+            let _dtf32 = dt.as_secs_f32();
+            while self.render_ticker.accumulator >= self.render_ticker.rate {
+                let _alpha = (self.ticker.accumulator.as_secs_f32()
+                    / self.ticker.rate.as_secs_f32())
+                .clamp(0.0, 1.0);
+                render.update_delta_time(self.render_ticker.rate);
+
+                self.render_ui(&mut render);
+                render.render();
+                self.render_ticker.accumulator -= self.render_ticker.rate;
             }
-            self.diagnostics.start("vertex");
-            renderer.update_uniforms(&self.camera, self.delta_time);
-            self.camera.reset_update();
-            let _ = renderer.prepare_render();
-            renderer.render();
-
-            self.diagnostics.stop("vertex");
-        }
-        self.diagnostics.start("egui");
-        self.draw_egui(window);
-        self.diagnostics.stop("egui");
-
-        if let Some(renderer) = self.renderers.get_mut(window) {
-            let renderer = Arc::get_mut(renderer).unwrap();
-            renderer.finish_render(&mut self.diagnostics);
+        } else {
+            log::error!("Renderer does not exist for {:?}", window);
+            return;
         }
 
-        self.diagnostics.stop("render");
+        if let Some(window) = self.windows.get(&window) {
+            window.request_redraw();
+        }
     }
 
-    pub fn resize(&mut self, window: &WindowId, size: PhysicalSize<u32>) {
-        if let Some(render) = self.renderers.get_mut(window) {
-            let render = Arc::get_mut(render).unwrap();
-            render.resize(size);
+    pub fn device_events(&mut self, event: &DeviceEvent) {
+        self.input.update(event);
 
-            if let Some(egui) = self.eguis.get_mut(window) {
-                let _egui = Arc::get_mut(egui).unwrap();
+        for (_id, render) in self.renderes.iter() {
+            let mut render = render.lock();
+            render.egui.handle_device_events(event);
+        }
+    }
+
+    pub fn window_events(&mut self, id: WindowId, event: &WindowEvent) {
+        self.input.update_window(event);
+
+        if let Some(render) = self.renderes.get(&id) {
+            let mut render = render.lock();
+            if !self.capture {
+                render.egui_handle_window_events(event);
             }
         }
+
+        if self.input.pressing(KeyCode::Escape) {
+            if let Some(window) = self.focused.take() {
+                let id = window.id();
+                let _window = self.windows.remove(&id);
+                let _render = self.renderes.remove(&id);
+            }
+        }
     }
 
-    pub fn pressed(&self, code: KeyCode) -> bool {
-        self.input.pressed(code)
+    pub fn focus_window(&mut self, id: WindowId) {
+        if let Some(window) = self.windows.get(&id) {
+            self.focused = Some(window.clone());
+
+            if self.capture {
+                if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                    window.set_cursor_visible(false);
+                } else {
+                    log::error!("Failed to grab: {:?}", id);
+                }
+            }
+        }
     }
 
-    pub fn held(&self, code: KeyCode) -> bool {
-        self.input.held(code)
+    pub fn unfocus_window(&mut self, id: WindowId) {
+        self.focused = None;
+        if let Some(window) = self.windows.get(&id) {
+            let _ = window.set_cursor_grab(CursorGrabMode::None);
+            window.set_cursor_visible(true);
+        }
     }
 
-    pub fn released(&self, code: KeyCode) -> bool {
-        self.input.released(code)
-    }
-
-    pub fn new_window(&mut self, event_loop: &ActiveEventLoop, title: &str) -> Arc<Window> {
+    pub fn create_window(
+        &mut self,
+        el: &ActiveEventLoop,
+        title: &str,
+        width: u32,
+        height: u32,
+    ) -> Arc<Window> {
         let attribs = WindowAttributes::default()
-            .with_inner_size(PhysicalSize::new(1920, 1080))
+            .with_inner_size(PhysicalSize::new(width, height))
             .with_title(title);
-        let window = match event_loop.create_window(attribs) {
+
+        let window = match el.create_window(attribs) {
             Ok(window) => window,
             Err(e) => panic!("Error creating window: {:?}", e),
         };
 
-        log::info!("Window created");
-
         let id = window.id();
+        log::info!("Window {:?} Created", id);
+
         let window = Arc::new(window);
         self.windows.insert(id, window.clone());
         window
     }
 
-    pub fn new_renderer(&mut self, window: Arc<Window>) {
-        let renderer = pollster::block_on(RenderContext::new(window.clone(), self.gpu.clone()));
+    pub fn create_renderer(&mut self, window: Arc<Window>) {
+        let id = window.id();
+        let renderer =
+            RenderContext::new(self.gpu.clone(), self.gpu_brickmap.clone(), window).unwrap();
 
-        log::info!("Renderer Created");
-
-        let egui_renderer = EguiRenderer::new(
-            renderer.device.clone(),
-            renderer.queue.clone(),
-            renderer.surface_config.format,
-            None,
-            1,
-            window.clone(),
-        );
-
-        log::info!("Egui Created");
-        let renderer = Arc::new(renderer);
-        self.renderers.insert(window.id(), renderer);
-
-        let egui_renderer = Arc::new(egui_renderer);
-        self.eguis.insert(window.id(), egui_renderer);
+        self.renderes.insert(id, Mutex::new(renderer));
     }
 
-    pub fn new_render_window(&mut self, event_loop: &ActiveEventLoop, title: &str) {
-        let window = self.new_window(event_loop, title);
-        self.new_renderer(window);
+    pub fn remove_window(&mut self, id: &WindowId) -> Arc<Window> {
+        self.windows.remove(id).unwrap()
+    }
+
+    pub fn windows(&self) -> &HashMap<WindowId, Arc<Window>> {
+        &self.windows
     }
 }

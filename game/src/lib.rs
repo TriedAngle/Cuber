@@ -11,6 +11,7 @@ pub mod palette;
 pub mod raytrace;
 pub mod worldgen;
 
+pub use brick::{BrickHandle, BrickMap, MaterialBrick};
 pub use camera::Camera;
 pub use dense::DenseBuffer;
 pub use input::Input;

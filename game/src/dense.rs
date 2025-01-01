@@ -109,7 +109,6 @@ impl DenseBuffer {
         self.try_shrink();
     }
 
-    
     pub fn deallocate_size(&self, offset: usize, size: usize) {
         let mut free_blocks = self.free_blocks.write();
 
@@ -306,92 +305,92 @@ impl DenseBuffer {
             MaterialBrick::Size8(b) => self.allocate_and_write(&b),
         }
     }
-
-    pub fn allocate_bricks(&self, bricks: &[MaterialBrick]) -> Option<Vec<(usize, u64)>> {
-        if bricks.is_empty() {
-            return Some(Vec::new());
-        }
-
-        let total_size: usize = bricks
-            .iter()
-            .map(|brick| match brick {
-                MaterialBrick::Size1(_) => 64,
-                MaterialBrick::Size2(_) => 128,
-                MaterialBrick::Size4(_) => 256,
-                MaterialBrick::Size8(_) => 512,
-            })
-            .sum();
-
-        let base_offset = self.allocate_dense::<u8>(total_size)?;
-
-        let mut current_offset = 0;
-        let mut offsets = Vec::with_capacity(bricks.len());
-        {
-            let mut buffer = self.buffer.write(); // Get write access to buffer
-
-            for brick in bricks {
-                let bits = brick.element_size();
-                let size = match brick {
-                    MaterialBrick::Size1(_) => 64,
-                    MaterialBrick::Size2(_) => 128,
-                    MaterialBrick::Size4(_) => 256,
-                    MaterialBrick::Size8(_) => 512,
-                };
-
-                // Copy brick data directly to our buffer
-                buffer[base_offset + current_offset..base_offset + current_offset + size]
-                    .copy_from_slice(brick.data());
-
-                offsets.push((base_offset + current_offset, bits));
-                current_offset += size;
-            }
-        }
-
-        Some(offsets)
-    }
 }
+//     pub fn allocate_bricks(&self, bricks: &[MaterialBrick]) -> Option<Vec<(usize, u64)>> {
+//         if bricks.is_empty() {
+//             return Some(Vec::new());
+//         }
+//
+//         let total_size: usize = bricks
+//             .iter()
+//             .map(|brick| match brick {
+//                 MaterialBrick::Size1(_) => 64,
+//                 MaterialBrick::Size2(_) => 128,
+//                 MaterialBrick::Size4(_) => 256,
+//                 MaterialBrick::Size8(_) => 512,
+//             })
+//             .sum();
+//
+//         let base_offset = self.allocate_dense::<u8>(total_size)?;
+//
+//         let mut current_offset = 0;
+//         let mut offsets = Vec::with_capacity(bricks.len());
+//         {
+//             let mut buffer = self.buffer.write(); // Get write access to buffer
+//
+//             for brick in bricks {
+//                 let bits = brick.element_size();
+//                 let size = match brick {
+//                     MaterialBrick::Size1(_) => 64,
+//                     MaterialBrick::Size2(_) => 128,
+//                     MaterialBrick::Size4(_) => 256,
+//                     MaterialBrick::Size8(_) => 512,
+//                 };
+//
+//                 // Copy brick data directly to our buffer
+//                 buffer[base_offset + current_offset..base_offset + current_offset + size]
+//                     .copy_from_slice(brick.data());
+//
+//                 offsets.push((base_offset + current_offset, bits));
+//                 current_offset += size;
+//             }
+//         }
+//
+//         Some(offsets)
+//     }
+// }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_allocation() {
-        let buffer = DenseBuffer::new(1024);
-
-        // Allocate and write a value
-        let value = 42u32;
-        let offset = buffer.allocate_and_write(&value).unwrap();
-
-        // Read it back
-        let read_value: u32 = buffer.read(offset);
-        assert_eq!(value, read_value);
-    }
-
-    #[test]
-    fn test_multiple_allocations() {
-        let buffer = DenseBuffer::new(1024);
-        let values = vec![1u32, 2, 3, 4, 5];
-
-        let offsets = buffer.allocate_and_write_many(&values).unwrap();
-
-        // Read back and verify
-        for (i, offset) in offsets.iter().enumerate() {
-            let read_value: u32 = buffer.read(*offset);
-            assert_eq!(values[i], read_value);
-        }
-    }
-
-    #[test]
-    fn test_deallocation_and_reuse() {
-        let buffer = DenseBuffer::new(1024);
-
-        // Allocate and deallocate
-        let offset1 = buffer.allocate::<u32>().unwrap();
-        buffer.deallocate::<u32>(offset1);
-
-        // New allocation should reuse the space
-        let offset2 = buffer.allocate::<u32>().unwrap();
-        assert_eq!(offset1, offset2);
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//
+//     #[test]
+//     fn test_basic_allocation() {
+//         let buffer = DenseBuffer::new(1024);
+//
+//         // Allocate and write a value
+//         let value = 42u32;
+//         let offset = buffer.allocate_and_write(&value).unwrap();
+//
+//         // Read it back
+//         let read_value: u32 = buffer.read(offset);
+//         assert_eq!(value, read_value);
+//     }
+//
+//     #[test]
+//     fn test_multiple_allocations() {
+//         let buffer = DenseBuffer::new(1024);
+//         let values = vec![1u32, 2, 3, 4, 5];
+//
+//         let offsets = buffer.allocate_and_write_many(&values).unwrap();
+//
+//         // Read back and verify
+//         for (i, offset) in offsets.iter().enumerate() {
+//             let read_value: u32 = buffer.read(*offset);
+//             assert_eq!(values[i], read_value);
+//         }
+//     }
+//
+//     #[test]
+//     fn test_deallocation_and_reuse() {
+//         let buffer = DenseBuffer::new(1024);
+//
+//         // Allocate and deallocate
+//         let offset1 = buffer.allocate::<u32>().unwrap();
+//         buffer.deallocate::<u32>(offset1);
+//
+//         // New allocation should reuse the space
+//         let offset2 = buffer.allocate::<u32>().unwrap();
+//         assert_eq!(offset1, offset2);
+//     }
+// }

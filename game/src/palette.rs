@@ -55,6 +55,7 @@ impl PaletteRegistry {
         };
 
         let mut palette_map = self.palette_map.write();
+        log::debug!("new palette: {:?} => {:?}", id, materials);
         palette_map.insert(materials, (id, count));
 
         id
