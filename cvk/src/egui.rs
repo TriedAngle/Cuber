@@ -48,7 +48,7 @@ impl EguiTextures {
                         ty: DescriptorType::SampledImage,
                         count: max_textures,
                         stages: vk::ShaderStageFlags::FRAGMENT,
-                        flags: Some(vk::DescriptorBindingFlags::PARTIALLY_BOUND),
+                        flags: Some(vk::DescriptorBindingFlags::PARTIALLY_BOUND | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND | vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING),
                     },
                     DescriptorBinding {
                         binding: 1,
@@ -77,6 +77,7 @@ impl EguiTextures {
         let descriptor_pool = device.create_descriptor_pool(&crate::DescriptorPoolInfo {
             max_sets: 1,
             layouts: &[&descriptor_layout],
+            flags: vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND,
             ..Default::default()
         });
 

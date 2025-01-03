@@ -36,6 +36,7 @@ impl GPUBrickMap {
         let device = context.device.clone();
         let queue = context.transfer_queue.clone();
 
+        // TODO: make this aware of limits
         let brickmap_buffer = Self::create_brickmap_buffer(&device, dims);
         let trace_bricks = cvk::GPUFreeList::new(
             device.clone(),

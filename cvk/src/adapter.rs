@@ -53,6 +53,18 @@ impl Adapter {
         }
     }
 
+    pub fn max_buffer_mapping_size(&self) -> u32 {
+        self.properties.limits.max_storage_buffer_range
+    }
+
+    pub fn max_descriptor_images(&self) -> u32 {
+        self.properties.limits.max_per_stage_descriptor_sampled_images 
+    }
+
+    pub fn max_descriptor_resources(&self) -> u32 {
+        self.properties.limits.max_per_stage_resources
+    }
+
     pub fn handle(&self) -> vk::PhysicalDevice {
         self.handle
     }

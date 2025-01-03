@@ -45,7 +45,8 @@ impl Device {
             vk::PhysicalDeviceDescriptorIndexingFeatures::default()
                 .descriptor_binding_partially_bound(true)
                 .descriptor_binding_sampled_image_update_after_bind(true)
-                .runtime_descriptor_array(true);
+                .runtime_descriptor_array(true)
+                .descriptor_binding_update_unused_while_pending(true);
 
         let device_extensions = [
             ash::khr::swapchain::NAME.as_ptr(),
